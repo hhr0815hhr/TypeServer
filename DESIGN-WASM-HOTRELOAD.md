@@ -182,13 +182,77 @@ function wasm_call1(int $h, string $fn, int $a): int { }
 std::string name = "[method]runtime." + fn.toStdString();
 ```
 
-### 还没验收的一条
+### 验收结果：通用入口成立，但"接口可热更"被推翻
 
-**"新增导出函数不重编宿主"没验。** 环境里没有 `wasmtime`/`wat2wasm`/`rustc`
-（`which` 全空），产不出新的 `.cwasm`，所以加不了 `mul` 这类新导出。
+补装 wasmtime 47.0.4（必须与 `libtp_host.so` 链接的版本一致，否则 `.cwasm` 不兼容）后，
+又验出一条关键事实。实测：
 
-这一条是 M7 的成立条件，缺了它只能说"通用入口能用"，不能说"热更成立"。
-补验需要：装 wasmtime CLI → 加一个导出 → 重新预编译 → **不重编 e1_stub** 调通。
+```
+call2(main,'simulate-frame',100,3) = 297   ✅ 与 wasm_call_sim(100,3) 一致
+call2(main,'sim',100,3)            = -2001
+call2(main,'no_such_fn',0,0)       = -2001
+```
+
+**通用入口不仅能调，还能按任意名字调**（`simulate-frame` 这个名字在 PHP 侧的绑定里叫
+`wasm_sim`，两者不同名却指向同一函数）。第 1 步本身是成功的。
+
+**但 `tp_open` 的实现否掉了"新增导出函数免重编"这个前提：**
+
+```rust
+// spike/s2/host-capi/src/lib.rs:454
+let methods = [
+    "[method]runtime.add",
+    "[method]runtime.greet",
+    "[method]runtime.simulate-frame",
+    "[method]runtime.spin",
+    "[method]runtime.forever",
+];
+match build(s, &p, &methods) { ... }
+```
+
+host 在打开模块时按**硬编码的 5 个名字**去解析方法，**不枚举模块导出**。后果：
+
+> 模块新增一个导出函数（比如 `mul`），host 必须在 `methods` 数组里加一行 → 重编
+> `libtp_host.so` → 重启进程加载新 so。**接口不可热更。**
+
+**我原来的判断是错的。** 本文档上一版写着"有了通用入口，新增导出函数就不用重编宿主"——
+实测推翻了它。`c_wasm_call` 的真实价值是"少写 N 个绑定函数"（从"每个函数一个
+`php_wasm_xxx`"变成"改一行名字表"），**不是**"接口可热更"。
+
+### 修正后的能力边界
+
+| 变更类型 | 代价 | 热更？ |
+|:--|:--|:--|
+| 同名函数换实现（v1→v2，行为不同） | **0**（E1 实测 swap 4.4–5.5 ms） | ✅ 是 |
+| 新增/删除导出函数 | 改 host 的 `methods` 表 + 重编 `libtp_host.so` + 重启 | ❌ 否 |
+| 改函数签名 | 同上，且要改调用点 | ❌ 否 |
+
+所以 M7 现在的"M7 = 三级热更全部可用"这个验收标准**达不到**：L2 只覆盖"实现热更"，
+接口变更仍然要重编+重启，等价于 L3。
+
+### 真正的胜负手：让 host 动态枚举接口方法
+
+`build(s, &p, &methods)` 那一步不需要硬编码——component model 支持在 interface 下
+遍历导出（`get_export_index` 取到 interface 后枚举其成员）。改成运行时枚举后：
+
+- 新增/删除导出函数 → host 零改动 → **接口也能热更**；
+- `methods` 表消失，`wasm_call2` 的名字解析成为唯一路径。
+
+**这是 M7 成立与否的真正前提，比封装门面重要得多。** 它是个 Rust 侧改动
+（`host-capi`），不在 PHP 侧，成本也比"重编整个宿主"低（只重编一个 so，且只需一次）。
+
+### 验证环境现状
+
+| 项 | 状态 |
+|:--|:--|
+| `wasmtime` CLI | ✅ 已装 **47.0.4**（`~/.local/bin`），必须与 `libtp_host.so` 一致 |
+| 手写 core module | ❌ host 只认 **Component Model**（`instantiate(&component)` + interface），core module 一律 `tp_open` 返回 -1 |
+| 编 wasm component | ❌ 缺 `wasm32-wasip2-clang`（WASI SDK）与 `wit-bindgen-cli 0.60.0`，需要 Rust 工具链 |
+
+**顺带记一条**：wasm 模块的源码形态是 **PHP + `#[\WasmExport]`**，由 tpc 编成
+component（`module_v2/project.yml` 里 `wasm: component` / `wasm-mode: library` /
+`wasm-package: typephp:s1-probe@1.0.0` / `wasm-world: s1-probe`）。
+这说明"玩法逻辑用 PHP 写、编成 wasm 热更"这条路在工具链设计上是通的，只是本机缺编译依赖。
 
 ### 注意：spike 不入库
 
