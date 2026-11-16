@@ -278,6 +278,38 @@ interface，再 `get_export_index(Some(&iface), "create-runtime")` 拿到函数�
 而实测每次 `cargo build` 要 2m29s，猜错一次的代价是又一轮编译。留到有把握时一次做完，
 比现在反复试错更划算。
 
+### 补工具链的结论：装齐了，但 SDK 在本机跑不起来（2026-11-16）
+
+为了能编出带新导出的 wasm 模块（验证"接口热更"），把缺的四样都装了：
+
+| 组件 | 状态 |
+|:--|:--|
+| `wasmtime` 47.0.4 | ✅ `~/.local/bin`（必须与 `libtp_host.so` 链接版本一致） |
+| rustup target `wasm32-wasip2` | ✅ |
+| `wasi-sdk` 28.0 | ⚠️ 下载解压正常（121,193,888 字节，10 路分段并行 3m29s），但 **`clang --version` 挂死** |
+| `wit-bindgen` 0.60.0 | ✅ `cargo install` 2m46s |
+
+**卡点**：wasi-sdk 28 的 `clang --version` 在本机 **180 秒无任何输出**（不是报错，是挂住），
+连带 `wasm32-wasip2-clang` wrapper 也无法给出可解析的版本号，tpc 的工具链检查因此失败：
+
+```
+WASI toolchain check failed: Unable to determine the version of WASI tool
+`wasm32-wasip2-clang` from PATH
+```
+
+判断：SDK 28 与 Ubuntu 22.04 的 glibc/依赖不匹配（SDK 越新要求的 glibc 越新）。
+**没有任何证据支持"再试一次就能过"**，所以停在这里，不猜。
+
+三条可选路径（按成本排序）：
+
+1. **降级 wasi-sdk**（试 24/25，对 glibc 要求更低）——最便宜，但版本不保证能配 tpc；
+2. **用项目已有的 Docker 构建**（`spike/s1/Dockerfile`）——spike 本来就是这么来的，
+   环境一致，代价是要跑容器；
+3. **换更新的发行版**（Ubuntu 24.04+）——最彻底，但会动开发环境。
+
+在工具链打通之前，M7 的"新增导出函数"这条验证**做不了**，因此也**无法**证明或否证
+"接口可热更"。这是当前唯一的事实。
+
 ### 验证环境现状
 
 | 项 | 状态 |
