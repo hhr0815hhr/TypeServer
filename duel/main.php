@@ -138,6 +138,20 @@ function main(): void
     $settlePath = Config::getString("settle.path", $base . "/var/settle.log");
     $settle = new Settle(new EventLog($settlePath));
 
+    // ---- 运维命令：钱的入口 ----
+    // 和 migrate 一样，跑完就退出、不起服务。
+    //
+    // 为什么扣款做成命令而不是走游戏协议：这个 demo 没有商城/复活/押金这些消耗场景，
+    // 硬造一个只会变成假业务。但"运维扣款/补偿"是真实存在的动作——退款、活动补发、
+    // 客服手工调整——而且天然需要一个"人能手工执行、能把结果贴到工单里"的入口。
+    // 真实业务（商城、抽卡）接进来时的用法见 `tsf/README.md` §25.6。
+    if ($cli === "wallet-debit" || $cli === "wallet-credit") {
+        exit(runWallet($settle, $cli, $_SERVER["argv"] ?? []));
+    }
+    if ($cli === "wallet-check") {
+        exit(runWalletCheck($settle));
+    }
+
     $duels = new DuelManager($publish, $records, $snaps, $settle);
 
     // ---- 迁移：启动只校验，不建表 ----
@@ -150,8 +164,31 @@ function main(): void
     // 缺表时每一局战绩都会静默写失败（`recordMatch()` 吞异常），日志里是 error 级别的
     // "未执行的迁移"，但那行字很容易被忽略。真要做到"缺表就别服务"，就把下面两处
     // Logger::error 换成 throw。
-    $server->onWorkerStart(function (int $wid) use ($db, $migrationsDir, $duels, $snaps): void {
+    $server->onWorkerStart(function (int $wid) use ($db, $migrationsDir, $duels, $snaps, $settle): void {
         if ($wid === 0) {
+            // 对账：独立重放一遍日志，和内存账本逐人比对。
+            // 这一步会**再读一遍整份日志**（Settle 构造时已经重放过一次），
+            // 日志很大时是双倍启动成本——所以它和迁移校验一样只在 0 号 worker 跑一次，
+            // 而且"账不平"只记 error 不拦服务（和非核心路径的一贯取舍一致）。
+            $rep = $settle->reconcile();
+            if ($rep["ok"]) {
+                Logger::info("wallet reconciled", [
+                    "events" => $rep["events"],
+                    "players" => $rep["players"],
+                    "total" => $rep["total_log"],
+                ]);
+            } else {
+                Logger::error("钱包对账不平", [
+                    "diff" => array_slice($rep["diff"], 0, 10),
+                    "diff_count" => count($rep["diff"]),
+                    "negative" => $rep["negative"],
+                    "dup_ids" => array_slice($rep["dup_ids"], 0, 10),
+                    "bad_debits" => array_slice($rep["bad_debits"], 0, 10),
+                    "total_mem" => $rep["total_mem"],
+                    "total_log" => $rep["total_log"],
+                ]);
+            }
+
             try {
                 $mig = new Migrator($db, $migrationsDir);
 
@@ -331,4 +368,99 @@ function printMigrateStatus(Db $db, string $dir): int
         echo "读取迁移状态失败: " . $e->getMessage() . PHP_EOL;
         return 1;
     }
+}
+
+/**
+ * 运维命令：扣款 / 充值。
+ *
+ * ```
+ * ./duel wallet-debit  1001 50 order-20261116-001
+ * ./duel wallet-credit 1001 50 refund-20261116-001
+ * ```
+ *
+ * 退出码：0 记账成功；2 业务拒绝（余额不足 / 这笔已扣过 / 参数非法）；1 用法错误。
+ * 拒绝和错误分开，是为了让调用方能区分"重试没用"和"命令写错了"。
+ *
+ * 这里的几个预检**只是为了把原因说清楚**，真正的判断在 `Settle::debit()` 里
+ * （它自己会再查一次——多一层，但账这种事宁可多查一遍）。
+ *
+ * @param array<int, string> $argv
+ */
+function runWallet(Settle $settle, string $cli, array $argv): int
+{
+    $uid = isset($argv[2]) ? (int) $argv[2] : 0;
+    $amount = isset($argv[3]) ? (int) $argv[3] : 0;
+    $ref = isset($argv[4]) ? (string) $argv[4] : "";
+
+    if ($uid <= 0 || $amount <= 0 || $ref === "") {
+        echo "用法: ./duel " . $cli . " <uid> <amount> <ref>" . PHP_EOL;
+        echo "  ref 是幂等键，必须是业务上唯一的东西（订单号/工单号）；" . PHP_EOL;
+        echo "  用随机值等于放弃幂等——重放时会重复记账。" . PHP_EOL;
+        return 1;
+    }
+
+    $isDebit = $cli === "wallet-debit";
+
+    if ($isDebit && $settle->isDebited($ref)) {
+        echo "SKIP    ref=" . $ref . " 已扣过（幂等），当前余额 " . $settle->balanceOf($uid) . PHP_EOL;
+        return 2;
+    }
+    if ($isDebit && !$settle->wallet()->has($uid, $amount)) {
+        echo "REJECT  余额不足：uid=" . $uid . " 需要 " . $amount
+            . "，当前 " . $settle->balanceOf($uid) . PHP_EOL;
+        return 2;
+    }
+
+    try {
+        $ok = $isDebit
+            ? $settle->debit($uid, $amount, $ref)
+            : $settle->credit($uid, $amount, $ref);
+    } catch (\Throwable $e) {
+        // 事件日志写不进去（磁盘满、目录只读）：这是环境问题，不是业务拒绝
+        echo "ERROR   记账失败，钱没有变动: " . $e->getMessage() . PHP_EOL;
+        return 1;
+    }
+
+    if (!$ok) {
+        echo "REJECT  未记账（参数非法或已处理过）" . PHP_EOL;
+        return 2;
+    }
+
+    echo ($isDebit ? "OK      debit  " : "OK      credit ") . "uid=" . $uid
+        . " amount=" . $amount . " ref=" . $ref
+        . " 余额=" . $settle->balanceOf($uid) . PHP_EOL;
+    return 0;
+}
+
+/**
+ * 运维命令：对账。
+ *
+ * 独立重放日志、和内存账本逐人比对。退出码 0 = 平，3 = 不平（可以挂到巡检脚本里）。
+ */
+function runWalletCheck(Settle $settle): int
+{
+    $rep = $settle->reconcile();
+
+    echo "事件 " . $rep["events"] . " 条，玩家 " . $rep["players"] . " 个"
+        . "，内存合计 " . $rep["total_mem"] . "，日志合计 " . $rep["total_log"] . PHP_EOL;
+
+    if ($rep["ok"]) {
+        echo "OK      账平" . PHP_EOL;
+        return 0;
+    }
+
+    echo "FAIL    对账不平" . PHP_EOL;
+    foreach ($rep["diff"] as $d) {
+        echo "   uid " . $d["uid"] . "：内存 " . $d["mem"] . " / 日志 " . $d["log"] . PHP_EOL;
+    }
+    foreach ($rep["negative"] as $uid) {
+        echo "   负数余额 uid " . $uid . PHP_EOL;
+    }
+    foreach ($rep["dup_ids"] as $id) {
+        echo "   重复事件 id " . $id . PHP_EOL;
+    }
+    foreach ($rep["bad_debits"] as $id) {
+        echo "   重放时余额不足的扣款 " . $id . PHP_EOL;
+    }
+    return 3;
 }
