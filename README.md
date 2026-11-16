@@ -1,10 +1,11 @@
 # TSF — TypePHP Server Framework
 
 用 TypePHP（AOT 编译）+ PHP 写游戏服务器，替代「C++ + Lua」。
-**当前版本 v0.6.0**：M0–M6 已交付，M7（wasm 热更）未做。
 
-一句话说清它换来什么：**性能接近原生（单 worker 稳态 116 万 msg/s），但保留 PHP 的开发效率**；
-代价是 AOT 之后改不了运行中的代码，所以热更必须靠"配置热更 + wasm 模块 + 滚动重启"三条轨道替代 Lua。
+**当前版本 v0.7.0**：M0–M7 全部交付。
+
+一句话说清它换来什么：**性能接近原生（单 worker 稳态 116 万 msg/s），但保留 PHP 的开发效率**。
+代价是 AOT 之后改不了运行中的代码，所以热更靠「配置热更 + wasm 模块 + 滚动重启」三条轨道替代 Lua。
 
 ---
 
@@ -14,59 +15,83 @@
 这套工具链目前只在 WSL/Linux 上验证过。
 
 ```bash
-# 1) 生成工程
-tsf new my-server
-
-# 2) 编译并启动
-cd my-server && tsf serve .
-
-# 3) 另开终端验证
-php85 client.php 9001        # resp msgId=1002 body=hello-tsf-...
+tsf new my-server              # 1) 生成工程
+cd my-server && tsf serve .    # 2) 编译并启动
+php85 client.php 9001          # 3) 另开终端验证
 ```
 
-开发时用 `tsf watch .`（改一行 1.4~1.9 s 看到效果）；
-提交前跑 `tsf lint`（禁 `mixed`、命名空间与目录一致，违反返回非 0，可挂 CI）。
+开发时 `tsf watch .`（改一行 1.4~1.9 s 看到效果）；提交前 `tsf lint`
+（禁 `mixed`、命名空间与目录一致，违反返回非 0，已挂 CI）。
 
-跑一个有内容的例子（登录 → 匹配 → 对战 → 结算 → 落库 + 发金币）：
+---
+
+## 验证：一条命令跑完 197 项断言
 
 ```bash
-cd demo/duel
-./duel migrate     # 建表（部署步骤，跑一次）
-./run.sh           # 两个客户端真打一局
+bash scripts/ci-preflight.sh   # 先看环境（缺什么、缺在哪、怎么补）
+tsf verify                     # 9 个套件
 ```
+
+```
+结果    套件             内容                                耗时
+PASS  semantics      AOT 语言语义差分（45 用例）                  16.5s
+PASS  swoole         Swoole 契约（6 项）
+PASS  settle         金币账本（91 项）
+PASS  settle-crash   账本崩溃重放（14 项）
+PASS  fd             fd/内存守卫（10 项）
+PASS  cluster        集群/房间归属（11 项）
+PASS  drain          进程 drain（8 项）
+PASS  rejoin         断线重连（6 项）
+PASS  wasm           wasm 热更链路（灰度/回滚）
+```
+
+`tsf verify --list` 看清单，`tsf verify <id>` 只跑一个。缺工具链的套件会标 `SKIP`
+而不是 FAIL——环境问题不该把整套判成失败。
 
 ---
 
 ## 目录结构
 
 ```
-tsf/                 框架本体（src 核心 + pkg 可选包 + bin/tsf CLI + tools）
+tsf/                 框架本体
   src/               15 个核心模块：Transport/Gateway/Protocol/Service/Rpc/Cluster/
                      Discovery/Shard/Breaker/Metrics/Gm/Config/Kernel/Timer/Proto
-  pkg/               9 个可选包：fsm entity frameloop room aoi match db snapshot eventlog
+  pkg/               10 个可选包：fsm entity frameloop room aoi match db snapshot eventlog wasm
   ext/codec/         原生帧编解码（C++，可关）
   tools/             config 导出、proto 生成（不进 AOT）
-demo/                duel（完整对局示例，含多进程 run-cluster.sh）、demo-echo（最小 echo）
-bench/               58 个目录：功能断言、性能基准、一次性技术探针（probe-*）
+bench/               功能断言与基准（tsf verify 依赖它，属于框架本体）
+scripts/             ci-preflight.sh 等
 tpc-patches/         对 typephp 编译器的本地补丁（AOT 下必须）
+.github/workflows/   CI：lint 走托管 runner，verify 走自托管
 tools/repo-guard.py  提交前检查：抓「被 .gitignore 误挡的源码」
-spike/               一次性技术验证（S1~S6、E1/E2/E4），只保留结论文档入仓库
+spike/               一次性技术验证，只保留结论文档入仓库
 ```
+
+**`demo/` 不在框架本体里**：它是示例（duel 完整对局、demo-echo 最小 echo），
+依赖框架但不属于框架。计划迁出为独立仓库的子模块——`bench/` 不能同样处理，
+因为 `tsf verify` 依赖它。
 
 ---
 
-## 文档在哪
+## 文档
 
-| 想知道 | 看 |
-|:--|:--|
-| **框架怎么用、为什么这么设计** | `tsf/README.md`（最全，约 4,000 行，按主题分节） |
-| **每个任务做了什么、验收数字** | `FRAMEWORK-TASK.md` |
-| **这一版有什么、边界在哪** | `CHANGELOG.md` |
-| **架构审计结论与遗留问题** | `tsf/AUDIT-2026-11-15.md` |
-| **AOT 为什么这么写** | `tsf/README.md` §5（编码约束）+ `ARCHITECTURE-DESIGN.md` |
-| **编译器的补丁与升级须知** | `tpc-patches/README.md` |
-| **想跑多进程/多节点（房间归属）** | `DESIGN-ROOM-OWNERSHIP.md`（设计稿，未实现） |
-| **想做 wasm 热更（M7）** | `DESIGN-WASM-HOTRELOAD.md`（设计稿，未实现） |
+根目录只保留 7 份，全部是"当前有效"的：
+
+| 想知道 | 看 | 状态 |
+|:--|:--|:--|
+| 框架怎么用、编码约束 | `tsf/README.md` | 权威，按主题分节 |
+| 每个任务做了什么、验收数字 | `FRAMEWORK-TASK.md` | 权威任务表（M0–M7） |
+| 这一版有什么、边界在哪 | `CHANGELOG.md` | 按时间倒序 |
+| 为什么这么分层（含 libhv 取舍） | `ARCHITECTURE-DESIGN.md` | 设计依据 |
+| 房间归属怎么做 | `DESIGN-ROOM-OWNERSHIP.md` | 已实现 |
+| wasm 热更怎么做（含踩的坑） | `DESIGN-WASM-HOTRELOAD.md` | 已实现 |
+| CI 与自托管 runner | `CI-RUNNER.md` | — |
+| 架构审计遗留问题 | `tsf/AUDIT-2026-11-15.md` | — |
+| 编译器补丁与升级须知 | `tpc-patches/README.md` | — |
+
+已移除的三份（`typeGame.md`、`ARCHITECTURE-EVOLUTION.md`、`IMPLEMENTATION-PLAN.md`）：
+它们的结论已并入 `FRAMEWORK-TASK.md`（§六 早期构想修正、§九 架构决策记录），
+原文在 git 历史里可查。
 
 ---
 
