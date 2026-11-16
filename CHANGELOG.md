@@ -222,6 +222,32 @@ clang 与 wasmtime 版本。发布时校校验和，能挡住"发了个旧包"�
 **灰度加载失败不影响主实例**（`canary()` 返回 false，主实例继续服务）——
 这是灰度最需要的行为：新版本坏了，老版本要能顶住。
 
+### 接入 GitHub Actions：lint 走托管 runner，verify 走自托管
+
+`.github/workflows/ci.yml` 两个 job，分在不同 runner 上——这是被现实逼的，不是设计偏好：
+
+| job | runner | 触发 | 内容 | 耗时 |
+|:--|:--|:--|:--|:--|
+| `lint` | ubuntu-latest | push / PR | `tsf lint` + 全量 `php -l` | 秒级 |
+| `verify` | self-hosted | 手动 | `tsf verify` 197 项断言 | 分钟级 |
+
+**为什么不把 verify 放托管 runner**：AOT 编译器 `tpc` 在 `../typephp-src`，**不在本仓库**；
+还要求 PHP 8.5 **ZTS** + Swoole + phpx，托管 runner 从零装要十几分钟且极易版本漂移。
+硬塞的后果是它长期红着，然后所有人学会忽略 CI——**装不上的测试比没有测试更糟**。
+
+`verify` 只在手动触发跑：push 就全量验证会把 197 项断言的几分钟成本摊到每次提交，
+而真正需要它的是"准备发布"和"动了核心之后"。
+
+**新增 `scripts/ci-preflight.sh`**：把环境检查前置。原来 `tsf verify` 失败时的报错来自
+最深那一层（`WASI toolchain check failed`、`function wasm_load is undefined`），
+分不清是缺环境还是代码真坏了。现在先跑一遍检查，缺什么、缺在哪、怎么补，一眼可见。
+本地也能用——新人接手第一件事就该跑它。
+
+顺带修了两处判定标准不一致：`wit-bindgen` 装在 `~/.cargo/bin` 但默认不在 PATH 里，
+`preflight` 曾误判"没装"、`tsf verify` 曾误判"装了"。现在 `findInPath()` 统一兜底
+`~/.cargo/bin`，且 `verify` 支持 `needs` 字段——缺工具链时 **SKIP** 而不是 FAIL，
+不让一个环境问题把整套判成失败。
+
 ### `tsf verify` 一键回归：9 个套件收成一个入口
 
 之前验证散在 9 个目录（`bench/*`、`demo/duel/*`），入口、前置条件、判定方式各不相同。
