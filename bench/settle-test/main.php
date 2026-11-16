@@ -271,6 +271,115 @@ function caseOrder(): void
     $log2->close();
 }
 
+
+function caseDebit(): void
+{
+    echo "== [10] 扣款：够就扣、不够就拒、拒绝不写日志 ==" . PHP_EOL;
+    $path = fresh("debit");
+    $log = new EventLog($path);
+    $st = new Settle($log);
+
+    T::ok($st->credit(3001, 100, "init"), "先充值 100");
+    T::eq($st->balanceOf(3001), 100, "余额 100");
+    T::ok($st->debit(3001, 30, "buy-1"), "扣 30 成功");
+    T::eq($st->balanceOf(3001), 70, "余额 70");
+    T::eq(lineCount($path), 2, "日志 2 条（充值 + 扣款）");
+
+    T::ok(!$st->debit(3001, 71, "buy-2"), "余额不足返回 false");
+    T::eq($st->balanceOf(3001), 70, "拒绝后余额一分没动");
+    T::eq(lineCount($path), 2, "**拒绝不写日志**");
+
+    T::ok($st->debit(3001, 70, "buy-3"), "正好扣到 0 可以");
+    T::eq($st->balanceOf(3001), 0, "余额 0");
+    T::ok(!$st->debit(3001, 1, "buy-4"), "0 余额再扣 1 被拒");
+    T::ok($st->balanceOf(3001) >= 0, "余额不会变成负数");
+    $log->close();
+}
+
+function caseDebitIdempotent(): void
+{
+    echo "== [11] 扣款幂等：同一 ref 只扣一次 ==" . PHP_EOL;
+    $path = fresh("debit-idem");
+    $log = new EventLog($path);
+    $st = new Settle($log);
+
+    $st->credit(4001, 100, "init");
+    T::ok($st->debit(4001, 10, "order-1"), "首次扣款成功");
+    T::ok(!$st->debit(4001, 10, "order-1"), "同一 ref 再扣返回 false");
+    T::eq($st->balanceOf(4001), 90, "只扣了一次");
+    T::eq(lineCount($path), 2, "日志仍 2 条（充值 + 1 笔扣款）");
+    T::ok($st->isDebited("order-1"), "isDebited 查得到");
+    T::ok(!$st->isDebited("order-2"), "没扣过的 ref 查不到");
+
+    // 不同 ref 是不同的一笔，可以继续扣
+    T::ok($st->debit(4001, 90, "order-2"), "换一个 ref 继续扣");
+    T::eq($st->balanceOf(4001), 0, "扣光");
+    T::eq(lineCount($path), 3, "日志 3 条");
+
+    // 空 ref 不允许：那等于放弃幂等
+    T::ok(!$st->debit(4001, 1, ""), "空 ref 被拒");
+    $log->close();
+}
+
+function caseDebitRebuild(): void
+{
+    echo "== [12] 借贷混合后重启：余额与去重表都追平 ==" . PHP_EOL;
+    $path = fresh("debit-rebuild");
+
+    $log = new EventLog($path);
+    $st = new Settle($log);
+    $st->credit(5001, 100, "c1");
+    $st->debit(5001, 40, "d1");
+    T::ok($st->settle(1, 5002), "一局结算给 5002 发奖");
+    T::ok($st->debit(5002, 60, "d2"), "再把 5002 扣 60");
+    $log->close();
+
+    // 模拟重启：新进程、同一份日志
+    $log2 = new EventLog($path);
+    $st2 = new Settle($log2);
+    T::eq($st2->balanceOf(5001), 60, "5001 重放后 60");
+    T::eq($st2->balanceOf(5002), 40, "5002 重放后 40");
+    T::ok($st2->isDebited("d1"), "去重表也回来了");
+    T::ok(!$st2->debit(5001, 1, "d1"), "重启后同一个 ref 仍然幂等");
+    T::eq($st2->balanceOf(5001), 60, "余额没被重复扣");
+
+    $st2->rebuildFrom();
+    T::eq($st2->balanceOf(5001), 60, "再重放一次不翻倍");
+    $log2->close();
+}
+
+function caseReconcile(): void
+{
+    echo "== [13] 对账：平、篡改内存、日志被改 ==" . PHP_EOL;
+    $path = fresh("reconcile");
+    $log = new EventLog($path);
+    $st = new Settle($log);
+    $st->credit(6001, 100, "c1");
+    $st->debit(6001, 30, "d1");
+
+    $rep = $st->reconcile();
+    T::ok($rep["ok"], "正常账平");
+    T::eq($rep["total_mem"], 70, "内存合计 70");
+    T::eq($rep["total_log"], 70, "日志合计 70");
+    T::eq(count($rep["diff"]), 0, "没有差异");
+
+    // 模拟"有人绕过 debit 直接改内存"
+    $st->wallet()->credit(6001, 5);
+    $rep2 = $st->reconcile();
+    T::ok(!$rep2["ok"], "篡改内存后对账能发现");
+    T::eq(count($rep2["diff"]), 1, "1 个 uid 有差异");
+    T::eq($rep2["diff"][0]["mem"], 75, "内存侧 75");
+    T::eq($rep2["diff"][0]["log"], 70, "日志侧 70");
+    T::eq($rep2["total_mem"] - $rep2["total_log"], 5, "两边差 5");
+
+    // 模拟"日志被改"：往日志里塞一条余额根本不够的扣款
+    $log->append("debit:tamper", "wallet.debit", ["uid" => 6001, "amount" => 99999, "ref" => "tamper"]);
+    $rep3 = $st->reconcile();
+    T::ok(in_array("debit:tamper", $rep3["bad_debits"], true), "重放时余额不足的扣款被抓出来");
+    T::ok(!$rep3["ok"], "存在坏扣款时对账不平");
+    $log->close();
+}
+
 function main(): void
 {
     @mkdir(DIR, 0777, true);
@@ -283,6 +392,10 @@ function main(): void
     caseTornLine();
     caseDuplicateId();
     caseOrder();
+    caseDebit();
+    caseDebitIdempotent();
+    caseDebitRebuild();
+    caseReconcile();
 
     echo PHP_EOL . "结果: " . T::$pass . " 通过 / " . T::$fail . " 失败" . PHP_EOL;
     exit(T::$fail === 0 ? 0 : 1);

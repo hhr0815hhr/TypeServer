@@ -52,7 +52,8 @@ function modeVerify(string $dir): void
     $st = new Settle($log);
 
     $events = 0;
-    $total = 0;
+    $settles = 0;
+    $net = 0;
     $ids = [];
     $dup = 0;
     $rooms = [];
@@ -63,14 +64,26 @@ function modeVerify(string $dir): void
             $dup++;
         }
         $ids[$id] = true;
-        $d = $ev["d"];
-        $total += isset($d["amount"]) ? (int) $d["amount"] : 0;
-        $rooms[isset($d["room"]) ? (int) $d["room"] : 0] = true;
+        $d = is_array($ev["d"]) ? $ev["d"] : [];
+        $amount = isset($d["amount"]) ? (int) $d["amount"] : 0;
+
+        // 净额 = 入账 - 出账。之前这里无脑相加，
+        // 一旦日志里出现 wallet.debit，加出来的就不是余额了
+        if ($ev["k"] === Settle::KIND_DEBIT) {
+            $net -= $amount;
+        } else {
+            $net += $amount;
+        }
+
+        if ($ev["k"] === Settle::KIND) {
+            $settles++;
+            $rooms[isset($d["room"]) ? (int) $d["room"] : 0] = true;
+        }
     }
 
-    // 房间号必须 1..events 连续：日志只可能从尾部被截，中间缺一局就说明丢在中间了
+    // 房间号必须 1..settles 连续：日志只可能从尾部被截，中间缺一局就说明丢在中间了
     $gaps = 0;
-    for ($i = 1; $i <= $events; $i++) {
+    for ($i = 1; $i <= $settles; $i++) {
         if (!isset($rooms[$i])) {
             $gaps++;
         }
@@ -79,14 +92,37 @@ function modeVerify(string $dir): void
     $walletTotal = $st->wallet()->total();
 
     printf(
-        "events=%d balance=%d sum=%d gaps=%d dup=%d torn=%d\n",
+        "events=%d balance=%d net=%d gaps=%d dup=%d torn=%d\n",
         $events,
         $walletTotal,
-        $total,
+        $net,
         $gaps,
         $dup,
         $log->badLines()
     );
+    $log->close();
+}
+
+/**
+ * mix 模式：发奖与扣款交替，用来看"借贷混在一起时被杀，重放还能不能对上"。
+ *
+ * 每局：结算给 100，再花掉 30。所以 Net = 局数 × 70，而不是 × 100。
+ */
+function modeMix(string $dir, int $count): void
+{
+    $path = logPath($dir);
+    $log = new EventLog($path);
+    $st = new Settle($log);
+
+    for ($i = 1; $i <= $count; $i++) {
+        $uid = 1000 + ($i % 3);
+        $st->settle($i, $uid);
+        // 刚发了 100，扣 30 一定够——这里要验的是"重放"，不是"余额不足"
+        $st->debit($uid, 30, "spend:" . $i);
+        fwrite(STDOUT, "settled " . $i . PHP_EOL);
+        fflush(STDOUT);
+        usleep(300);
+    }
     $log->close();
 }
 
@@ -126,5 +162,9 @@ function main(): void
         modeRepeat($dir, $n > 0 ? $n : 50);
         return;
     }
-    echo "用法: settle_crash settle <dir> <count> | verify <dir> | repeat <dir> <count>" . PHP_EOL;
+    if ($mode === "mix") {
+        modeMix($dir, $n > 0 ? $n : 100000);
+        return;
+    }
+    echo "用法: settle_crash settle <dir> <count> | verify <dir> | repeat <dir> <count> | mix <dir> <count>" . PHP_EOL;
 }
