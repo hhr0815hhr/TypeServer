@@ -1,0 +1,36 @@
+{
+    "app": {
+        "name": "demo-echo"
+    },
+    "log": {
+        "level": "warn",
+        "file": "/data/TypeServer/demo/demo-echo/var/log/app.log"
+    },
+    "protocol": {
+        "frame": "native",
+        "payload": "raw"
+    },
+    "server": {
+        "host": "0.0.0.0",
+        "port": 9001,
+        "transport": "tcp",
+        "worker_num": 1,
+        "max_conn": 20000,
+        "nodelay": true,
+        "heartbeat_sec": 30,
+        "rate_per_sec": 0,
+        "rate_burst": 100,
+        "auth": {
+            "require": false,
+            "secret": "dev-secret-change-me",
+            "tokens": {
+                "tok-1001": 1001,
+                "tok-1002": 1002
+            }
+        },
+        "codec": "native",
+        "gateway": true,
+        "send_fail_limit": 50,
+        "reactor_num": 1
+    }
+}
