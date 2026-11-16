@@ -44,7 +44,10 @@ function main(): void
     $port = Config::getInt("server.port", 9101);
 
     $opts = [
-        "worker_num" => 1,
+        // 以前这里写死 1，**配置里的 server.worker_num 被静默忽略**——
+        // 调了 worker_num 发现行为没变，会以为是 Swoole 的问题。
+        // 现在跟其他选项一样从配置读；多 worker 的正确性还没验（见下面的断言）。
+        "worker_num" => Config::getInt("server.worker_num", 1),
         "max_conn" => Config::getInt("server.max_conn", 200),
         "nodelay" => true,
     ];
@@ -128,11 +131,24 @@ function main(): void
     // （实测：两进程各写 60 条 → 120 条记录只有 61 个不同序号）。
     // 幂等靠业务 id（`duel:<房间号>`），撞号不会多发钱；但 replay($fromSeq) 和
     // truncate($uptoSeq) 都以 seq 为坐标，一撞就会漏读/重读，归档也跟着错。
+    // 多 worker 目前**整体**不支持，不是"事件日志一条"的问题。实测三处：
+    //
+    //  ① 快照目录被每个 worker 各扫一遍。一个快照、两个 worker 启动，日志里会出现两次
+    //     `rooms restored done=1`（worker 0 与 worker 1），同一个房间在两个调度器里各建一份，
+    //     并且都往同一个 `duel_<id>.snap` 写——后写的覆盖先写的，一份进度静默丢失。
+    //  ② 事件日志的 nextSeq 是构造时扫文件算出来的，多进程会撞号（实测 120 条 61 个序号）。
+    //  ③ 房间号是每个 worker 各自从 1 数的，跨 worker 必然重复；而结算幂等键是
+    //     `duel:<房间号>`，重复就意味着"钱静默不发"。
+    //
+    // 要支持多 worker，缺的是「房间归属」这一层设计：谁负责哪些房间、重启后怎么认领、
+    // 跨 worker 怎么路由。不是把 1 改成 4 的事。所以这里直接拒绝，别让它半死不活地跑。
     $workers = Config::getInt("server.worker_num", 1);
     if ($workers > 1) {
         throw new \RuntimeException(
-            "事件日志只支持单写入进程，但 server.worker_num=" . $workers
-            . "。要么把 worker_num 改回 1，要么把日志按 worker 分文件（settle.w{id}.log）再在读取侧合并。"
+            "这个 demo 只支持单 worker，但 server.worker_num=" . $workers . "。"
+            . "实测三处缺口：①快照被每个 worker 各恢复一次，同一房间会有两份状态；"
+            . "②事件日志多进程写会撞号；③房间号各 worker 各数一份，跨 worker 重复会让结算被跳过。"
+            . "要支持多 worker 得先设计「房间归属」（谁负责哪些房间、重启后怎么认领、跨 worker 怎么路由）。"
         );
     }
     $settlePath = Config::getString("settle.path", $base . "/var/settle.log");
