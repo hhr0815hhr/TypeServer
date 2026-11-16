@@ -360,6 +360,89 @@ component model 的版本化 import 是**精确匹配**的，host 的
 顺带确认：interface 名是一致的（两边都是 `typephp:s1-probe/api@1.0.0`），
 所以**不是**命名空间/包名的问题——这一点排除了。
 
+### ✅ 闭环了：新增导出函数不重编桥接层（2026-11-16）
+
+上面那个 WASI 版本死结，用**升级 host 的 wasmtime** 解开了。实测输出：
+
+```
+load main(v1): handle=0 耗时 46 ms
+  call2(main,'add',1,2)      = 3
+  call2(main,'add',40,2)     = 42
+  call2(main,'no_such_fn',0,0) = -2001
+load(mul-probe.cwasm) handle=1
+  call2(mul,'mul',6,7)       = 42        ← 新增导出，桥接层零改动
+```
+
+`mul` 这个函数：用 PHP 写成（`#[\WasmExport] function mul(int $a, int $b)`），
+经 tpc 编成 wasm component，`cpp-src/wasm_bridge.cc` 里**搜不到 "mul" 一个字**，
+靠 `wasm_call2($h, "mul", 6, 7)` 直接调通，返回 42。
+
+**这就是 T7-01 的验收条件，现在满足了。**
+
+### 打通它需要动的四处（按依赖顺序）
+
+**1. host 的 wasmtime 从 47 升到 50**（`Cargo.toml` 三行 → 50）。
+
+原因：wasi-sdk 34 产出 `wasi:cli/*@0.2.12`，而 wasmtime 47 的 `wasmtime_wasi::p2`
+只 link 到 0.2.6，精确匹配失败 → `instantiate` 失败 → `tp_open` 返回 -1。
+升级后 50.0.1 支持 0.2.12。
+
+连带一处 API 适配：`WasiHttpView` / `WasiHttpCtxView` 从 `wasmtime_wasi_http::p2`
+移到了 crate root，import 改一行即可。编译 2m42s（首次拉依赖）+ 1m30s（改完重编）。
+
+**2. phpx 的 wasm 头要打 clang 22+ 的补丁。**
+
+`phpx.h` 用了 `std::abort()` / `std::fill` 但没 include `<cstdlib>` / `<algorithm>`；
+旧版 libc++ 恰好间接包含，clang 22+ 不再包含，报 `no member named 'abort' in namespace 'std'`。
+补两行 include + `std::abort()` → `abort()` 后编译通过（编译器自己提示了
+"did you mean simply 'abort'?"）。这是上游适配缺口，不是本项目的代码问题。
+
+**3. cwasm 必须用 `tp-precompile`，不能用 `wasmtime` CLI。**
+
+这一条最容易踩：`fuel` / `epoch` 属于**编译期插桩**，预编译时的配置必须与运行期一致，
+产物里带 `fingerprint` 与 `artifact_size`，不一致直接拒绝启动。
+用 CLI 编出来的 cwasm 会让**所有模块**加载失败（表现是句柄全变 `-1000`，
+看起来像"升级把一切都搞坏了"）。
+
+```bash
+./spike/e1/precompile.sh build <in.wasm> <out.cwasm>
+```
+
+**4. 升级后所有既有模块的 cwasm 都要重编**（v1/v2 也一样），否则一起打不开。
+
+### 完整复现步骤
+
+```bash
+# 1) host：升级 wasmtime 并重编 so
+cd spike/s2/host-capi
+sed -i 's/version = "47"/version = "50"/' Cargo.toml
+~/.cargo/bin/cargo build --release          # 约 2.5 分钟
+
+# 2) 模块：PHP 源码 → wasm component（要 WASI SDK 34 / clang 23）
+cd /tmp/mulmod
+env PATH=~/.local/bin:/tmp/wasi-sdk-34.0-x86_64-linux/bin:~/.cargo/bin:/usr/local/bin:/usr/local/php-8.5-zts/bin:/usr/bin:/bin   php85 ~/typephp-src/bin/tpc.php project.yml   # 产出 mul-probe.wasm
+
+# 3) 预编译（必须用 tp-precompile，不是 wasmtime CLI）
+cd /data/TypeServer/spike
+./e1/precompile.sh build /tmp/mulmod/mul-probe.wasm /tmp/mulmod/mul50.cwasm
+
+# 4) 跑：TP_METHODS 里登记新方法名，验证调用
+cd spike/e1 && php85 ~/typephp-src/bin/tpc.php project.yml
+TP_METHODS='[method]runtime.add,[method]runtime.mul' ./e1_stub
+```
+
+### 能力边界（更新后）
+
+| 变更类型 | 现在需要做什么 | 热更？ |
+|:--|:--|:--|
+| 同名函数换实现 | 换 cwasm + `wasm_swap`（4.4–5.5 ms） | ✅ 是 |
+| 新增导出函数 | 编 cwasm + 在 `TP_METHODS` 加名字 + 重启 | 🟡 不用改代码/重编 so |
+| 改签名 | 同上 + 改调用点 | 🟡 同上 |
+| 自动发现接口 | 未做（`TP_METHODS` 仍要人维护） | ❌ |
+
+所以"M7 = 三级热更全部可用"里，**实现热更是真的、接口变更还差"自动枚举"这一步**。
+但至少现在可以确定：这条路的技术前提是成立的，不是死路。
+
 ### 验证环境现状
 
 | 项 | 状态 |
