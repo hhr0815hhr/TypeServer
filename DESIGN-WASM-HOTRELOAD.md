@@ -277,7 +277,50 @@ interface，再 `get_export_index(Some(&iface), "create-runtime")` 拿到函数�
 **没做的原因**：wasmtime 的 component type 枚举 API 需要精确的类型/生命周期写法，
 而实测每次 `cargo build` 要 1.5–2.5 分钟，猜错一次的代价是又一轮编译。
 
-**试过一次，失败了，已回滚。** 2026-11-16：按记忆写了
+**✅ 已实现（2026-11-16 晚）。** `TP_METHODS` 那份人工表可以不再维护了——
+host 从 component 的类型信息里枚举成员，模块新增导出函数自己就能发现：
+
+```
+[enum] members=9 names=["typephp-error", "runtime", "[method]runtime.add",
+  "[method]runtime.greet", "[method]runtime.simulate-frame", "[method]runtime.spin",
+  "[method]runtime.forever", "[method]runtime.mul", "create-runtime"]
+load(mul-probe.cwasm) handle=1
+call2(mul,'mul',6,7) = 42        ← 没设 TP_METHODS
+```
+
+**正确的 API（wasmtime 50，查源码确认，不是凭记忆）**：
+
+```rust
+use wasmtime::component::types::ComponentItem;
+
+for (ename, eitem) in component.component_type().exports(engine) {
+    if ename != IFACE { continue; }
+    if let ComponentItem::ComponentInstance(inst) = eitem.ty {   // 字段，不是方法
+        for (mname, _item) in inst.exports(engine) {             // 产出 ComponentExtern
+            // mname 已经是 "[method]runtime.add" 这种完整名，别再加前缀
+        }
+    }
+}
+```
+
+四个容易写错的点（我逐个踩了一遍）：
+
+1. `component_type()` 返回 **`types::Component`**，不是 `ComponentType`；
+2. `ComponentItem` 在 **`component::types`** 子模块里，不在 `component` 根；
+3. 顶层 `exports()` 产出的是 **`ComponentExtern`**，要取 `.ty`（**字段**）才是 `ComponentItem`；
+4. `ComponentInstance::exports()` 给出的成员名**已经带 `[method]runtime.` 前缀**，
+   再拼一次就变成 `[method]runtime.[method]runtime.mul`，查不到（表现是 -2001，
+   很容易误判成"枚举没生效"）。
+
+现在实现里保留了兜底：枚举失败（解析不了/为空）就退回 `TP_METHODS`/内置表，
+不影响已验证的路径。`typephp-error` / `runtime` / `create-runtime` 这类非函数成员
+也会被加进候选表，但它们过不了 `get_func`，自然被跳过。
+
+**上一轮失败的原因**：我按记忆写了 `wasmtime::component::ComponentItem`（旧版路径），
+编译直接 `unresolved import`。教训是——**这类跨大版本的 API 只能查源码/文档，
+不能凭记忆写**，否则每次代价是一轮 1.5–2.5 分钟的编译加回滚。
+
+**上一轮（已作废）的记录：** 2026-11-16：按记忆写了
 `use wasmtime::component::ComponentItem`，编译直接报 `unresolved import`——
 说明 wasmtime 50 里这个类型**不存在**（component 的类型 API 在这个大版本里重构过），
 `ComponentItem` 这个名字在我的知识里是旧版的。`grep` 源码也没直接定位到替代名。
