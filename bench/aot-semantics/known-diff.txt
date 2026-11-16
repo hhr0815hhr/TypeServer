@@ -1,0 +1,13 @@
+# AOT 语义已知差异
+#
+# 每行一个用例名（后面的说明是给人看的）。登记在这里的差异：
+#   - 不会被 run.sh 判为失败
+#   - 但必须在本目录 README.md 里有对应条目，说明"为什么不同、怎么规避"
+#
+# 新增用例如果 diff 出差异，先判断：是 AOT 的**设计限制**（登记 + 写规避），
+# 还是**回归/bug**（不要登记，去修或去 tpc 提 issue）。
+
+closure_empty_arity     # AOT 严格校验闭包实参个数，PHP 忽略多余实参
+closure_extra_args      # 同上
+int_overflow_64         # 整数溢出：PHP 降级为 float，AOT 按 C 语义回绕
+reference_param_mutation # 闭包形参用 &$ref 时 AOT 下引用传递失效（只警告）
