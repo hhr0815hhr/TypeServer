@@ -9,6 +9,14 @@ cd "$(dirname "$0")" || exit 1
 TSF=../../tsf/bin/tsf
 BIN=./wasm_link
 
+# 先构建 fixture（源码在 fixtures/v1、fixtures/v2，用 tsf module build 现编）
+echo "== 构建 wasm fixture =="
+if ! bash fixtures/build.sh > /tmp/wl_fixture.log 2>&1; then
+    echo "FAIL fixture 构建"
+    tail -6 /tmp/wl_fixture.log
+    exit 1
+fi
+
 if ! $TSF build . > /tmp/wl_build.log 2>&1; then
     echo "FAIL 构建"
     tail -4 /tmp/wl_build.log

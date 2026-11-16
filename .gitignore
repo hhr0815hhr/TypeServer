@@ -64,3 +64,7 @@ implementation-kit/lib/**
 demo/*/var/**
 bench/*/var/**
 bench/*/build/**
+
+# wasm 验收 fixture 的构建产物（源码在版本控制里，产物现编）
+bench/wasm-link/fixtures/*/dist/
+bench/wasm-link/fixtures/*/*.wasm

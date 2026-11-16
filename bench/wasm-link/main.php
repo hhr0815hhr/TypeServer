@@ -10,8 +10,10 @@ use TSF\Wasm\Module;
 
 function main(): void
 {
-    $v1 = "/data/TypeServer/spike/s1/s1-probe.wasm.cwasm";
-    $v2 = "/data/TypeServer/spike/e1/module_v2/s1-probe-v2.wasm.cwasm";
+    // 路径由 fixtures/build.sh 产出；run.sh 会先跑它。
+    // 之所以写绝对路径：AOT 里没有可靠的「脚本所在目录」，靠 run.sh 的 cd 保证更实在。
+    $v1 = "/data/TypeServer/bench/wasm-link/fixtures/v1/dist/fixture-v1.cwasm";
+    $v2 = "/data/TypeServer/bench/wasm-link/fixtures/v2/dist/fixture-v2.cwasm";
 
     echo "bridge = " . Module::bridgeVersion() . PHP_EOL;
 
