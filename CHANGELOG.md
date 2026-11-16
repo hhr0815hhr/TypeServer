@@ -271,6 +271,33 @@ clang 与 wasmtime 版本。发布时校校验和，能挡住"发了个旧包"�
 `~/.cargo/bin`，且 `verify` 支持 `needs` 字段——缺工具链时 **SKIP** 而不是 FAIL，
 不让一个环境问题把整套判成失败。
 
+### 指标类型从字符串改为 enum（`bench/metrics-test` 37 项通过）
+
+体检结论："未使用 TypePHP 特性"里大部分**不是性能欠债，是类型安全欠债**。
+先落地确定性最高的那一处：`MetricSnapshot::$kind` 的三选一字符串。
+
+```php
+// 之前
+public string $kind = "counter";
+if ($s->kind === "counter") { ... }
+
+// 现在
+public MetricKind $kind = MetricKind::Counter;
+if ($s->kind === MetricKind::Counter) { ... }
+```
+
+**换来的是编译期穷尽性**：以后加一种指标类型（比如 summary），所有 `match` 漏分支的
+地方直接编译失败。字符串常量做不到——漏了只是静默走默认分支，等看板数字不对才发现。
+
+**性能是中性偏负**：`enum case` 在 AOT 下是对象而非标量常量（`OBJECT_CREATION.md` 3.2），
+不要把它当性能优化。顺带确认热路径未受影响：`inc` 81 ns/次、`observe` 400 ns/次，
+都在 `metrics-test` 的阈值内（300 / 800 ns）。
+
+**踩到的坑**：改公共数据结构的字段类型必须 grep **全仓库**。我第一次只查了 `tsf/`，
+漏了 `bench/metrics-test/main.php` 里两处 `T::eq($s->kind, "counter")`——编译能过，
+跑到第 1 组用例就 `TypeError: Argument #1 must be of type int|string|float|bool, object given`。
+类型收紧的收益在编译期，但代价会在运行期以这种形式出现。
+
 ### `tsf verify` 一键回归：9 个套件收成一个入口
 
 之前验证散在 9 个目录（`bench/*`、`demo/duel/*`），入口、前置条件、判定方式各不相同。

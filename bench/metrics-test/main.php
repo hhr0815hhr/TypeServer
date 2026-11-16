@@ -79,14 +79,14 @@ function testCounter(): void
 
     T::eq(isset($by["packet.in"]), true, "计数器出现在快照里");
     if (isset($by["packet.in"])) {
-        T::eq($by["packet.in"]->kind, "counter", "类型是 counter");
+        T::eq($by["packet.in"]->kind->label(), "counter", "类型是 counter");
         T::eq((int) $by["packet.in"]->value, 12, "3 次 inc 累加成 12");
     }
     if (isset($by["bytes.out"])) {
         T::eq((int) $by["bytes.out"]->value, 1500, "add 累加");
     }
     if (isset($by["room.active"])) {
-        T::eq($by["room.active"]->kind, "gauge", "类型是 gauge");
+        T::eq($by["room.active"]->kind->label(), "gauge", "类型是 gauge");
         T::eq((int) $by["room.active"]->value, 150, "gauge 记最后的值");
         T::eq((int) $by["room.active"]->max, 150, "gauge 也记峰值");
     }
