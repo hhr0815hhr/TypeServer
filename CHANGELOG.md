@@ -111,6 +111,31 @@ TCP 连接绑在进程上，节点崩了 socket 就没了。要在旧节点做�
 测试：`duel-settle` **34 → 45**（认领过滤 9 项：两个 node 从同一快照目录认领、
 `not_mine` 计数正确、**别人的快照没被删**、各自清掉自己的坏快照；段末溢出返回 0）。
 
+### M7 第 1 步闭环：新增 wasm 导出函数不重编桥接层
+
+`call2(mul,'mul',6,7) = 42` —— `mul` 用 PHP 写（`#[\WasmExport]`），经 tpc 编成
+wasm component，`spike/e1/cpp-src/wasm_bridge.cc` 里**搜不到 "mul" 一个字**，
+靠通用入口 `wasm_call2($h, "mul", 6, 7)` 直接调通。T7-01 的验收条件满足。
+
+打通它要动四处，每一处都是"不知道就卡住"的那种：
+
+1. **host 的 wasmtime 47 → 50**。SDK 34 产出 `wasi:cli/*@0.2.12`，47 的
+   `wasmtime_wasi::p2` 只 link 到 0.2.6，版本化 import 精确匹配失败 →
+   `instantiate` 失败 → `tp_open` 返回 -1。连带 API 适配一处
+   （`WasiHttpView`/`WasiHttpCtxView` 从 `p2` 移到 crate root）。
+2. **phpx 的 wasm 头要打 clang 22+ 补丁**：`phpx.h` 用了 `std::abort()`/`std::fill`
+   但没 include `<cstdlib>`/`<algorithm>`，旧 libc++ 恰好间接包含。属上游适配缺口。
+3. **cwasm 必须用 `tp-precompile`，不能用 `wasmtime` CLI**：`fuel`/`epoch` 是编译期
+   插桩，产物带 fingerprint，配置不一致直接拒绝启动。用 CLI 编会让**所有模块**变成
+   句柄 `-1000`，看起来像"升级把一切都搞坏了"。
+4. **升级后所有既有模块的 cwasm 都要重编**（v1/v2 也是），否则一起打不开。
+
+能力边界（更新）：换实现 = 真热更（4.4–5.5 ms）；增删函数 = 编 cwasm +
+`TP_METHODS` 加名字 + 重启（不用改代码、不重编 so）；自动枚举接口**仍未做**。
+
+环境基线：`wasi-sdk 34`（clang 23.1.0）／`wit-bindgen 0.60.0`／`wasmtime 50.0.1`／
+`~/.local/bin/wasm32-wasip2-clang` 是指向 SDK 34 的 wrapper（**不能是符号链接**）。
+
 ### 文档：wasm 热更（M7 / T7-01）设计稿
 
 `DESIGN-WASM-HOTRELOAD.md`。M7 是任务表里唯一未做的大项，先确认前提再谈方案：
