@@ -299,7 +299,11 @@ var/settle.n0.log  var/settle.n1.log  …
 验收（阶段 2）：杀节点 → 玩家在 T 秒内重连成功回到原房间，且 `frame` 继续推进
 （不是从 0 开始）。T 的目标值待压测后定，起步按"客户端退避 3 次内"。
 
-**状态：未实现**（属阶段 2，要先有认领/落主才谈得上重连找回）。
+**状态：同节点已实现（2026-11-16）**。`Msg::REJOIN` / `REJOIN_OK`、`DuelManager::$duelOf`
+（uid → {room, foe, side}，进程重启时从快照重建）、断线宽限期判负
+（`server.rejoin_grace_sec`，默认 15s）。`run-rejoin.sh` 6 项全过。
+**跨节点重连仍未做**：客户端需要保存 roomId，服务端回 `{error:"room-on-node", node:N}`
+让它连回原节点——那一步要客户端配合，先把同节点做通。
 
 ### 9.2 房间号：**加宽到 10 亿/节点，明确不做号段回收**
 
