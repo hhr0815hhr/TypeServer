@@ -4,7 +4,7 @@
 # 关键：kill -9 而不是 kill。优雅退出会走 onStop → unregister，那是"立刻消失"，
 # 测不出 TTL 判定这条真正依赖的路径。
 set -u
-cd /data/TypeServer/bench/discovery-live || exit 1
+cd "$(dirname "$0")" || exit 1
 BIN=./discovery_live
 DIR=/tmp/tsf_disc_live
 

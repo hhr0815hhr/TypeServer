@@ -2,8 +2,8 @@
 # 把 spike 里的现行实现镜像到 implementation-kit/src/。
 # 原则：spike 是源，kit 是交付副本；改了 spike 后重跑本脚本同步。
 set -eu
-KIT=/data/TypeServer/implementation-kit
-SRC=/data/TypeServer/spike
+KIT=$(cd "$(dirname "$0")" && pwd)
+SRC="$KIT/../spike"
 
 mkdir -p "$KIT/src/wasm-host/src/bin" \
          "$KIT/src/wasm-host/php-src" \

@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
 # 端到端跑一局：起服务端 → 两个客户端（一个进攻一个被动）→ 输出结算。
 set -u
-cd /data/TypeServer/demo/duel || exit 1
-
-
+cd "$(dirname "$0")" || exit 1
 # 迁移是部署步骤：先建表，再起服务（服务启动只校验，不建表）。
 # 幂等，跑几次都行。
 ./duel migrate > /tmp/duel_migrate.log 2>&1 || { echo "迁移失败，看 /tmp/duel_migrate.log"; exit 1; }

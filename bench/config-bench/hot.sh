@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 万行表的热更耗时：这是最坏情况，也是唯一可能顶破 100 ms 的地方。
 set -u
-cd /data/TypeServer/bench/config-bench || exit 1
+cd "$(dirname "$0")" || exit 1
 TSF=/data/TypeServer/tsf/bin/tsf
 CFG=build/config
 

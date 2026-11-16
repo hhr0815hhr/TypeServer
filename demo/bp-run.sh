@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # 背压验证：关掉限流（否则先被限流拦住），把发送失败阈值调小，灌数据不读回包
 set -u
-cd /data/TypeServer/demo/demo-echo || exit 1
-
+cd "$(dirname "$0")" || exit 1
 patch() {
   python3 - "$@" <<'PY'
 import json, sys

@@ -3,8 +3,7 @@
 #   起 demo_echo（1 worker），用 C 压测端 closed-loop 打不同并发，
 #   同时采样服务端 CPU，折算 µs CPU/消息。
 set -u
-cd /data/TypeServer/bench || exit 1
-
+cd "$(dirname "$0")" || exit 1
 SRV=/data/TypeServer/demo/demo-echo/demo_echo
 cpu_ticks() { awk '{print $14+$15}' "/proc/$1/stat" 2>/dev/null; }
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # T6-05 回归：进程内 39 项 + 用真 curl 打一遍（HTTP 框架不能只有自己写的客户端能认）
 set -u
-cd /data/TypeServer/bench/gm-test || exit 1
+cd "$(dirname "$0")" || exit 1
 BIN=./gm_test
 TOKEN=s3cr3t-token-for-test
 PORT=19703

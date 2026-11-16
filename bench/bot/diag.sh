@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 诊断：1 万连接时服务端到底接受到了多少
 set -u
-cd /data/TypeServer/bench/bot || exit 1
+cd "$(dirname "$0")" || exit 1
 ulimit -n 65535 2>/dev/null
 pkill -9 -x demo_echo 2>/dev/null
 sleep 0.3

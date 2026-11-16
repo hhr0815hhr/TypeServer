@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 跨进程 RPC 延迟：起一个服务端进程，客户端分串行/批量两种模式打。
 set -u
-cd /data/TypeServer/bench/rpc-cluster || exit 1
+cd "$(dirname "$0")" || exit 1
 BIN=./rpc_cluster
 N=${1:-500}
 TOTAL=${2:-2000}

@@ -7,7 +7,7 @@
 #
 # 测试改的是**同一行里的一个字符**（大小不变、可能同秒），正是 mtime+size 判据会漏的情况。
 set -u
-cd /data/TypeServer/bench/watch-test || exit 1
+cd "$(dirname "$0")" || exit 1
 TSF=/data/TypeServer/tsf/bin/tsf
 LOG=/tmp/watch_test.log
 

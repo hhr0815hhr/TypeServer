@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 跨服调用透明：两个进程各是一个"节点"，调用方按 uid 路由，一半落本地一半落远端。
 set -u
-cd /data/TypeServer/bench/shard-cross || exit 1
+cd "$(dirname "$0")" || exit 1
 BIN=./shard_cross
 N=${1:-200}
 

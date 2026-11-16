@@ -7,7 +7,7 @@
 #
 # 为了把 B 单独量出来，先在 /tmp 里把新配置导出好，再用一次 cp 让它"落地"。
 set -u
-cd /data/TypeServer/bench/config-hot || exit 1
+cd "$(dirname "$0")" || exit 1
 TSF=/data/TypeServer/tsf/bin/tsf
 CFG=build/config
 

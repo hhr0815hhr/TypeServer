@@ -4,7 +4,7 @@
 # 为什么不用 kill -9：杀掉的节点会被注册表在 TTL 内摘除，测出来的就只是 TTL。
 # 这里要测的是"注册表看不出问题"的那一半——所以节点 3 必须继续心跳。
 set -u
-cd /data/TypeServer/bench/breaker-live || exit 1
+cd "$(dirname "$0")" || exit 1
 BIN=./breaker_live
 PROBE=${1:-30}
 HEALTHY=${2:-20}

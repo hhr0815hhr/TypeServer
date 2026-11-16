@@ -2,7 +2,7 @@
 # 看服务端内存随连接数怎么涨（判断是否 per-connection 泄漏/缓冲膨胀）
 set -u
 CONNS=${1:-5000}
-cd /data/TypeServer/bench/bot || exit 1
+cd "$(dirname "$0")" || exit 1
 ulimit -n 65535 2>/dev/null
 pkill -9 -x demo_echo 2>/dev/null
 sleep 0.3

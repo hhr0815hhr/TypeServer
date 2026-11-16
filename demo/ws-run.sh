@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 启动 WebSocket 传输的实例并测试，结束后恢复配置
 set -u
-cd /data/TypeServer/demo/demo-echo || exit 1
+cd "$(dirname "$0")" || exit 1
 WSPORT=9010
 
 patch_ws() {

@@ -6,7 +6,7 @@
 #   房间号连续无洞           （只截尾，没丢中间）
 #   没有重复 id              （重放不重复发钱）
 set -u
-cd /data/TypeServer/bench/settle-crash || exit 1
+cd "$(dirname "$0")" || exit 1
 BIN=./settle_crash
 DIR=/tmp/settle_crash
 PASS=0

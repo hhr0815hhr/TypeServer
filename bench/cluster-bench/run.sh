@@ -5,7 +5,7 @@
 # uid 全部重分布——那测的是缩容，不是故障。这里要测的是
 # "节点还在、但不干活"这种情况（热更新卡住、GC 卡死、下游全超时）。
 set -u
-cd /data/TypeServer/bench/cluster-bench || exit 1
+cd "$(dirname "$0")" || exit 1
 BIN=./cluster_bench
 PER=${1:-6000}
 WIN=${2:-32}

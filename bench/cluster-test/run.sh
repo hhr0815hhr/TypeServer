@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 跨进程往返测试：起两个进程（node1 服务端 / node2 客户端），走 UDS
 set -u
-cd /data/TypeServer/bench/cluster-test || exit 1
+cd "$(dirname "$0")" || exit 1
 BIN=./cluster_test
 N=${1:-2000}
 

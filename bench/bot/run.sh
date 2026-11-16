@@ -3,8 +3,7 @@
 #
 # 用法: ./run.sh [conns] [rate_hz] [seconds] [workers]
 set -u
-cd /data/TypeServer/bench/bot || exit 1
-
+cd "$(dirname "$0")" || exit 1
 CONNS=${1:-10000}
 RATE=${2:-10}
 SECS=${3:-10}

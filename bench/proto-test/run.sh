@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # T6-03 回归：proto → PHP → AOT → 跑通，以及"写错了要说清楚"。
 set -u
-cd /data/TypeServer/bench/proto-test || exit 1
+cd "$(dirname "$0")" || exit 1
 TSF=/data/TypeServer/tsf/bin/tsf
 
 echo "=== 1. 生成 + 编译 + 运行 ==="

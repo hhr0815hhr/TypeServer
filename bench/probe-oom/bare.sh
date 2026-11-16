@@ -6,7 +6,7 @@ CONNS=${1:-8500}
 RATE=${2:-1}
 SECS=${3:-8}
 
-cd /data/TypeServer/bench/bot || exit 1
+cd "$(dirname "$0")" || exit 1
 ulimit -n 65535 2>/dev/null
 
 pkill -9 -f "probe-oom/bare.php" 2>/dev/null

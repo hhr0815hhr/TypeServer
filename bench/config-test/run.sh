@@ -5,7 +5,7 @@
 #   1. 校验失败时**一个字节都不写**（不留半成品给运行期捡到）
 #   2. 改数值不需要重新编译（数据在 .bin 里）—— 这条是 T6-02 热更的前提
 set -u
-cd /data/TypeServer/bench/config-test || exit 1
+cd "$(dirname "$0")" || exit 1
 TSF=/data/TypeServer/tsf/bin/tsf
 
 echo "=== 1. 校验失败要中断，且不写产物 ==="

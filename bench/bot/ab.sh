@@ -9,8 +9,7 @@ CONNS=${2:-8500}
 RATE=${3:-1}
 SECS=${4:-10}
 
-cd /data/TypeServer/bench/bot || exit 1
-
+cd "$(dirname "$0")" || exit 1
 for r in $(seq 1 "$ROUNDS"); do
   echo "--- 第 $r 轮 ---"
 

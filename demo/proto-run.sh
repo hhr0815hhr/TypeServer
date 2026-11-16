@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 协议切换验证：同一份二进制，只改 protocol.payload，跑 raw / json 两组
 set -u
-cd /data/TypeServer/demo/demo-echo || exit 1
+cd "$(dirname "$0")" || exit 1
 FAIL=0
 
 patch() {
