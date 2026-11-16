@@ -67,9 +67,12 @@ tools/repo-guard.py  提交前检查：抓「被 .gitignore 误挡的源码」
 spike/               一次性技术验证，只保留结论文档入仓库
 ```
 
-**`demo/` 不在框架本体里**：它是示例（duel 完整对局、demo-echo 最小 echo），
-依赖框架但不属于框架。计划迁出为独立仓库的子模块——`bench/` 不能同样处理，
-因为 `tsf verify` 依赖它。
+**`demo/` 是子模块，不在框架本体里**：示例（duel 完整对局、demo-echo 最小 echo）放在
+[tsf-demo](https://github.com/hhr0815hhr/tsf-demo) 独立仓库，克隆时用
+`git clone --recurse-submodules`，已克隆的仓库补 `git submodule update --init`。
+
+`bench/` 不能同样处理——`tsf verify` 依赖它，拆出去验证就断了。两者的区别是：
+**`bench/` 是回归的一部分，`demo/` 是可以独立演进的产品示例**。
 
 ---
 
