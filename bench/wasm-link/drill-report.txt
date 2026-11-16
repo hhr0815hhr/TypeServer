@@ -1,0 +1,13 @@
+bridge = tsf-wasm/0.2
+1) load v1      add(1,2) = 3  <- 3
+2) canary 50%   ok
+   key 1..20 -> v1=10 v2=10  <- 应各约一半
+3) key=7 twice: 1003 / 1003  <- 必须相同
+   stats: main=11,canary=12,ratio=500
+4) swap v2      5531 us
+   add(1,2) = 1003  <- 1003
+   stats: main=12,canary=12,ratio=0  <- ratio 应归 0
+5) no_such_fn = -2001  <- 负数
+6) rollback v1  3750 us
+   add(1,2) = 3  <- 3（已回滚）
+closed

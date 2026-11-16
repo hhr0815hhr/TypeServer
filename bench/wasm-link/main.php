@@ -55,6 +55,13 @@ function main(): void
     // 5) 只有 v2 才有的行为差异：regression 检查 v1 已不可用
     echo "5) no_such_fn = " . $m->call2("no_such_fn", 0, 0) . "  <- 负数" . PHP_EOL;
 
+    // 6) 回滚：swap 回 v1，行为必须恢复成 3。
+    // 演练里最容易被跳过、也最关键的一步——只验"能更上去"不验"能退回来"，
+    // 等于把出事时的唯一退路留成了未测试状态。
+    $rollbackUs = $m->swap($v1);
+    echo "6) rollback v1  " . $rollbackUs . " us" . PHP_EOL;
+    echo "   add(1,2) = " . $m->call2("add", 1, 2) . "  <- 3（已回滚）" . PHP_EOL;
+
     $m->close();
     echo "closed" . PHP_EOL;
 }
