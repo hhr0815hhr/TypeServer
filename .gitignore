@@ -68,3 +68,7 @@ bench/*/build/**
 # wasm 验收 fixture 的构建产物（源码在版本控制里，产物现编）
 bench/wasm-link/fixtures/*/dist/
 bench/wasm-link/fixtures/*/*.wasm
+
+# spike 是本地技术验证现场（4.4G 构建产物），不入库；
+# 结论性的 SPIKE-*.md 已收到 docs/spike/
+/spike/

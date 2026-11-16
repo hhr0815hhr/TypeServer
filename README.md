@@ -83,17 +83,17 @@ spike/               一次性技术验证，只保留结论文档入仓库
 | 想知道 | 看 | 状态 |
 |:--|:--|:--|
 | 框架怎么用、编码约束 | `tsf/README.md` | 权威，按主题分节 |
-| 每个任务做了什么、验收数字 | `FRAMEWORK-TASK.md` | 权威任务表（M0–M7） |
+| 每个任务做了什么、验收数字 | `docs/FRAMEWORK-TASK.md` | 权威任务表（M0–M7） |
 | 这一版有什么、边界在哪 | `CHANGELOG.md` | 按时间倒序 |
-| 为什么这么分层（含 libhv 取舍） | `ARCHITECTURE-DESIGN.md` | 设计依据 |
-| 房间归属怎么做 | `DESIGN-ROOM-OWNERSHIP.md` | 已实现 |
-| wasm 热更怎么做（含踩的坑） | `DESIGN-WASM-HOTRELOAD.md` | 已实现 |
-| CI 与自托管 runner | `CI-RUNNER.md` | — |
+| 为什么这么分层（含 libhv 取舍） | `docs/ARCHITECTURE-DESIGN.md` | 设计依据 |
+| 房间归属怎么做 | `docs/DESIGN-ROOM-OWNERSHIP.md` | 已实现 |
+| wasm 热更怎么做（含踩的坑） | `docs/DESIGN-WASM-HOTRELOAD.md` | 已实现 |
+| CI 与自托管 runner | `docs/CI-RUNNER.md` | — |
 | 架构审计遗留问题 | `tsf/AUDIT-2026-11-15.md` | — |
 | 编译器补丁与升级须知 | `tpc-patches/README.md` | — |
 
 已移除的三份（`typeGame.md`、`ARCHITECTURE-EVOLUTION.md`、`IMPLEMENTATION-PLAN.md`）：
-它们的结论已并入 `FRAMEWORK-TASK.md`（§六 早期构想修正、§九 架构决策记录），
+它们的结论已并入 `docs/FRAMEWORK-TASK.md`（§六 早期构想修正、§九 架构决策记录），
 原文在 git 历史里可查。
 
 ---

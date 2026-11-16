@@ -102,7 +102,7 @@ canary: calls=3      traps=1 rebuilds=1
 
 | 项 | 原因 |
 |:--|:--|
-| 快照与事件日志（P3） | 需要业务状态结构才能落地；原实施计划已移除，结论见 `../FRAMEWORK-TASK.md` |
+| 快照与事件日志（P3） | 需要业务状态结构才能落地；原实施计划已移除，结论见 `../docs/FRAMEWORK-TASK.md` |
 | 激活/回收（P4） | 依赖 P3 的快照能力 |
 | 按比例灰度分流 | 当前是"全量换句柄"，分流策略需业务定 |
 | 告警接入 | 现在写 `alarms.log` 与 stdout，需接采集器（filebeat/vector → 企微/邮件） |
@@ -131,7 +131,7 @@ canary: calls=3      traps=1 rebuilds=1
 
 | 文档 | 内容 |
 |:--|:--|
-| `../FRAMEWORK-TASK.md` | 权威任务表与架构决策记录（**取代**了原先的 `IMPLEMENTATION-PLAN.md` 与 `ARCHITECTURE-EVOLUTION.md`，那两份已移除，原文在 git 历史里） |
+| `../docs/FRAMEWORK-TASK.md` | 权威任务表与架构决策记录（**取代**了原先的 `IMPLEMENTATION-PLAN.md` 与 `ARCHITECTURE-EVOLUTION.md`，那两份已移除，原文在 git 历史里） |
 | `../spike/s1/SPIKE-S1.md`、`SPIKE-S3.md` | wasm 可行性与资源治理的原始实验 |
 | `../spike/s2/SPIKE-S2.md` | 嵌进进程的成本（体积/加载/内存/符号） |
 | `../spike/s4/SPIKE-S4.md` | 房间独立进程与崩溃半径 |

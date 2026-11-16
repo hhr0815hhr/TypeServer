@@ -46,7 +46,7 @@ v0.6.0 的账本只有"发奖"一个方向，现在补上出账与核对。三�
 
 ### 文档：房间归属设计稿
 
-`DESIGN-ROOM-OWNERSHIP.md`。核心结论：**不需要发明新层**——`Addr` 已有 node 位、
+`docs/DESIGN-ROOM-OWNERSHIP.md`。核心结论：**不需要发明新层**——`Addr` 已有 node 位、
 `Cluster` 已按 node 连通、`Ring`/`Router` 已能定位节点，缺的是三个动作：
 
 1. **认领**：启动时 `ring->nodeFor("room:" . $rid)` 只恢复归自己的快照
@@ -226,9 +226,9 @@ clang 与 wasmtime 版本。发布时校校验和，能挡住"发了个旧包"�
 
 先确认了现状：**这台机器上还没有 runner**（无 `actions-runner` 目录、无 `Runner.Listener`
 进程）。所以现在手动触发 CI，`verify` job 会一直停在 "Waiting for a runner..."——
-这是预期行为，已写进 `CI-RUNNER.md`，否则会被当成配置错误排查很久。
+这是预期行为，已写进 `docs/CI-RUNNER.md`，否则会被当成配置错误排查很久。
 
-**`CI-RUNNER.md`** 给出 WSL 里的完整注册步骤（WSL 有 systemd，可以 `svc.sh install`
+**`docs/CI-RUNNER.md`** 给出 WSL 里的完整注册步骤（WSL 有 systemd，可以 `svc.sh install`
 装成服务，关机重启自动恢复），以及两个具体的坑：
 
 1. **runner 服务的 PATH 和你 shell 的不一样**，尤其不含 `~/.cargo/bin` 与
@@ -451,7 +451,7 @@ settle-crash 14 项、fd 10 项、cluster 11 项、drain 8 项、rejoin 6 项、
 
 ### 文档：wasm 热更（M7 / T7-01）设计稿
 
-`DESIGN-WASM-HOTRELOAD.md`。M7 是任务表里唯一未做的大项，先确认前提再谈方案：
+`docs/DESIGN-WASM-HOTRELOAD.md`。M7 是任务表里唯一未做的大项，先确认前提再谈方案：
 
 - **前提成立**：`spike/e1` 已端到端打通（PHP→stub→wasm 782 ns/次，与 Rust 宿主直调同量级；
   重建实例 3.6 ms；灰度 swap 4.4–5.5 ms）。**性能不是障碍**。
@@ -607,7 +607,7 @@ PASS 杀 node 1 后 node 0 不受影响
 ## v0.6.0 — 2026-11-16（首次封版）
 
 首个可交付版本。对应里程碑 M0–M6 全部交付，M7（wasm 热更）未做。
-细节与验收依据见 `FRAMEWORK-TASK.md`；框架原理与实测过程见 `tsf/README.md`。
+细节与验收依据见 `docs/FRAMEWORK-TASK.md`；框架原理与实测过程见 `tsf/README.md`。
 
 ### 交付内容
 

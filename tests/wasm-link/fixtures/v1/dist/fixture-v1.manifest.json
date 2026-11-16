@@ -5,7 +5,7 @@
     "cwasm": "fixture-v1.cwasm",
     "cwasm_sha256": "2f1b8f64c1253293c48c93d8657946d3d0dd437ebd276140258270f287d7666d",
     "cwasm_bytes": 54147120,
-    "built_at": "2026-11-16T17:04:18+08:00",
+    "built_at": "2026-11-16T17:32:16+08:00",
     "toolchain": {
         "clang": "clang version 23.1.0-wasi-sdk (https://github.com/llvm/llvm-project 895aa2c896ada719451be2e3673c83da8ddf1141)",
         "wasmtime": "wasmtime 47.0.4 (254cb7a02 2026-08-20)"
