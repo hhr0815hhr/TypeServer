@@ -1,0 +1,59 @@
+# ---------------------------------------------------------------------------
+# 这个仓库只收源码、文档、配置和脚本。
+#
+# 用「白名单」而不是「黑名单」：先排除一切，再按扩展名放行。
+# 好处是新增一类构建产物（.o / .rlib / .wasm / 无扩展名二进制）默认就被挡住，
+# 不需要每次有人加了新工具链就回来补一条规则。
+#
+# 背景：整理前整个目录 3.8G，其中源码+文档只有 1.6M，其余全是产物
+# （Rust target 2.8G、静态库 445M、可执行文件 407M、.wasm/.cwasm 171M、.so 158M）。
+# ---------------------------------------------------------------------------
+*
+!*/
+
+# ---- 源码、文档、配置 ----
+!*.php
+!*.md
+!*.sh
+!*.sql
+!*.json
+!*.yml
+!*.yaml
+!*.c
+!*.h
+!*.rs
+!*.toml
+!*.txt
+!.gitignore
+!.gitkeep
+
+# 无扩展名的脚本：只有这一个，漏了就整个 CLI 都没了
+!tsf/bin/tsf
+
+# ---- 依赖（composer install 可还原，不入库）----
+tsf/vendor/**
+
+# ---- 会话数据（WorkBuddy 的工作记忆，属于本机状态）----
+.workbuddy/**
+
+# ---- 一次性技术验证：只留结论文档 ----
+# spike/s1 的 Rust target 和 .wasm/.cwasm、spike/s2 的静态链接产物加起来 3.6G。
+# 结论都在 SPIKE-*.md 里；源码留在磁盘上，不入库。
+/spike/**
+!/spike/*/
+!/spike/*/SPIKE-*.md
+
+# ---- 生成物 ----
+# project.yml 由 `tsf build` 从 project.json 生成，不入库。
+# 例外：demo-echo / demo-echo-nts 没有 project.json，它们的 yml 是唯一配置源。
+/demo/duel/project.yml
+/bench/*/project.yml
+
+# ---- 预编译库 ----
+# implementation-kit/build.sh 会用 cargo 现编（约 5 分钟），或由 TP_HOST_SO 指定。
+implementation-kit/lib/**
+
+# ---- 运行期数据 ----
+demo/*/var/**
+bench/*/var/**
+bench/*/build/**

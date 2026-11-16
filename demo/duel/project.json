@@ -1,0 +1,11 @@
+{
+    "name": "duel",
+    "packages": [
+        "room",
+        "match",
+        "db",
+        "entity",
+        "snapshot",
+        "eventlog"
+    ]
+}

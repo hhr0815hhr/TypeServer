@@ -1,0 +1,4 @@
+{
+  "name": "snapshot-test",
+  "packages": ["snapshot", "room", "entity"]
+}

@@ -1,0 +1,7 @@
+name: s1-probe-v2
+wasm: component
+wasm-mode: library
+wasm-package: typephp:s1-probe@1.0.0
+wasm-world: s1-probe
+sources:
+  - lib.php

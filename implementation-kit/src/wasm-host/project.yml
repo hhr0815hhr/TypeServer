@@ -1,0 +1,14 @@
+name: e1-stub
+version: 0.1.0
+cxx-std: c++17
+cxx-flags: |
+  -O2
+ld-flags: |
+  -L/data/TypeServer/spike/s2/host-capi/target/release
+  -Wl,--no-as-needed
+  -ltp_host
+  -Wl,-rpath,/data/TypeServer/spike/s2/host-capi/target/release
+sources:
+  - php-src
+  - cpp-src
+  - main.php

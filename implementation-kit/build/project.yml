@@ -1,0 +1,14 @@
+name: kit-demo
+version: 0.1.0
+cxx-std: c++17
+cxx-flags: |
+  -O2
+ld-flags: |
+  -L/data/TypeServer/implementation-kit/lib
+  -Wl,--no-as-needed
+  -ltp_host
+  -Wl,-rpath,/data/TypeServer/implementation-kit/lib
+sources:
+  - /data/TypeServer/implementation-kit/src/wasm-host/php-src
+  - /data/TypeServer/implementation-kit/src/wasm-host/cpp-src
+  - /data/TypeServer/implementation-kit/src/wasm-host/main.php

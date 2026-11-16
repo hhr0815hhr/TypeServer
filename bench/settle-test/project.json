@@ -1,0 +1,9 @@
+{
+    "name": "settle-test",
+    "packages": [
+        "eventlog"
+    ],
+    "sources": [
+        "../../demo/duel/src"
+    ]
+}

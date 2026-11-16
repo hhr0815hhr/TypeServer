@@ -1,0 +1,9 @@
+{
+    "name": "settle-crash",
+    "packages": [
+        "eventlog"
+    ],
+    "sources": [
+        "../../demo/duel/src"
+    ]
+}

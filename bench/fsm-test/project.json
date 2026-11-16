@@ -1,0 +1,4 @@
+{
+  "name": "fsm-test",
+  "packages": ["fsm"]
+}

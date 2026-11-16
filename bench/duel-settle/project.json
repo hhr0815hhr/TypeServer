@@ -1,0 +1,14 @@
+{
+    "name": "duel-settle",
+    "packages": [
+        "eventlog",
+        "room",
+        "entity",
+        "db",
+        "snapshot",
+        "frameloop"
+    ],
+    "sources": [
+        "../../demo/duel/src"
+    ]
+}
