@@ -1,0 +1,4 @@
+name: probe-queue
+sources:
+  - src
+  - main.php

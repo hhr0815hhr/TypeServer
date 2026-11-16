@@ -1,0 +1,18 @@
+name: wasm-link
+version: 0.1.0
+cxx-std: c++17
+cxx-flags: |
+  -O2
+sources:
+  - /data/TypeServer/tsf/src
+  - /data/TypeServer/tsf/ext/codec/php-src
+  - /data/TypeServer/tsf/ext/codec/cpp-src
+  - /data/TypeServer/tsf/pkg/wasm/src
+  - /data/TypeServer/tsf/pkg/wasm/php-src
+  - /data/TypeServer/tsf/pkg/wasm/cpp-src
+  - /data/TypeServer/tests/wasm-link/main.php
+ld-flags: |
+  -L/data/TypeServer/spike/s2/host-capi/target/release
+  -Wl,--no-as-needed
+  -ltp_host
+  -Wl,-rpath,/data/TypeServer/spike/s2/host-capi/target/release

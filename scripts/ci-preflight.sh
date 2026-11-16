@@ -60,10 +60,22 @@ else
     echo "         export PATH=\"\$HOME/.cargo/bin:\$PATH\""
 fi
 
-if [ -x /data/TypeServer/spike/s2/host-capi/target/release/tp-precompile ]; then
-    ok "tp-precompile" "libtp_host 构建产物就位"
+# tp-precompile 是宿主的 Rust 构建产物，不可能入库，所以按三级查找：
+# 显式 env > PATH > 仓库内 host 的构建目录。原来只认最后一条硬编码路径，
+# 换机器或换目录就误报"未构建"。
+PRE=${TSF_PRECOMPILE:-}
+if [ -z "$PRE" ]; then
+    PRE=$(command -v tp-precompile 2>/dev/null || true)
+fi
+if [ -z "$PRE" ]; then
+    CANDIDATE="$(cd "$(dirname "$0")/.." && pwd)/spike/s2/host-capi/target/release/tp-precompile"
+    [ -x "$CANDIDATE" ] && PRE=$CANDIDATE
+fi
+if [ -n "$PRE" ]; then
+    ok "tp-precompile" "$PRE"
 else
-    warn "tp-precompile" "未构建（wasm 套件的预编译会失败）"
+    warn "tp-precompile" "未找到（wasm 套件会失败）"
+    echo "         先 cd spike/s2/host-capi && cargo build --release，或设 TSF_PRECOMPILE"
 fi
 
 echo

@@ -271,6 +271,35 @@ clang 与 wasmtime 版本。发布时校校验和，能挡住"发了个旧包"�
 `~/.cargo/bin`，且 `verify` 支持 `needs` 字段——缺工具链时 **SKIP** 而不是 FAIL，
 不让一个环境问题把整套判成失败。
 
+### wasm 验证套件改自包含：fixture 从源码现编，不再依赖 spike 产物
+
+`bench/wasm-link` 原来直接引用 `spike/s1`、`spike/e1` 的 cwasm，而 spike 是本地验证
+现场、产物不入库——**干净克隆的仓库跑不了这个套件，CI 更跑不了**。验证集依赖考古现场，
+这条依赖链的方向是反的。
+
+现在 `fixtures/v1|v2/` 各有一份源码（`add` 分别是 `a+b` 与 `a+b+1000`，靠返回值分辨
+世代），`fixtures/build.sh` 用 `tsf module build` 现编；`dist/` 与 `*.wasm` 已 gitignore。
+验收仍是 6 项全 PASS（swap 5669 µs / 回滚 4316 µs）。
+
+**路上踩了 4 个环境坑，全记在 build.sh 注释里**：
+
+| 报错 | 真因 |
+|:--|:--|
+| `wasm32-wasip2-clang++ not found` | tpc 的 C++ 模式会检查，之前只建了 C 版 wrapper |
+| `llvm-ar not found` | 只给 wrapper 不够，**SDK 的 bin 必须整套在 PATH** |
+| `reported target: wasip1` | wrapper 必须显式 `--target=wasm32-wasip2`；**文件名改不了 clang 的默认 target** |
+| `platform_check.php` 抛错 | PATH 里的 `php` 是 8.3，要加 `/usr/local/php-8.5-zts/bin` |
+
+最后一条最坑：报错来自 Composer 平台检查，看起来像"依赖没装"，与"跑 tpc 的解释器
+版本不对"毫无关系。
+
+**顺带**：`wasi-sdk-34` 从 `/tmp` 迁到 `~/.local/wasi-sdk-34`（`/tmp` 会被清），
+两个 wrapper 同步改路径。
+
+**没能消除的依赖**：`tp-precompile` 仍是环境依赖——它是 host 的 Rust 构建产物，且
+**不能换成 `wasmtime compile`**（fuel/epoch 是编译期插桩，产物带 fingerprint，配置
+不一致宿主直接拒绝启动）。`build.sh` 做了三级查找并给出构建指引。
+
 ### AOI 按格批量：密集场景 166×，稀疏场景反而略慢
 
 上一轮基准的结论是"容器层没得优化，该往算法层走"。落地了 `Grid::neighborsShared()`：

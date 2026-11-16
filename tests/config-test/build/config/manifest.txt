@@ -1,0 +1,3 @@
+# tsf config manifest v1
+item.bin 450 1865766726
+monster.bin 230 4198351356

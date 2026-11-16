@@ -1,0 +1,13 @@
+name: room-test
+version: 0.1.0
+cxx-std: c++17
+cxx-flags: |
+  -O2
+sources:
+  - /data/TypeServer/tsf/src
+  - /data/TypeServer/tsf/ext/codec/php-src
+  - /data/TypeServer/tsf/ext/codec/cpp-src
+  - /data/TypeServer/tsf/pkg/room/src
+  - /data/TypeServer/tsf/pkg/fsm/src
+  - /data/TypeServer/tsf/pkg/frameloop/src
+  - /data/TypeServer/bench/room-test/main.php

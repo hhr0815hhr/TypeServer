@@ -1,0 +1,4 @@
+name: probe-types
+sources:
+  - src
+  - main.php

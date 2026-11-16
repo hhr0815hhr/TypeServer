@@ -1,0 +1,14 @@
+name: probe-dbal
+version: 0.1.0
+cxx-std: c++17
+cxx-flags: |
+  -O2
+sources:
+  - vendor
+  - main.php
+ignore:
+  # composer 生成的入口脚本顶层有 if 语句，而 AOT 的全局作用域
+  # 只允许声明/use/常量——这类"纯引导脚本"必须排除。
+  # 类本身都在 vendor/<pkg>/src 下，不影响编译。
+  - vendor/autoload.php
+  - vendor/composer

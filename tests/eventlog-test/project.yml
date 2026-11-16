@@ -1,0 +1,11 @@
+name: eventlog-test
+version: 0.1.0
+cxx-std: c++17
+cxx-flags: |
+  -O2
+sources:
+  - /data/TypeServer/tsf/src
+  - /data/TypeServer/tsf/ext/codec/php-src
+  - /data/TypeServer/tsf/ext/codec/cpp-src
+  - /data/TypeServer/tsf/pkg/eventlog/src
+  - /data/TypeServer/bench/eventlog-test/main.php
