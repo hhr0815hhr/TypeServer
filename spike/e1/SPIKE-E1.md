@@ -133,7 +133,7 @@ ld-flags: |
 cd /data/TypeServer/spike/e1
 
 export PATH=/usr/local/php-8.5-zts/bin:$PATH
-php85 /home/hhr/typephp-src/bin/tpc.php project.yml
+php85 $HOME/typephp-src/bin/tpc.php project.yml
 
 ./e1_stub
 ```

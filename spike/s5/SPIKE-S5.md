@@ -123,8 +123,8 @@ cd /data/TypeServer/spike/s5
 
 # 编译（小房间 60 房 / 大房间 20 房 × 200 人）
 export PATH=/usr/local/php-8.5-zts/bin:$PATH
-(cd roomsvc && php85 /home/hhr/typephp-src/bin/tpc.php project.yml)
-(cd roomsvc_big && php85 /home/hhr/typephp-src/bin/tpc.php project.yml)
+(cd roomsvc && php85 $HOME/typephp-src/bin/tpc.php project.yml)
+(cd roomsvc_big && php85 $HOME/typephp-src/bin/tpc.php project.yml)
 
 ./test.sh          # 单次 kill：时延 + 冷哈希 + 连带检查
 ./test2.sh         # 连续 5 次 kill：分布

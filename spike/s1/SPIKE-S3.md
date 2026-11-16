@@ -223,8 +223,8 @@ trap 分类处理：
 cd /data/TypeServer/spike/s1
 
 # 1) 编译探针组件（含 add / greet / simulateFrame / spin / forever / freshProbe）
-export PATH=/home/hhr/.tools/wasi-sdk-33.0-x86_64-linux/bin:/home/hhr/.tools/wasmtime-v47.0.0-x86_64-linux:$PATH
-php85 /home/hhr/typephp-src/bin/tpc.php project.yml --wasm
+export PATH=$HOME/.tools/wasi-sdk-33.0-x86_64-linux/bin:$HOME/.tools/wasmtime-v47.0.0-x86_64-linux:$PATH
+php85 $HOME/typephp-src/bin/tpc.php project.yml --wasm
 
 # 2) epoch 打断超长计算（心跳 1ms）
 ./host-rs/target/release/s1-host epoch s1-probe.wasm spin 1 1 2000000000

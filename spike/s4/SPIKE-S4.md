@@ -145,7 +145,7 @@ cd /data/TypeServer/spike/s4
 
 # 1) 编译房间池（进程模式）
 export PATH=/usr/local/php-8.5-zts/bin:$PATH
-php85 /home/hhr/typephp-src/bin/tpc.php project.yml
+php85 $HOME/typephp-src/bin/tpc.php project.yml
 
 # 2) 杀房间 → 观察隔离与恢复耗时
 ./test.sh
@@ -154,7 +154,7 @@ php85 /home/hhr/typephp-src/bin/tpc.php project.yml
 ./test2.sh
 
 # 4) 协程模式对照（内存 + 抢占缺陷）
-cd coro && php85 /home/hhr/typephp-src/bin/tpc.php project.yml && cd ..
+cd coro && php85 $HOME/typephp-src/bin/tpc.php project.yml && cd ..
 ./test3.sh
 ```
 

@@ -1,7 +1,7 @@
 # Spike S1 —— WASM 能否作为「可热替换模块」被宿主加载并调用
 
 > 执行时间：2026-11-11（本轮为端到端实测，取代同日早间的源码推断版）
-> 执行环境：WSL2 Ubuntu 22.04 / PHP 8.5.12 ZTS / tpc v0.9.6（`/home/hhr/typephp-src`）/ 宿主 Rust + wasmtime 47.0.4
+> 执行环境：WSL2 Ubuntu 22.04 / PHP 8.5.12 ZTS / tpc v0.9.6（`$HOME/typephp-src`）/ 宿主 Rust + wasmtime 47.0.4
 > **结论一句话：全链路跑通。单次跨边界调用 0.74–0.79 µs，边界成本约 0.75 µs，远低于 5 µs 判定线——E1 可进 tick 热路径。**
 
 ---
@@ -172,16 +172,16 @@ function add(int $a, int $b): int { return $a + $b; }
 
 ```bash
 # 1) 构建 SDK（7 分 45 秒，4 核）
-export PATH=/home/hhr/.tools/wasi-sdk-33.0-x86_64-linux/bin:$PATH
+export PATH=$HOME/.tools/wasi-sdk-33.0-x86_64-linux/bin:$PATH
 cd /data/TypeServer/spike/s1
 env -u http_proxy -u https_proxy \
-  /home/hhr/typephp-src/wasm/build-sdk.sh \
-  --prefix /home/hhr/wasip2-sdk \
+  $HOME/typephp-src/wasm/build-sdk.sh \
+  --prefix $HOME/wasip2-sdk \
   --php-source /tmp/php-wasm \
-  --phpx-source /home/hhr/typephp-src/vendor/swoole/phpx --jobs 4
+  --phpx-source $HOME/typephp-src/vendor/swoole/phpx --jobs 4
 
 # 2) 编译 component（产出 23.8 MB）
-php85 /home/hhr/typephp-src/bin/tpc.php project.yml --wasm
+php85 $HOME/typephp-src/bin/tpc.php project.yml --wasm
 
 # 3) 宿主测量
 ./host-rs/target/release/s1-host s1-probe.wasm 200000 2

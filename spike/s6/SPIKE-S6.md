@@ -126,9 +126,9 @@ cd /data/TypeServer/spike/s6
 
 # 编译
 export PATH=/usr/local/php-8.5-zts/bin:$PATH
-(cd server && php85 /home/hhr/typephp-src/bin/tpc.php project.yml)
-(cd server_obj && php85 /home/hhr/typephp-src/bin/tpc.php project.yml)
-(cd server_plain && php85 /home/hhr/typephp-src/bin/tpc.php project.yml)
+(cd server && php85 $HOME/typephp-src/bin/tpc.php project.yml)
+(cd server_obj && php85 $HOME/typephp-src/bin/tpc.php project.yml)
+(cd server_plain && php85 $HOME/typephp-src/bin/tpc.php project.yml)
 gcc -O2 load.c -o load && gcc -O2 echo_c.c -o echo_c
 
 # 逐级加压（RSS + CPU 轨迹）

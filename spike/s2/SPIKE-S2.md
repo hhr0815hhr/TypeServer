@@ -138,7 +138,7 @@ UDS socketpair 往返 (24 字节): 41.352 us/call
 cd /data/TypeServer/spike/s2
 
 # 1) 编译 C ABI 库（约 5 分钟）
-export PATH=/home/hhr/.cargo/bin:$PATH
+export PATH=$HOME/.cargo/bin:$PATH
 cd host-capi && cargo build --release && cd ..
 
 # 2) 动态加载 + 全量基准

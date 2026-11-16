@@ -143,7 +143,7 @@ small0: 97839 -> 98534
 ```bash
 cd /data/TypeServer/spike/e4
 export PATH=/usr/local/php-8.5-zts/bin:$PATH
-php85 /home/hhr/typephp-src/bin/tpc.php project.yml
+php85 $HOME/typephp-src/bin/tpc.php project.yml
 ./test.sh
 ```
 

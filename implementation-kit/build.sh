@@ -59,7 +59,7 @@ YML
 echo "== 编译示例 =="
 export PATH="/usr/local/php-8.5-zts/bin:$PATH"
 cd "$KIT/build"
-php85 /home/hhr/typephp-src/bin/tpc.php project.yml
+php85 $HOME/typephp-src/bin/tpc.php project.yml
 
 if [ -x "$KIT/build/kit_demo" ]; then
   echo "OK: $KIT/build/kit_demo"

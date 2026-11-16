@@ -152,10 +152,10 @@ php85 ../frame-test.php 9001
 
 ```bash
 cd /data/TypeServer/bench/proto        # 分帧 + 消息体各实现的单次成本
-php85 /home/hhr/typephp-src/bin/tpc.php project.yml && ./proto_bench
+php85 $HOME/typephp-src/bin/tpc.php project.yml && ./proto_bench
 
 cd /data/TypeServer/bench/dispatch     # 具体类型 / 接口 / 闭包 的分派成本
-php85 /home/hhr/typephp-src/bin/tpc.php project.yml && ./dispatch_bench
+php85 $HOME/typephp-src/bin/tpc.php project.yml && ./dispatch_bench
 ```
 
 > 早期那批手写 A/B 脚本（`codec_alt.sh`、`ab_codec.sh`、`srv-native/`、`codec-cpp/`）

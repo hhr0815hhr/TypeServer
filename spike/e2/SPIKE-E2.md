@@ -145,7 +145,7 @@ kill 前 5000 行，kill 后 5000 行
 ```bash
 cd /data/TypeServer/spike/e2
 export PATH=/usr/local/php-8.5-zts/bin:$PATH
-php85 /home/hhr/typephp-src/bin/tpc.php project.yml
+php85 $HOME/typephp-src/bin/tpc.php project.yml
 
 ./test.sh                       # 零丢失 + 幂等 + 吞吐 + kill -9 完整性
 MODE=gen N=20000 SNAP_AT=0 ./e2_evlog && MODE=replay-all ./e2_evlog   # 全量重放速率
