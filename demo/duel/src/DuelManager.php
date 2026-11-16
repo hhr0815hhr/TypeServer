@@ -99,7 +99,23 @@ final class DuelManager
         }
 
         $roomId = $this->nextRoomId;
-        $this->nextRoomId++;
+
+        // 先校验、后推进。顺序反了会出大问题：段末耗尽时 compose 返回 0，
+        // 如果用 0 去"推进"，`RoomIds::seq(0)+1 = 1` 会把号**重置回 1**——
+        // 那就是房间号复用，`duel:1` 被结算过之后新一局的钱静默不发。
+        // 宁可让这一局建不出来（返回 0），也不能把号绕回去。
+        if ($roomId <= 0 || RoomIds::node($roomId) !== $this->nodeId) {
+            Logger::error("房间号不在本节点号段内（或本段已用尽），拒绝建房", [
+                "room" => $roomId,
+                "label" => RoomIds::label($roomId),
+                "node" => $this->nodeId,
+            ]);
+            return 0;
+        }
+
+        // 用 compose 推进而不是 `++`：直接加一会在段末溢出到**下一个节点的号段**
+        // （node 0 的 999999999 加一 = 1e9，那是 node 1 的号）
+        $this->nextRoomId = RoomIds::compose($this->nodeId, RoomIds::seq($roomId) + 1);
 
         $pub = $this->publish;
         $mgr = $this;
@@ -155,6 +171,14 @@ final class DuelManager
         // 收集到本地数组再统一登记更稳
         $spawned = [];
 
+        // 认领过滤：**只恢复本节点号段里的房间**。
+        //
+        // 归属的判断就是房间号本身（`RoomId = node*1e9 + seq`），不需要再查环——
+        // 号段已经把归属编码进去了，任何进程拿到号都能算出来，且不会算错。
+        // 这一点是本设计与"一致性哈希算归属"的关键差别：分段号让"归属"变成
+        // 房间号的属性，而不是一张需要同步的映射表。
+        $node = $this->nodeId;
+
         $restorer = new Restorer(50, 200);
         $stat = $restorer->restore(
             $store,
@@ -178,6 +202,12 @@ final class DuelManager
 
                 $spawned[] = ["room" => $rid, "addr" => $addr, "uids" => $duel->room()->uids()];
                 return true;
+            },
+            true,
+            // 不是我的房间：跳过，**且不删**（Restorer 里 accept 在 get() 之前，
+            // 不会走到任何 delete 分支）
+            function (int $rid) use ($node): bool {
+                return RoomIds::node($rid) === $node;
             }
         );
 

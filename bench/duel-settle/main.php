@@ -16,6 +16,8 @@ use Duel\DuelService;
 use Duel\Settle;
 use TSF\EventLog\EventLog;
 use TSF\Service\Message;
+use TSF\Snapshot\FileStore;
+use TSF\Snapshot\Snapshot;
 use TSF\Room\RoomIds;
 use TSF\Service\Scheduler;
 
@@ -217,6 +219,8 @@ function caseSegmentIds(): void
     T::eq(RoomIds::seq(1000000007), 7, "反解段内序号");
     T::eq(RoomIds::nextSeq(1, [1, 2, 3, 1000000005]), 6, "只在本段内取最大");
     T::eq(RoomIds::compose(256, 1), 0, "越界节点返回 0");
+    T::eq(RoomIds::compose(0, 1000000000), 0, "段末溢出返回 0（建房会拒绝，不会绕回 1）");
+    T::eq(RoomIds::compose(1, 0), 0, "序号 0 非法（0 号房是保留值）");
     // 用 ok 而不是 eq：T::eq 的第一个参数在前面几次调用里已经定型成 int，
     // AOT 按**首次调用**定型后，这里再传 string 会报
     // "Cannot re-assign variable from php::Str to php::Int"
@@ -242,6 +246,58 @@ function caseSegmentIds(): void
     $log2->close();
 }
 
+
+/**
+ * 认领：只恢复本节点号段里的房间，**且绝不删别人的快照**。
+ *
+ * 这里用两个"重建必失败"的快照来区分两种跳过：自己的坏了该删（下次启动别再卡），
+ * 别人的连读都不该读、更不能删。若把归属过滤错做成 rebuild 返回 false，
+ * 下面那句"别人的快照没被删"就会红——那正是多节点下最贵的一种 bug（玩家回不来且不报错）。
+ */
+function caseClaimBySegment(): void
+{
+    echo "== [7] 认领：按号段过滤，且不删别人的快照 ==" . PHP_EOL;
+
+    $logPath = freshLog("claim");
+    $dir = dirname($logPath) . "/snap";
+    @mkdir($dir, 0777, true);
+    $files = glob($dir . "/*");
+    if (is_array($files)) {
+        foreach ($files as $f) {
+            @unlink($f);
+        }
+    }
+    $store = new FileStore($dir);
+
+    $a = new Snapshot("duel", 1);
+    $a->put("duel", []);
+    $store->put($a);
+    $b = new Snapshot("duel", 1000000001);
+    $b->put("duel", []);
+    $store->put($b);
+    T::eq(count($store->keys("duel")), 2, "先放了两个快照");
+
+    Scheduler::reset();
+    $own0 = new DuelManager(null, null, $store, null, 0);
+    $stat = $own0->restoreAll($store);
+
+    T::eq($stat["not_mine"], 1, "node 1 的那个不算我的");
+    T::eq($stat["skipped"], 1, "我的那个解不出来，跳过");
+    T::eq($stat["done"], 0, "没有恢复成功");
+
+    $left = $store->keys("duel");
+    T::ok(in_array(1000000001, $left), "**别人的快照没被删**");
+    T::ok(!in_array(1, $left), "自己的坏快照被删掉（下次启动不再卡）");
+
+    // 换 node 1 来认领：它能看到自己的那个（坏的），不会碰到别人的
+    Scheduler::reset();
+    $own1 = new DuelManager(null, null, $store, null, 1);
+    $stat1 = $own1->restoreAll($store);
+    T::eq($stat1["not_mine"], 0, "node 1 眼里没有别人的快照");
+    T::eq($stat1["skipped"], 1, "它自己那个也解不出来");
+    T::eq(count($store->keys("duel")), 0, "两边各自清掉自己的坏快照");
+}
+
 function main(): void
 {
     @mkdir(DIR, 0777, true);
@@ -251,6 +307,7 @@ function main(): void
     caseRestartAfterWiring();
     caseNoRoomIdReuse();
     caseSegmentIds();
+    caseClaimBySegment();
 
     echo PHP_EOL . "结果: " . T::$pass . " 通过 / " . T::$fail . " 失败" . PHP_EOL;
     exit(T::$fail === 0 ? 0 : 1);

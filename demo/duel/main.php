@@ -151,8 +151,38 @@ function main(): void
             . "要支持多 worker 得先设计「房间归属」（谁负责哪些房间、重启后怎么认领、跨 worker 怎么路由）。"
         );
     }
-    $settlePath = Config::getString("settle.path", $base . "/var/settle.log");
-    $settle = new Settle(new EventLog($settlePath));
+    // ---- 事件日志：每个节点一个文件，读侧收全部 ----
+    //
+    // 写：只写自己的 `settle.n<id>.log`。房间归属保证同一个房间只由一个节点写，
+    //     所以不需要多写者协调（这也是"全局序不是需求"的根据）。
+    // 读：扫 var/ 下所有 `settle*.log`（含历史的单文件 `settle.log`）归并。
+    //
+    // 老文件不迁移：`settle.log` 继续被读，新写入进分段文件。
+    // 好处是升级不需要停机搬数据，坏处是同一个逻辑日志会横跨两代文件——
+    // 归并按 (t, 文件序号, s) 排序，跨代的顺序仍然确定。
+    $nodeId = Config::getInt("server.node_id", 0);
+    $settlePath = Config::getString(
+        "settle.path",
+        $base . "/var/settle.n" . $nodeId . ".log"
+    );
+
+    $varDir = $base . "/var";
+    $readerLogs = [];
+    $names = @scandir($varDir);
+    if (is_array($names)) {
+        sort($names);   // 稳定顺序：MergedLog 靠"文件序号"打破同 t 的平手
+        foreach ($names as $name) {
+            $name = (string) $name;
+            if (str_starts_with($name, "settle") && str_ends_with($name, ".log")) {
+                $readerLogs[] = new EventLog($varDir . "/" . $name);
+            }
+        }
+    }
+    $ownLog = new EventLog($settlePath);
+    if ($readerLogs === []) {
+        $readerLogs = [$ownLog];
+    }
+    $settle = new Settle($ownLog, null, $readerLogs);
 
     // ---- 运维命令：钱的入口 ----
     // 和 migrate 一样，跑完就退出、不起服务。
@@ -168,9 +198,8 @@ function main(): void
         exit(runWalletCheck($settle));
     }
 
-    // 节点号：房间号按它分段编址（`RoomIds`）。单机保持 0，号还是 1,2,3……
-    // 多进程时每个进程配不同的 node_id，各自的号段互不重叠。
-    $nodeId = Config::getInt("server.node_id", 0);
+    // 节点号在 settle 构造之前就算好了（日志文件按它命名，见上）。
+    // 多进程时每个进程配不同的 node_id：号段互不重叠，日志文件也各自独立。
     $duels = new DuelManager($publish, $records, $snaps, $settle, $nodeId);
 
     // ---- 迁移：启动只校验，不建表 ----
