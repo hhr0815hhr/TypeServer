@@ -9,7 +9,7 @@
 /demo-echo-nts/var/
 
 # project.yml 是 tsf build 的产物（sources 写的是绝对路径，换机器必失效）。
-# 例外：demo-echo / demo-echo-nts 没有 project.json，它们的 yml 是手写维护的唯一配置源。
+# 三个示例现在都有 project.json，yml 全部是 tsf build 的生成物。
 /duel/project.yml
 /demo-echo/project.yml
 /demo-echo-nts/project.yml
