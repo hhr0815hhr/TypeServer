@@ -24,6 +24,7 @@
 !*.rs
 !*.toml
 !*.txt
+!*.lock
 !.gitignore
 !.gitkeep
 
@@ -41,7 +42,7 @@ tsf/vendor/**
 # 结论都在 SPIKE-*.md 里；源码留在磁盘上，不入库。
 /spike/**
 !/spike/*/
-!/spike/*/SPIKE-*.md
+!/spike/*/*.md
 
 # ---- 生成物 ----
 # project.yml 由 `tsf build` 从 project.json 生成，不入库。
