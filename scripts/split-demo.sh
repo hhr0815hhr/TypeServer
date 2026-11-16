@@ -47,7 +47,9 @@ demo 是用框架写的示例，不是框架本体的一部分。放在同一个
 （前者是 tsf verify 依赖的验证集，后者是可以独立演进的产品示例）。
 
 用 git subtree split 保留历史；克隆时记得 git clone --recurse-submodules。"
-sed -i 's|^demo/.*|demo/|' .gitignore 2>/dev/null || true
+# 注意：**不要**改 .gitignore 里的 demo 规则。现有规则是精确的
+# （/demo/duel/project.yml、demo/*/var/**），而 submodule 走的是 gitlink，
+# 本来就不受 ignore 影响。改成 `demo/` 只会冲掉那两条精确规则。
 
 echo
 echo "完成。后续克隆："
