@@ -169,6 +169,33 @@ PHP 源码（#[\WasmExport] function mul）
 **方法论**：跨大版本的第三方 API 只能查源码/文档。凭记忆写 `ComponentItem` 的旧路径，
 换来一轮 1.5–2.5 分钟的编译加回滚；查一次源码就拿到准确签名。
 
+### T7-02 发布流水线：`tsf module build` 一条命令
+
+原来产出可发布模块要敲四步（tpc 编 wasm、`tp-precompile` 预编译、拷到目标路径、
+设 `TP_METHODS` 重启）。漏一步的现象都很隐蔽，最坑的是拿 `wasmtime` CLI 代替
+`tp-precompile`——所有模块句柄变 `-1000`，看起来像"升级把一切都搞坏了"。
+
+现在：
+
+```
+tsf module build <模块目录>
+1/3 编译 wasm component
+2/3 预编译（tp-precompile）
+3/3 写 manifest
+OK  dist/mul-probe.cwasm  54,238,224 字节
+    dist/mul-probe.manifest.json
+```
+
+**先检查再动手**：工具链缺什么直接说（`wasm32-wasip2-clang` / `wasmtime` /
+`wit-bindgen` 三项逐个查），不让它走到 tpc 再抛一句笼统的 `toolchain check failed`。
+
+**manifest 记什么**：`wasm_sha256`、`cwasm_sha256`、字节数、构建时间、
+clang 与 wasmtime 版本。发布时校校验和，能挡住"发了个旧包"。
+
+两个实现细节：预编译工具先查 PATH 再退到 `ld-flags` 的 `-L` 目录（模块工程不链接
+宿主库，通常没有 `ld-flags`）；`tp-precompile` 的用法是 `tp-precompile <in> <out>`，
+**没有** `build` 子命令——那是 `precompile.sh` 自己的分支，我按那个抄错过一次。
+
 ### 文档：wasm 热更（M7 / T7-01）设计稿
 
 `DESIGN-WASM-HOTRELOAD.md`。M7 是任务表里唯一未做的大项，先确认前提再谈方案：
