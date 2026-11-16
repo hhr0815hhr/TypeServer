@@ -77,6 +77,26 @@ function benchOfKey(Grid $g, int $uid, int $times): float
     return (float) ($t1 - $t0) / (float) $times;
 }
 
+/** 批量：一次处理整组 uids，返回 ns/批 */
+function benchBatch(Grid $g, array $uids, int $times): float
+{
+    $sum = 0;
+    $keep = 0;
+    $t0 = hrtime(true);
+    $i = 0;
+    while ($i < $times) {
+        $all = $g->neighborsShared($uids);
+        $sum += count($all);
+        $i++;
+    }
+    $t1 = hrtime(true);
+    $keep = $sum;
+    if ($keep < -1) {
+        echo "不可能: " . $keep . PHP_EOL;
+    }
+    return (float) ($t1 - $t0) / (float) $times;
+}
+
 function report(string $label, Grid $g, int $uid, int $times): void
 {
     // 先跑一遍预热（首次调用会触碰类初始化与内存分配器）
@@ -87,11 +107,10 @@ function report(string $label, Grid $g, int $uid, int $times): void
     $nsKey = benchOfKey($g, $uid, $times);
 
     printf(
-        "%-8s 邻居约 %6.1f 个   neighbors %9.1f ns   OfKey %9.1f ns   %6.2f ns/邻居\n",
+        "%-6s 邻居 %5.1f  逐个 %9.1f ns  %6.2f ns/邻居\n",
         $label,
         $avg,
         $ns,
-        $nsKey,
         $avg > 0.0 ? $ns / $avg : 0.0
     );
 }
@@ -112,6 +131,40 @@ function main(): void
     report("稀疏", $sparse, 1, $times);
 
     echo "--------------------------------------------------------------" . PHP_EOL;
-    echo "解读：稀疏组的耗时 ≈ 每次分配的固定开销 + 9 格循环；" . PHP_EOL;
-    echo "      密集组减去稀疏组，除以邻居数，才是逐元素的真实成本。" . PHP_EOL;
+
+    // 构造「全服玩家」列表（uid => uid），模拟一帧里要给所有人算邻居
+    $uids = [];
+    $i = 0;
+    while ($i < 500) {
+        $uids[$i] = $i;
+        $i++;
+    }
+
+    echo "按格批量（同一格共用一次 9 格扫描）" . PHP_EOL;
+    echo "--------------------------------------------------------------" . PHP_EOL;
+    $batchTimes = 200;
+
+    $pairs = [["密集", $dense, 29882.0], ["中", $mid, 8825.0], ["稀疏", $sparse, 968.0]];
+    foreach ($pairs as $row) {
+        $label = $row[0];
+        $grid = $row[1];
+        $perCall = $row[2];
+
+        $one = $grid->neighborsShared($uids);   // 预热
+        $batchNs = benchBatch($grid, $uids, $batchTimes);
+        $loopNs = $perCall * 500.0;             // 逐个调用的总成本（用上面实测的 per-call × 500）
+        $speed = $batchNs > 0.0 ? $loopNs / $batchNs : 0.0;
+
+        printf(
+            "%-6s 逐个 %9.0f ns/500人   批量 %8.0f ns/500人   加速 %6.1f×  （结果 %d 个）\n",
+            $label,
+            $loopNs,
+            $batchNs,
+            $speed,
+            count($one)
+        );
+    }
+
+    echo "--------------------------------------------------------------" . PHP_EOL;
+    echo "加速比 ≈ 同格玩家数；全散开（每格 1 人）时应接近 1×，那是批量的下限。" . PHP_EOL;
 }
