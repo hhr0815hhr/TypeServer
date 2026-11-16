@@ -110,12 +110,28 @@ canary: calls=3      traps=1 rebuilds=1
 
 ---
 
+## 六点五、当前状态（2026-11-16 补记）
+
+本包是 **2026-11-12 的交付快照**。之后框架本体独立演进，对照如下：
+
+| 本包内容 | 现状 |
+|:--|:--|
+| `src/wasm-module/` | ✅ 已转化为 `tsf/pkg/wasm`（但走的是 spike 的简化实现，不是这里的引擎层） |
+| `src/wasm-host/` | ⏳ **待转化**：`FRAMEWORK-TASK` §九 计划让它成为 `typephp/wasm` 的引擎层 |
+| `src/supervisor/` | ⏳ **待转化**：计划成为独立的 supervisor 包 |
+| `lib/libtp_host.so` | ❌ **已删除**：11-12 编译、对应 wasmtime 47；现在的宿主是 **wasmtime 50**（WASI 0.2.12 必需）。拿这个库去集成，`instantiate` 必然失败 |
+
+删 `lib/` 的理由很具体：**留着比删掉更危险**。它是唯一一个"看起来能用、实际肯定不能用"的
+文件——19MB 的 .so 摆在那儿，下一个人会先试它，然后花半天排查一个版本不匹配的错误。
+真正可用的产物在 `spike/s2/host-capi/target/release/`（`tp-precompile` + `libtp_host.so`）。
+
+---
+
 ## 七、相关文档
 
 | 文档 | 内容 |
 |:--|:--|
-| `../IMPLEMENTATION-PLAN.md` | 完整实施计划（P0–P5、容量模型、风险回滚） |
-| `../ARCHITECTURE-EVOLUTION.md` | 架构演进提案与各项验证结论 |
+| `../FRAMEWORK-TASK.md` | 权威任务表与架构决策记录（**取代**了原先的 `IMPLEMENTATION-PLAN.md` 与 `ARCHITECTURE-EVOLUTION.md`，那两份已移除，原文在 git 历史里） |
 | `../spike/s1/SPIKE-S1.md`、`SPIKE-S3.md` | wasm 可行性与资源治理的原始实验 |
 | `../spike/s2/SPIKE-S2.md` | 嵌进进程的成本（体积/加载/内存/符号） |
 | `../spike/s4/SPIKE-S4.md` | 房间独立进程与崩溃半径 |
