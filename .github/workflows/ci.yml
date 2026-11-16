@@ -52,11 +52,19 @@ jobs:
     # 自托管 runner 的标签是 self-hosted；这台机器上跑过 tsf verify 才算通过。
     # 只在手动触发时跑：push 就全量验证会把 197 项断言的成本摊到每次提交上，
     # 而真正需要它的是"准备发布"和"改了核心之后"。
-    runs-on: self-hosted
+    runs-on: [self-hosted, tsf]
     if: github.event_name == 'workflow_dispatch'
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+
+      # runner 的默认 PATH 里没有 cargo install 与 wasi-sdk 的产物，
+      # 不显式加进来的话 preflight 会把已装好的 wit-bindgen / wasmtime 报成缺失。
+      # 这是"环境装好了但 CI 说没有"这类问题的根源。
+      - name: 加入工具链目录
+        run: |
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: 前置检查
         run: bash scripts/ci-preflight.sh
