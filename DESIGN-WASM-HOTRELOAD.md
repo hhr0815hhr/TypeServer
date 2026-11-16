@@ -310,6 +310,56 @@ WASI toolchain check failed: Unable to determine the version of WASI tool
 在工具链打通之前，M7 的"新增导出函数"这条验证**做不了**，因此也**无法**证明或否证
 "接口可热更"。这是当前唯一的事实。
 
+### 工具链打通了，但撞上 WASI 版本死结（2026-11-16 下午）
+
+继续在 WSL2 里（不引入 Docker）把工具链补齐，过程记录：
+
+**先发现是我自己把编译器写坏了。** wasi-sdk 28 的 `clang --version` 挂死 180 秒，
+原因不是 glibc：我先 `ln -sf clang .../wasm32-wasip2-clang`，随后往这个路径写 wrapper，
+`open(O_TRUNC)` **跟随符号链接**，把 121 KB 的编译器本体覆盖成了那段 123 字节的脚本，
+于是 `clang` → `clang-21` → `clang` 无限递归。重新解压 tarball 即恢复。
+
+**然后是版本要求。** wasi-sdk 28 带的是 clang 21，而 tpc 要求 **≥22**。
+换成 **wasi-sdk 34**（clang 23.1.0）后工具链检查通过。
+
+**还修了 phpx 的一个上游适配缺口**：`phpx.h` 用了 `std::abort()` / `std::fill`，
+但没 include `<cstdlib>` / `<algorithm>`。旧版 libc++ 恰好间接包含，clang 22+ 不再包含，
+报 `no member named 'abort' in namespace 'std'`。补两行 include + 把 `std::abort()` 换成
+`abort()` 之后编译通过（编译器自己提示了 "did you mean simply 'abort'?"）。
+
+**结果：模块编出来了。** `mul-probe.wasm` 23.8 MB（含 PHP 运行时），
+`wasmtime compile` 出 `.cwasm` 42.6 MB。
+
+**但是 `tp_open` 返回 -1。根因是 WASI 接口版本不匹配：**
+
+```
+mul-probe（wasi-sdk 34 产出）: wasi:cli/*@0.2.12
+s1-probe-v2（能加载）        : wasi:cli/*@0.2.0 / @0.2.6
+```
+
+component model 的版本化 import 是**精确匹配**的，host 的
+`wasmtime_wasi::p2::add_to_linker_sync` 只认它编译时对应的那版（0.2.0–0.2.6），
+遇到 0.2.12 直接 instantiate 失败 → `tp_open` 返回 null → C++ 侧看到 -1。
+
+**这是一个死结，两条路都被卡住：**
+
+| 需求 | 后果 |
+|:--|:--|
+| tpc 要求 clang ≥ 22 | 只能用新 SDK（≥30），它产出 wasi 0.2.12 imports |
+| host 用 wasmtime 47 的 p2 linker | 只认 0.2.0–0.2.6 |
+
+所以"新增导出函数不重编宿主"这条**到这一轮结束仍未验证**。阻塞点从
+"没有工具链"精确到了"WASI 接口版本契约不匹配"——这是比方法表硬编码更根本的约束。
+
+两条出路（都要动 Rust 侧）：
+
+1. **升级 host 的 `wasmtime-wasi`**，让它匹配 0.2.12（重编 so，约 2.5 分钟，
+   但可能牵动 wasmtime 大版本，需要连带升级）；
+2. **给 tpc 加"目标 WASI 版本"选项**，让它按 host 认的版本产出（上游改动，最干净）。
+
+顺带确认：interface 名是一致的（两边都是 `typephp:s1-probe/api@1.0.0`），
+所以**不是**命名空间/包名的问题——这一点排除了。
+
 ### 验证环境现状
 
 | 项 | 状态 |
