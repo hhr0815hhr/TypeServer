@@ -4,7 +4,10 @@
 > **输入**：`typeGame.md`（架构构想）
 > **核验基线**：TypePHP **v0.9.6**（`src/Translator.php: VERSION = '0.9.6'`，源码 HEAD `4fb6d1d`，51 篇中文文档 + 源码 + examples）
 > 备注：本机 MCP 索引二进制为 v0.9.5，`CHANGELOG.md` 最新章节仍停在 0.8.0 —— 版本号三处不一致，升级判断以 `src/` 与 `docs/` 为准。
-> **延伸**：技术全景、运行时复核与后续优化提案见 `ARCHITECTURE-EVOLUTION.md`（含 WASM 热更通道、事件溯源、虚拟 Actor 生命周期、Agones 分配模型与 8 个 Spike）。
+> **延伸**：技术全景与运行时复核的原文（`ARCHITECTURE-EVOLUTION.md`）、最初的架构构想
+> （`typeGame.md`）、旧版实施计划（`IMPLEMENTATION-PLAN.md`）**均已移除**——它们的结论并入
+> `FRAMEWORK-TASK.md`（§六 早期构想的两处修正、§九 架构决策记录），原文在 git 历史里可查。
+> 本文中凡提到这三份的地方，都按此理解。
 
 ---
 

@@ -102,7 +102,7 @@ canary: calls=3      traps=1 rebuilds=1
 
 | 项 | 原因 |
 |:--|:--|
-| 快照与事件日志（P3） | 需要业务状态结构才能落地，详见 `IMPLEMENTATION-PLAN.md` |
+| 快照与事件日志（P3） | 需要业务状态结构才能落地；原实施计划已移除，结论见 `../FRAMEWORK-TASK.md` |
 | 激活/回收（P4） | 依赖 P3 的快照能力 |
 | 按比例灰度分流 | 当前是"全量换句柄"，分流策略需业务定 |
 | 告警接入 | 现在写 `alarms.log` 与 stdout，需接采集器（filebeat/vector → 企微/邮件） |
