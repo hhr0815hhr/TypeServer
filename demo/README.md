@@ -56,3 +56,13 @@ Timers.cc:137: cannot convert 'php::Variant' to 'php::Int'
 `demo-echo-nts` 的源码与 `demo-echo` 完全相同，**改 `demo-echo` 时不需要同步它**——
 它连不上当前工具链，同步过去也编不出东西。要的是"能跑的 NTS 对照"，就按上面三步重建；
 不要的是这份历史产物，整个目录可以删掉（删之前确认还有没有人拿它做基准对比）。
+
+## 配置里的 `${base}`
+
+三个 demo 的 `config/tsf.json` 里，日志、sqlite、快照路径都写成 `${base}/var/...`。
+`Bootstrap::boot()` 在加载配置后会把 `${base}` 展开成**本次启动的工程目录**
+（`Config::expandBase()`）。
+
+不写绝对路径的原因：仓库 clone 到别处跑起来，会把日志和库写回**原来那个目录**——
+看起来一切正常，实际在污染另一棵树。这个坑在 2026-11-16 整理仓库时实际验证过。
+
