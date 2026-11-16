@@ -111,30 +111,63 @@ TCP 连接绑在进程上，节点崩了 socket 就没了。要在旧节点做�
 测试：`duel-settle` **34 → 45**（认领过滤 9 项：两个 node 从同一快照目录认领、
 `not_mine` 计数正确、**别人的快照没被删**、各自清掉自己的坏快照；段末溢出返回 0）。
 
-### M7 第 1 步闭环：新增 wasm 导出函数不重编桥接层
+### M7 技术验证完成：wasm 模块从 PHP 源码到热更调用，全链路打通
 
-`call2(mul,'mul',6,7) = 42` —— `mul` 用 PHP 写（`#[\WasmExport]`），经 tpc 编成
-wasm component，`spike/e1/cpp-src/wasm_bridge.cc` 里**搜不到 "mul" 一个字**，
-靠通用入口 `wasm_call2($h, "mul", 6, 7)` 直接调通。T7-01 的验收条件满足。
+任务表里唯一未做的大项（M7 / 12 人日）的技术前提，这次全部验证完毕——**不是设计，
+是跑出来的**。最终形态：
 
-打通它要动四处，每一处都是"不知道就卡住"的那种：
+```
+PHP 源码（#[\WasmExport] function mul）
+  → tpc（wasi-sdk 34 / clang 23）编出 wasm component
+  → tp-precompile 预编译成 cwasm（带 fingerprint）
+  → host 加载，自动枚举 interface 成员
+  → wasm_call2($h, "mul", 6, 7) = 42
+```
+
+`spike/e1/cpp-src/wasm_bridge.cc` 里**搜不到 "mul" 一个字**，`TP_METHODS` 也没设。
+新增一个 wasm 导出函数，只需要把模块编出来——桥接层、配置、宿主二进制都不用动。
+
+**四处非改不可的地方**（每一处不知道就卡死）：
 
 1. **host 的 wasmtime 47 → 50**。SDK 34 产出 `wasi:cli/*@0.2.12`，47 的
-   `wasmtime_wasi::p2` 只 link 到 0.2.6，版本化 import 精确匹配失败 →
-   `instantiate` 失败 → `tp_open` 返回 -1。连带 API 适配一处
-   （`WasiHttpView`/`WasiHttpCtxView` 从 `p2` 移到 crate root）。
+   `wasmtime_wasi::p2` 只 link 到 0.2.6，版本化 import **精确匹配**，`instantiate` 直接失败
+   → `tp_open` 返回 -1。连带一处 API 迁移（`WasiHttpView` 从 `p2` 移到 crate root）。
 2. **phpx 的 wasm 头要打 clang 22+ 补丁**：`phpx.h` 用了 `std::abort()`/`std::fill`
-   但没 include `<cstdlib>`/`<algorithm>`，旧 libc++ 恰好间接包含。属上游适配缺口。
-3. **cwasm 必须用 `tp-precompile`，不能用 `wasmtime` CLI**：`fuel`/`epoch` 是编译期
-   插桩，产物带 fingerprint，配置不一致直接拒绝启动。用 CLI 编会让**所有模块**变成
-   句柄 `-1000`，看起来像"升级把一切都搞坏了"。
-4. **升级后所有既有模块的 cwasm 都要重编**（v1/v2 也是），否则一起打不开。
+   但没 include `<cstdlib>`/`<algorithm>`，旧 libc++ 恰好间接包含。属上游适配缺口，
+   需要时按"did you mean simply 'abort'"提示改。
+3. **cwasm 必须用 `tp-precompile`，不能用 `wasmtime` CLI**：`fuel`/`epoch` 是编译期插桩，
+   产物带 fingerprint 与 artifact_size，配置不一致**直接拒绝启动**。用 CLI 编会让
+   **所有模块**句柄变 `-1000`，现象酷似"升级把一切都搞坏了"。
+4. **升级后所有既有模块的 cwasm 都要重编**（v1/v2 也一样），否则一起打不开。
 
-能力边界（更新）：换实现 = 真热更（4.4–5.5 ms）；增删函数 = 编 cwasm +
-`TP_METHODS` 加名字 + 重启（不用改代码、不重编 so）；自动枚举接口**仍未做**。
+**两处实现**：
 
-环境基线：`wasi-sdk 34`（clang 23.1.0）／`wit-bindgen 0.60.0`／`wasmtime 50.0.1`／
-`~/.local/bin/wasm32-wasip2-clang` 是指向 SDK 34 的 wrapper（**不能是符号链接**）。
+- `wasm_call2(handle, fn, a, b)` / `wasm_call1`：通用按名调用，替换掉"每个导出函数
+  手写一个 PHP 绑定"的形态。名字在运行时解析（传 `no_such_fn` 返回 -2001）。
+- `enum_members()`：从 component 类型信息枚举 interface 成员。`TP_METHODS` 那份人工表
+  从此**不需要维护**（保留作为兜底）。
+
+**wasmtime 50 的四个 API 细节**（都踩过，别再凭记忆写）：
+`component_type()` 返回 `types::Component`；`ComponentItem` 在 `component::types` 子模块；
+顶层 `exports()` 产出 `ComponentExtern`，取 `.ty` **字段**（不是方法）才是 `ComponentItem`；
+`ComponentInstance::exports()` 的成员名**已带 `[method]runtime.` 前缀**，再拼一次会得到
+`[method]runtime.[method]runtime.mul`，查询失败返回 -2001——很像"枚举没生效"。
+
+**能力边界**：
+
+| 变更类型 | 需要做什么 | 热更？ |
+|:--|:--|:--|
+| 同名函数换实现 | 换 cwasm + `wasm_swap`（4.4–5.5 ms） | ✅ 真热更 |
+| 新增/删除导出函数 | 编 cwasm，其余全自动 | ✅ 不改代码、不改配置 |
+| 改函数签名 | 编 cwasm + 改调用点（业务必然） | 🟡 |
+| C++ 桥接层本身要改 | 重编 so + 重启 | ❌ 等价 L3 |
+
+**环境基线**：`wasi-sdk 34`（clang 23.1.0）／`wit-bindgen 0.60.0`／`wasmtime 50.0.1`／
+`~/.local/bin/wasm32-wasip2-clang` 是指向 SDK 34 的 wrapper（**不能是符号链接**，
+且在符号链接路径上写文件会把编译器本体覆盖掉——踩过）。
+
+**方法论**：跨大版本的第三方 API 只能查源码/文档。凭记忆写 `ComponentItem` 的旧路径，
+换来一轮 1.5–2.5 分钟的编译加回滚；查一次源码就拿到准确签名。
 
 ### 文档：wasm 热更（M7 / T7-01）设计稿
 
