@@ -77,6 +77,39 @@ function benchOfKey(Grid $g, int $uid, int $times): float
     return (float) ($t1 - $t0) / (float) $times;
 }
 
+/**
+ * 正确性断言：批量结果必须与逐个调用**完全一致**。
+ *
+ * 性能优化最容易出的错不是慢，是"快但算错了"——而错在邻居集合上，
+ * 表现是"有人看不见身边玩家"，这种 bug 从日志里几乎看不出来。
+ */
+function assertSame(Grid $g, array $uids, string $label): void
+{
+    $batch = $g->neighborsShared($uids);
+    $bad = 0;
+    $checked = 0;
+    foreach ($uids as $uid => $_) {
+        $a = $batch[$uid] ?? [];
+        $b = $g->neighbors($uid);
+        $checked++;
+        if (count($a) !== count($b)) {
+            $bad++;
+            continue;
+        }
+        foreach ($b as $k => $v) {
+            if (!isset($a[$k])) {
+                $bad++;
+                break;
+            }
+        }
+    }
+    if ($bad === 0) {
+        echo "  OK   " . $label . "：" . $checked . " 个 uid 与逐个结果一致" . PHP_EOL;
+    } else {
+        echo "  FAIL " . $label . "：" . $bad . " / " . $checked . " 不一致" . PHP_EOL;
+    }
+}
+
 /** 批量：一次处理整组 uids，返回 ns/批 */
 function benchBatch(Grid $g, array $uids, int $times): float
 {
@@ -139,6 +172,13 @@ function main(): void
         $uids[$i] = $i;
         $i++;
     }
+
+    echo "正确性（批量结果 == 逐个结果）" . PHP_EOL;
+    echo "--------------------------------------------------------------" . PHP_EOL;
+    assertSame($dense, $uids, "密集");
+    assertSame($mid, $uids, "中");
+    assertSame($sparse, $uids, "稀疏");
+    echo PHP_EOL;
 
     echo "按格批量（同一格共用一次 9 格扫描）" . PHP_EOL;
     echo "--------------------------------------------------------------" . PHP_EOL;
