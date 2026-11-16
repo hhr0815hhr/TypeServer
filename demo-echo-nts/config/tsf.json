@@ -4,7 +4,7 @@
     },
     "log": {
         "level": "warn",
-        "file": "/data/TypeServer/demo/demo-echo/var/log/app.log"
+        "file": "/var/log/app.log"
     },
     "protocol": {
         "frame": "native",

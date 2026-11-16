@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # M1 验证：配不同参数起服务，跑四个用例，最后复原配置
 set -u
-cd /data/TypeServer/demo/demo-echo || exit 1
+cd "$(dirname "$0")" || exit 1
 SRV=./demo_echo
 TEST="php85 /data/TypeServer/demo/m1-test.php"
 CFG=config/tsf.json

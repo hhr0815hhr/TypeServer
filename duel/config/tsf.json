@@ -4,17 +4,17 @@
     },
     "log": {
         "level": "info",
-        "file": "/data/TypeServer/demo/duel/var/log/app.log"
+        "file": "${base}/var/log/app.log"
     },
     "protocol": {
         "frame": "native",
         "payload": "raw"
     },
     "db": {
-        "dsn": "sqlite:/data/TypeServer/demo/duel/var/duel.db"
+        "dsn": "sqlite:${base}/var/duel.db"
     },
     "snapshot": {
-        "dir": "/data/TypeServer/demo/duel/var/snap"
+        "dir": "${base}/var/snap"
     },
     "server": {
         "host": "0.0.0.0",

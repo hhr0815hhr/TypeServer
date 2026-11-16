@@ -2,8 +2,7 @@
 # 断线判负验证：开局 5 秒后杀掉一方，另一方应**立刻**收到结算，
 # 而不是干等 60 秒超时。
 set -u
-cd /data/TypeServer/demo/duel || exit 1
-
+cd "$(dirname "$0")" || exit 1
 pkill -9 -x duel 2>/dev/null
 pkill -9 -f "duel/client.php" 2>/dev/null
 sleep 0.3
