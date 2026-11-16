@@ -274,9 +274,26 @@ interface，再 `get_export_index(Some(&iface), "create-runtime")` 拿到函数�
 列表（wasmtime 的 component type 提供了遍历导出/成员的接口），把 `for name in methods`
 换成 `for name in 枚举结果`。那样 `TP_METHODS` 和默认表都可以删掉。
 
-**没做的原因**：wasmtime 47 的 component type 枚举 API 需要精确的类型/生命周期写法，
-而实测每次 `cargo build` 要 2m29s，猜错一次的代价是又一轮编译。留到有把握时一次做完，
-比现在反复试错更划算。
+**没做的原因**：wasmtime 的 component type 枚举 API 需要精确的类型/生命周期写法，
+而实测每次 `cargo build` 要 1.5–2.5 分钟，猜错一次的代价是又一轮编译。
+
+**试过一次，失败了，已回滚。** 2026-11-16：按记忆写了
+`use wasmtime::component::ComponentItem`，编译直接报 `unresolved import`——
+说明 wasmtime 50 里这个类型**不存在**（component 的类型 API 在这个大版本里重构过），
+`ComponentItem` 这个名字在我的知识里是旧版的。`grep` 源码也没直接定位到替代名。
+
+所以现在的状态是：**枚举这条路要查着文档写，不能靠记忆写**。
+探测改动已全部回滚（`lib.rs` 从备份恢复 + 重编），闭环成果未受影响——
+回滚后重新验证：
+
+```
+load(mul-probe.cwasm) handle=1
+call2(mul,'mul',6,7) = 42
+```
+
+**下一步要做的具体事**（不是"再试一次"）：读 wasmtime 50.x 的
+`component::types` 模块文档，确认遍历 interface 成员的 API（类型名 + 方法签名），
+再写一次。那是一次纯查证工作，不需要试错。
 
 ### 补工具链的结论：装齐了，但 SDK 在本机跑不起来（2026-11-16）
 
