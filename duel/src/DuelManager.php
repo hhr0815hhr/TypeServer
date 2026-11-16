@@ -56,6 +56,19 @@ final class DuelManager
     private bool $shutdownRequested = false;
 
     /**
+     * uid => {room, foe, side}：**重连找回**要用。
+     *
+     * `addrOf` 只知道"这个人在哪个房间服务上"，答不出"房间号是多少、他对面是谁"——
+     * 而重连的客户端需要这些才能接着打。所以单独记一份，`clear()` 时一起摘。
+     *
+     * @var array<int, array{room: int, foe: int, side: int}>
+     */
+    private array $duelOf = [];
+
+    /** @var array<int, int> uid => TimerId（断线宽限期内待判负） */
+    private array $pendingForfeit = [];
+
+    /**
      * 下面这三个（`Repo` / `Store` / `Settle`）是**进程内设施**，直接传进每个房间服务的
      * 构造函数。单进程单线程下完全安全——调度器保证同一个服务不会并发执行。
      *
@@ -156,6 +169,9 @@ final class DuelManager
 
         $this->addrOf[$uidA] = $addr;
         $this->addrOf[$uidB] = $addr;
+        // 重连要用的信息：房间号 + 对手 + 自己站哪边
+        $this->duelOf[$uidA] = ["room" => $roomId, "foe" => $uidB, "side" => 0];
+        $this->duelOf[$uidB] = ["room" => $roomId, "foe" => $uidA, "side" => 1];
         $this->created++;
         return $roomId;
     }
@@ -237,8 +253,26 @@ final class DuelManager
                 continue;
             }
             // 恢复 uid → 地址，玩家重连后能直接找回自己的局
+            $first = 0;
             foreach ($uids as $uid) {
-                $this->addrOf[(int) $uid] = $addr;
+                $uid = (int) $uid;
+                $this->addrOf[$uid] = $addr;
+                if ($first === 0) {
+                    $first = $uid;
+                }
+            }
+            // 重连信息也要重建，否则"进程重启后重连"答不出房间号
+            $side = 0;
+            foreach ($uids as $uid) {
+                $uid = (int) $uid;
+                $foe = 0;
+                foreach ($uids as $other) {
+                    if ((int) $other !== $uid) {
+                        $foe = (int) $other;
+                    }
+                }
+                $this->duelOf[$uid] = ["room" => $rid, "foe" => $foe, "side" => $side];
+                $side = 1;
             }
             // 新房号必须避开已恢复的，否则会撞号覆盖。
             // 只在本节点段内推进：别的节点的号更大，不代表本节点该接着用
@@ -283,6 +317,9 @@ final class DuelManager
     public function clear(int $uid): void
     {
         unset($this->addrOf[$uid]);
+        unset($this->duelOf[$uid]);
+        // 房间结束了，宽限期内的判负也没意义了
+        $this->cancelForfeit($uid);
     }
 
     /**
@@ -322,6 +359,50 @@ final class DuelManager
             return 0;
         }
         return (int) (microtime(true) * 1000) - $this->drainAtMs;
+    }
+
+    /**
+     * 这个 uid 正在进行的那一局（重连用）。没有则返回空数组。
+     *
+     * @return array{room: int, foe: int, side: int}
+     */
+    public function roomOf(int $uid): array
+    {
+        return isset($this->duelOf[$uid]) ? $this->duelOf[$uid] : [];
+    }
+
+    /**
+     * 断线后**延迟**判负：先给宽限期，期间重连就不算输。
+     *
+     * 为什么不能立刻判负：网络抖一下、进程被调度走 200ms，玩家就白输一局。
+     * 对局类玩法里"掉线即负"是体验事故，而 15 秒的宽限几乎没有作弊空间
+     * （对面照常打，你不操作就是站着挨打）。
+     *
+     * 回调必须声明 `int $timerId`——AOT 下空参闭包 Swoole 调不到（见 README §5.2.2）。
+     */
+    public function scheduleForfeit(int $uid, int $graceMs): bool
+    {
+        if (!isset($this->addrOf[$uid]) || isset($this->pendingForfeit[$uid])) {
+            return false;
+        }
+        $mgr = $this;
+        $id = \Swoole\Timer::after($graceMs, function (int $timerId) use ($mgr, $uid): void {
+            $mgr->cancelForfeit($uid);
+            $mgr->forfeit($uid);
+        });
+        $this->pendingForfeit[$uid] = $id;
+        return true;
+    }
+
+    /** 重连成功：撤销待判负 */
+    public function cancelForfeit(int $uid): bool
+    {
+        if (!isset($this->pendingForfeit[$uid])) {
+            return false;
+        }
+        \Swoole\Timer::clear($this->pendingForfeit[$uid]);
+        unset($this->pendingForfeit[$uid]);
+        return true;
     }
 
     /** 当前进行中的对局数 */

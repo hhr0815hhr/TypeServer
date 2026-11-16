@@ -440,6 +440,31 @@ function main(): void
         Scheduler::instance()->deliver($matchAddr, MatchService::MSG_LEAVE, (string) $uid);
     });
 
+    // ---- 重连找回 ----
+    // 客户端重连 → 重新登录（Gateway 会把 uid→fd 更新成新连接）→ 发 REJOIN。
+    // 房间那边的推送走 `$publish`，它按 uid 查 fd，所以**不需要**通知房间换连接；
+    // 这里只负责：撤销待判负、把房间号/对手/边告诉客户端，让它接着画。
+    $gw->on(Msg::REJOIN, function (int $fd, int $uid, string $body) use ($duels, $gw): void {
+        if ($uid <= 0) {
+            return; // 没登录
+        }
+        $info = $duels->roomOf($uid);
+        if ($info === []) {
+            // payload: raw → 必须是字符串
+            $gw->send($fd, Msg::NOTICE, json_encode([
+                "code" => "no-room",
+                "text" => "没有进行中的对局",
+            ]));
+            return;
+        }
+        $duels->cancelForfeit($uid);
+        Logger::info("player rejoined", [
+            "uid" => $uid,
+            "room" => $info["room"],
+        ]);
+        $gw->send($fd, Msg::REJOIN_OK, json_encode($info));
+    });
+
     // 移动：body 是 "-1" / "0" / "1"
     $gw->on(Msg::MOVE, function (int $fd, int $uid, string $body) use ($duels): void {
         $duels->forward($uid, DuelService::MSG_MOVE, ["uid" => $uid, "dir" => (int) $body]);
@@ -453,7 +478,16 @@ function main(): void
     // 不处理的话，掉线玩家的匹配票会一直挂在队列里，对战房间会干等 60 秒超时。
     $gw->onDisconnect(function (int $fd, int $uid) use ($matchAddr, $duels): void {
         Scheduler::instance()->deliver($matchAddr, MatchService::MSG_LEAVE, (string) $uid);
-        $duels->forfeit($uid);
+        // 断线**不立刻判负**：给宽限期，期间重连就不算输（`Msg::REJOIN`）。
+        // 立刻判负等于"网络抖一下白输一局"，对局类玩法的体验事故。
+        // 宽限期可配：对局越"重"，给的时间应该越长（一次掉线代价太大）
+        $graceMs = Config::getInt("server.rejoin_grace_sec", 15) * 1000;
+        if ($duels->scheduleForfeit($uid, $graceMs)) {
+            Logger::info("player disconnected, forfeit in grace", [
+                "uid" => $uid,
+                "grace_ms" => $graceMs,
+            ]);
+        }
     });
 
     $gw->boot();

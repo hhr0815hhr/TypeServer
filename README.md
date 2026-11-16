@@ -119,3 +119,20 @@ lifecycle:
 ```
 
 多节点时记得带 `TSF_ENV`：`TSF_ENV=node1 ./duel drain` 写的是 `var/drain.n1`。
+
+## 重连找回（rejoin）
+
+```bash
+bash run-rejoin.sh                                  # 6 项断言
+php85 client.php 9101 tok-1001 aggressive --rejoin  # 手工：登录后直接找回自己那一局
+```
+
+断线**不立刻判负**：`server.rejoin_grace_sec`（默认 15 秒）内重连不算输，过期才判负。
+协议 `REJOIN(5003)` → `REJOIN_OK(5101)`，回 `{room, foe, side}`；没有进行中的局则回
+`NOTICE {code:"no-room"}`。
+
+房间层不需要知道重连——`$publish` 按 uid 查 fd，重连重新登录后 Gateway 会把 uid→fd
+指向新连接。uid → {room, foe, side} 的索引存在 `DuelManager::$duelOf`，进程重启时从
+快照重建。
+
+**跨节点重连还没做**：连到另一个节点会回 `no-room`，要客户端保存 roomId 并连回原节点。

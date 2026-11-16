@@ -16,8 +16,19 @@ final class Msg
     /** 客户端 → 服务端：取消匹配 */
     public const MATCH_CANCEL = 5002;
 
+    /**
+     * 客户端 → 服务端：重连后找回自己那一局。
+     *
+     * 断线不立刻判负（宽限期内重连不算输），所以客户端重连后要主动说一句
+     * "我是谁、把我放回我的局里"。服务端据 uid 查 `DuelManager::$duelOf`。
+     */
+    public const REJOIN = 5003;
+
     /** 服务端 → 客户端：匹配成功（房间号、对手、自己的起始位置） */
     public const MATCH_FOUND = 5100;
+
+    /** 服务端 → 客户端：重连成功（room/foe/side），之后的帧推送会自然续上 */
+    public const REJOIN_OK = 5101;
 
     /** 客户端 → 服务端：设置移动方向 {dir: -1|0|1} */
     public const MOVE = 5201;

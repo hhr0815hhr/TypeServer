@@ -15,6 +15,8 @@ const MSG_LOGIN = 1;
 const MSG_LOGIN_OK = 2;
 const MSG_MATCH_JOIN = 5001;
 const MSG_MATCH_FOUND = 5100;
+const MSG_REJOIN = 5003;
+const MSG_REJOIN_OK = 5101;
 const MSG_MOVE = 5201;
 const MSG_ATTACK = 5202;
 const MSG_STATE = 5300;
@@ -29,6 +31,8 @@ const ATTACK_CD_MS = 800;
 $port = (int) ($argv[1] ?? 9101);
 $token = (string) ($argv[2] ?? "tok-1001");
 $mode = (string) ($argv[3] ?? "aggressive");
+// --rejoin：登录后不发匹配，直接找回自己那一局（模拟断线重连）
+$rejoin = isset($argv[4]) && $argv[4] === "--rejoin";
 
 $sock = stream_socket_client("tcp://127.0.0.1:" . $port, $errno, $errstr, 3);
 if ($sock === false) {
@@ -82,31 +86,62 @@ if ($r === null || $r[0] !== MSG_LOGIN_OK) {
 $uid = (int) $r[1];
 echo "[" . $uid . "] login ok, mode=" . $mode . PHP_EOL;
 
-// ---- 2) 入匹配 ----
-send($sock, MSG_MATCH_JOIN);
-echo "[" . $uid . "] matching..." . PHP_EOL;
-
 $foe = 0;
 $side = 0;
-$deadline = microtime(true) + 15.0;
-while (microtime(true) < $deadline) {
-    $r = readFrame($sock, 0.5);
-    if ($r === null) {
-        continue;
+
+if ($rejoin) {
+    // ---- 2a) 重连找回：不发匹配，直接问"我还在哪一局" ----
+    send($sock, MSG_REJOIN);
+    echo "[" . $uid . "] rejoining..." . PHP_EOL;
+    $deadline = microtime(true) + 3.0;
+    while (microtime(true) < $deadline) {
+        $r = readFrame($sock, 0.5);
+        if ($r === null) {
+            continue;
+        }
+        if ($r[0] === MSG_NOTICE) {
+            $n = json_decode($r[1], true);
+            $code = is_array($n) && isset($n["code"]) ? (string) $n["code"] : "notice";
+            echo "[" . $uid . "] NOTICE " . $code . PHP_EOL;
+            exit(4);
+        }
+        if ($r[0] === MSG_REJOIN_OK) {
+            $info = json_decode($r[1], true);
+            $foe = (int) $info["foe"];
+            $side = (int) $info["side"];
+            echo "[" . $uid . "] REJOINED room " . $info["room"] . " vs " . $foe . " (side " . $side . ")" . PHP_EOL;
+            break;
+        }
     }
-    if ($r[0] === MSG_NOTICE) {
-        $n = json_decode($r[1], true);
-        $code = is_array($n) && isset($n["code"]) ? (string) $n["code"] : "notice";
-        $text = is_array($n) && isset($n["text"]) ? (string) $n["text"] : "";
-        echo "[" . $uid . "] NOTICE " . $code . ": " . $text . PHP_EOL;
-        exit(3);
+    if ($foe === 0) {
+        echo "[" . $uid . "] rejoin timeout" . PHP_EOL;
+        exit(4);
     }
-    if ($r[0] === MSG_MATCH_FOUND) {
-        $found = json_decode($r[1], true);
-        $foe = (int) $found["foe"];
-        $side = (int) $found["side"];
-        echo "[" . $uid . "] MATCHED vs " . $foe . " (room " . $found["room"] . ", side " . $side . ")" . PHP_EOL;
-        break;
+} else {
+    // ---- 2b) 入匹配 ----
+    send($sock, MSG_MATCH_JOIN);
+    echo "[" . $uid . "] matching..." . PHP_EOL;
+
+    $deadline = microtime(true) + 15.0;
+    while (microtime(true) < $deadline) {
+        $r = readFrame($sock, 0.5);
+        if ($r === null) {
+            continue;
+        }
+        if ($r[0] === MSG_NOTICE) {
+            $n = json_decode($r[1], true);
+            $code = is_array($n) && isset($n["code"]) ? (string) $n["code"] : "notice";
+            $text = is_array($n) && isset($n["text"]) ? (string) $n["text"] : "";
+            echo "[" . $uid . "] NOTICE " . $code . ": " . $text . PHP_EOL;
+            exit(3);
+        }
+        if ($r[0] === MSG_MATCH_FOUND) {
+            $found = json_decode($r[1], true);
+            $foe = (int) $found["foe"];
+            $side = (int) $found["side"];
+            echo "[" . $uid . "] MATCHED vs " . $foe . " (room " . $found["room"] . ", side " . $side . ")" . PHP_EOL;
+            break;
+        }
     }
 }
 if ($foe === 0) {
