@@ -143,20 +143,58 @@ Int php_wasm_call1(Int h, Str fn, Int a);          // PHP: wasm_call1($h, "burn"
   否则两个入口的观测数据没法放在一起看。
 - 计时默认关闭的行为保留了：`clock_gettime` 每次 20–30 ns，开着会把 782 ns 的量级污染。
 
-**验证状态：只做了语法检查，没跑通。**
+**验证状态：已跑通（部分）。** 2026-11-16 实测输出：
 
 ```
-g++ -std=c++17 -fsyntax-only -I<phpx.h> -I<php 头> wasm_bridge.cc   # 无输出
+main.add(1,2)                     = 3
+call2(main,'add',1,2)             = 3        <- 通用入口
+call2(main,'add',40,2)            = 42
+call2(main,'no_such_fn',0,0)      = -2001    <- 名字运行时解析，宿主不感知函数名
 ```
 
-语法检查只能证明类型与签名合法，**不能**证明"新增导出函数真的不用重编"。要完成第 1 步的
-验收还差三件事：
+`-2001` 是"名字查不到"（`-2000 + rc(1)`），说明名字确实在运行时解析，
+**桥接层没有任何业务函数名的白名单**。这是第 1 步的核心结论。
 
-1. 重建 `e1_stub`（依赖 `libtp_host.so` + wasmtime，见 `spike/e1/project.yml`）；
-2. 在 `spike/e1/main.php` 里加一组调用：`wasm_call2($h, "add", 1, 2)` 应得 3；
-   `wasm_call2($h, "不存在的名字", 0, 0)` 应返回错误码（证明名字是运行时解析的）；
-3. 往模块里加一个 E1 没有的导出（如 `mul`）并重新预编译 `.cwasm`，
-   **不重编 e1_stub** 也能调通——这条才是真正的验收。
+### 过程中踩到的三个坑（都会让结论反过来）
+
+**坑 1：`tsf build` 用不了。** `genProjectYml()` 是硬编码生成的，会重写 `project.yml`，
+把 spike 手写的 `ld-flags`（`-ltp_host` + rpath）冲掉，产物名也改成目录名。
+必须手工执行 tpc：
+
+```bash
+cd spike/e1 && php85 /home/hhr/typephp-src/bin/tpc.php project.yml
+```
+
+**坑 2：PHP 侧要声明存根。** 只写 C++ 的 `php_wasm_call2` 不够，PHP 调用会报
+`function 'wasm_call2' is undefined`。必须同时在 `spike/e1/php-src/wasm.stub.php` 里声明：
+
+```php
+function wasm_call2(int $h, string $fn, int $a, int $b): int { }
+function wasm_call1(int $h, string $fn, int $a): int { }
+```
+
+**坑 3（最隐蔽）：`tp_call2` 的名字要带 ABI 前缀。**
+直接传 `"add"` 会返回 `-2001`（查不到），必须传 `"[method]runtime.add"`。
+参考 `php_wasm_add_byname` 的写法才看出来。前缀是 host 的 ABI 细节，
+所以由桥接层拼，**业务侧仍传裸名**：
+
+```cpp
+std::string name = "[method]runtime." + fn.toStdString();
+```
+
+### 还没验收的一条
+
+**"新增导出函数不重编宿主"没验。** 环境里没有 `wasmtime`/`wat2wasm`/`rustc`
+（`which` 全空），产不出新的 `.cwasm`，所以加不了 `mul` 这类新导出。
+
+这一条是 M7 的成立条件，缺了它只能说"通用入口能用"，不能说"热更成立"。
+补验需要：装 wasmtime CLI → 加一个导出 → 重新预编译 → **不重编 e1_stub** 调通。
+
+### 注意：spike 不入库
+
+`.gitignore` 第 49 行是 `/spike/**`，所以上面这些 C++ / stub / main.php 的改动
+**只在本地工作区**，git 里只有这份设计稿。复现步骤已写在上面，改动是纯增量的
+（新增两个函数 + 两个存根声明 + 三行验证输出）。
 
 ---
 
