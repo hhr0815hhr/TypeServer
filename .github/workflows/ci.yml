@@ -1,0 +1,65 @@
+name: CI
+
+# 两个 job，跑在不同的 runner 上，这是被现实逼的：
+#
+#   lint   —— 结构检查 + PHP 语法。**托管 runner 就能跑**，每次 push 都跑。
+#   verify —— 全量验证（tsf verify，197 项断言）。**必须自托管**：
+#             AOT 编译器 tpc 在 ../typephp-src，不在本仓库；还要求 PHP 8.5 ZTS +
+#             Swoole + phpx，托管 runner 从零装要十几分钟且极易漂移。
+#
+# 不把 verify 塞进托管 runner，是因为"装不上的测试"比没有测试更糟：
+# 它会长期红着，然后所有人学会忽略 CI。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  lint:
+    name: 结构检查 + PHP 语法
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          coverage: none
+
+      - name: tsf lint（禁 mixed + 命名空间与目录一致）
+        run: php tsf/bin/tsf lint
+
+      - name: 全量 php -l
+        run: |
+          fail=0
+          while IFS= read -r f; do
+            if ! php -l "$f" > /dev/null 2>&1; then
+              echo "语法错误: $f"
+              php -l "$f" || true
+              fail=1
+            fi
+          done < <(git ls-files '*.php')
+          if [ "$fail" -ne 0 ]; then
+            exit 1
+          fi
+          echo "OK $(git ls-files '*.php' | wc -l) 个 PHP 文件"
+
+  verify:
+    name: 全量验证（自托管）
+    # 自托管 runner 的标签是 self-hosted；这台机器上跑过 tsf verify 才算通过。
+    # 只在手动触发时跑：push 就全量验证会把 197 项断言的成本摊到每次提交上，
+    # 而真正需要它的是"准备发布"和"改了核心之后"。
+    runs-on: self-hosted
+    if: github.event_name == 'workflow_dispatch'
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 前置检查
+        run: bash scripts/ci-preflight.sh
+
+      - name: tsf verify（197 项断言）
+        run: ./tsf/bin/tsf verify
