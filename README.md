@@ -66,6 +66,7 @@ spike/               一次性技术验证（S1~S6、E1/E2/E4），只保留结�
 | **AOT 为什么这么写** | `tsf/README.md` §5（编码约束）+ `ARCHITECTURE-DESIGN.md` |
 | **编译器的补丁与升级须知** | `tpc-patches/README.md` |
 | **想跑多进程/多节点（房间归属）** | `DESIGN-ROOM-OWNERSHIP.md`（设计稿，未实现） |
+| **想做 wasm 热更（M7）** | `DESIGN-WASM-HOTRELOAD.md`（设计稿，未实现） |
 
 ---
 
