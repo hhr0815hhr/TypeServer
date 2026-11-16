@@ -9,6 +9,10 @@
 set -u
 cd "$(dirname "$0")" || exit 1
 
+# duel 是编译产物、不入库。没编过就先编——否则新克隆/CI 会一路跑到「0. 清场」
+# 才因为 ./duel 不存在而失败，而本地编过的环境是绿的（假绿比报错更费时间）。
+[ -x ./duel ] || ../../tsf/bin/tsf build . > /tmp/duel_build.log 2>&1
+
 PASS=0
 FAIL=0
 ok()  { PASS=$((PASS + 1)); printf 'PASS %s\n' "$1"; }

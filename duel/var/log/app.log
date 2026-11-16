@@ -1,0 +1,14 @@
+{"ts":"2026-11-16T17:31:55+08:00","lvl":"info","ch":"app","pid":730177,"msg":"boot","ctx":{"env":"prod","dir":"/data/TypeServer/demo/duel","php":"8.5.12","pid":730177}}
+{"ts":"2026-11-16T17:31:55+08:00","lvl":"info","ch":"app","pid":730177,"msg":"protocol","ctx":{"frame":"header/native","payload":"raw"}}
+{"ts":"2026-11-16T17:31:55+08:00","lvl":"info","ch":"app","pid":730178,"msg":"boot","ctx":{"env":"prod","dir":"/data/TypeServer/demo/duel","php":"8.5.12","pid":730178}}
+{"ts":"2026-11-16T17:31:55+08:00","lvl":"info","ch":"app","pid":730178,"msg":"protocol","ctx":{"frame":"header/native","payload":"raw"}}
+{"ts":"2026-11-16T17:31:55+08:00","lvl":"info","ch":"app","pid":730178,"msg":"duel ready","ctx":{"host":"0.0.0.0","port":9101,"frame":"header/native"}}
+{"ts":"2026-11-16T17:31:55+08:00","lvl":"info","ch":"app","pid":730178,"msg":"server listen","ctx":{"proto":"tcp","host":"0.0.0.0","port":9101}}
+{"ts":"2026-11-16T17:31:55+08:00","lvl":"info","ch":"app","pid":730178,"msg":"worker start","ctx":{"worker":0}}
+{"ts":"2026-11-16T17:31:55+08:00","lvl":"info","ch":"app","pid":730178,"msg":"wallet reconciled","ctx":{"events":0,"players":0,"total":0}}
+{"ts":"2026-11-16T17:31:55+08:00","lvl":"info","ch":"app","pid":730178,"msg":"db ready","ctx":{"worker":0}}
+{"ts":"2026-11-16T17:31:55+08:00","lvl":"info","ch":"app","pid":730178,"msg":"gateway ready","ctx":{"worker":0,"heartbeat_sec":30}}
+{"ts":"2026-11-16T17:31:56+08:00","lvl":"info","ch":"app","pid":730178,"msg":"player disconnected, forfeit in grace","ctx":{"uid":1001,"grace_ms":15000}}
+{"ts":"2026-11-16T17:31:58+08:00","lvl":"info","ch":"app","pid":730178,"msg":"player rejoined","ctx":{"uid":1001,"room":1}}
+{"ts":"2026-11-16T17:32:03+08:00","lvl":"info","ch":"app","pid":730178,"msg":"player disconnected, forfeit in grace","ctx":{"uid":1002,"grace_ms":15000}}
+{"ts":"2026-11-16T17:32:03+08:00","lvl":"info","ch":"app","pid":730178,"msg":"player disconnected, forfeit in grace","ctx":{"uid":1001,"grace_ms":15000}}
