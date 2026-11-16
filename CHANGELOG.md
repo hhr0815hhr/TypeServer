@@ -222,6 +222,29 @@ clang 与 wasmtime 版本。发布时校校验和，能挡住"发了个旧包"�
 **灰度加载失败不影响主实例**（`canary()` 返回 false，主实例继续服务）——
 这是灰度最需要的行为：新版本坏了，老版本要能顶住。
 
+### 自托管 runner：注册文档 + 两处会真出问题的配置
+
+先确认了现状：**这台机器上还没有 runner**（无 `actions-runner` 目录、无 `Runner.Listener`
+进程）。所以现在手动触发 CI，`verify` job 会一直停在 "Waiting for a runner..."——
+这是预期行为，已写进 `CI-RUNNER.md`，否则会被当成配置错误排查很久。
+
+**`CI-RUNNER.md`** 给出 WSL 里的完整注册步骤（WSL 有 systemd，可以 `svc.sh install`
+装成服务，关机重启自动恢复），以及两个具体的坑：
+
+1. **runner 服务的 PATH 和你 shell 的不一样**，尤其不含 `~/.cargo/bin` 与
+   `~/.local/bin`。不补的话会出现"我本地明明装了，CI 说没有"。
+2. **`/etc/wsl.conf` 里 `systemd=false` 时**，`svc.sh` 装的服务不会自启。
+
+**`ci.yml` 两处修正：**
+
+- `runs-on: self-hosted` → `[self-hosted, tsf]`。不加标签的话，这台 runner 会被仓库里
+  **所有** `self-hosted` 的 job 抢走——将来加第二个自托管任务时才会发现，且很难查。
+- 增加 `$GITHUB_PATH` 步骤补 `~/.cargo/bin` 与 `~/.local/bin`，否则 `preflight` 会把
+  已经装好的 `wit-bindgen` / `wasmtime` 报成缺失。
+
+**没有 runner 也不影响验证**：`bash scripts/ci-preflight.sh` + `./tsf/bin/tsf verify`
+就是 CI 里跑的那两条命令，没有第二套逻辑——CI 与本地不一致时，"绿"的意义就没了。
+
 ### 接入 GitHub Actions：lint 走托管 runner，verify 走自托管
 
 `.github/workflows/ci.yml` 两个 job，分在不同 runner 上——这是被现实逼的，不是设计偏好：
