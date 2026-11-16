@@ -12,7 +12,7 @@ sleep 0.3
 # 清掉上次留下的快照。不清的话，`run-crash.sh` 跑完之后再来跑这一个，服务启动会把
 # 那个"已结算但还占着 1001/1002"的房间恢复出来，于是新的一局永远配不上对——
 # 现象就是两个客户端都卡在 "matching..."，看起来像匹配器坏了。
-rm -rf var/snap
+rm -rf var/snap var/drain.n*
 mkdir -p var/snap
 
 ./duel > /tmp/duel_server.log 2>&1 &

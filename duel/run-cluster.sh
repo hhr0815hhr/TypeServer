@@ -34,7 +34,7 @@ wait_port() {
 
 echo "=== 0. 清场 ==="
 cleanup
-rm -rf var/snap var/log var/settle.log var/settle.n*.log var/duel.db var/node*.lock
+rm -rf var/snap var/log var/settle.log var/settle.n*.log var/duel.db var/node*.lock var/drain.n*
 mkdir -p var/snap var/log
 ./duel migrate > /dev/null 2>&1 || { echo "迁移失败"; exit 1; }
 echo "已重置 var/"

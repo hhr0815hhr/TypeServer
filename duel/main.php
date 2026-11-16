@@ -178,7 +178,10 @@ function main(): void
     // 会**写**的命令（wallet-debit / wallet-credit）必须抢锁——它们写的就是本节点那份日志，
     // 和正在跑的服务同时写就等于两个写者，违反"每个日志文件只有一个写入进程"的前提。
     // （真要在服务运行时扣款，走 §T6-05 的 GM 通道：它和 Scheduler 同一个事件循环，天然单写者。）
-    $readOnly = $cli === "wallet-check" || $cli === "migrate" || $cli === "migrate-status";
+    // drain 也算只读：它只写一个标记文件，不碰房间状态、不碰事件日志。
+    // 否则"通知正在跑的服务退役"这件事会被服务自己的锁挡住。
+    $readOnly = $cli === "wallet-check" || $cli === "migrate"
+        || $cli === "migrate-status" || $cli === "drain";
     $lockDir = $base . "/var/node" . $nodeId . ".lock";
     $lockPidFile = $lockDir . "/pid";
     if (!$readOnly && !@mkdir($lockDir, 0777, true)) {
@@ -242,6 +245,9 @@ function main(): void
     if ($cli === "wallet-check") {
         exit(runWalletCheck($settle));
     }
+    if ($cli === "drain") {
+        exit(runDrain($base . "/var/drain.n" . $nodeId, $nodeId));
+    }
 
     // 节点号在 settle 构造之前就算好了（日志文件按它命名，见上）。
     // 多进程时每个进程配不同的 node_id：号段互不重叠，日志文件也各自独立。
@@ -257,7 +263,30 @@ function main(): void
     // 缺表时每一局战绩都会静默写失败（`recordMatch()` 吞异常），日志里是 error 级别的
     // "未执行的迁移"，但那行字很容易被忽略。真要做到"缺表就别服务"，就把下面两处
     // Logger::error 换成 throw。
-    $server->onWorkerStart(function (int $wid) use ($db, $migrationsDir, $duels, $snaps, $settle): void {
+    // drain 的两个触发方式：
+    //   - SIGTERM（标准运维接口，容器/k8s 都发这个）
+    //   - var/drain.n<id> 文件（没有信号通道时用；秒级轮询）
+    // 两个都只是"进入 drain"，真正的退出由下面的 1s 定时器判断"存量做完了没"。
+    $drainFile = $base . "/var/drain.n" . $nodeId;
+    $drainTimeoutMs = Config::getInt("server.drain_timeout_sec", 300) * 1000;
+
+    // master 侧收 SIGTERM：**只写 drain 文件，不退出**。
+    //
+    // 为什么必须挂在 master 的 Start 上：运维/k8s 发 SIGTERM 打的是 master（容器里是 PID 1）。
+    // 在 worker 里注册 handler 管不到 master——master 按默认行为直接退出，worker 连带被杀，
+    // drain 根本没机会执行（第一版就是这么失败的：SIGTERM 一来进程立刻没了）。
+    //
+    // 退出由 worker 判断"存量做完了没"来触发（下面那个 1s 定时器），
+    // master 只负责把"有人要求你退役"这件事传下去。
+    // drain 的触发方式是**文件**，不是信号。
+    //
+    // 试过两次让 master 收 SIGTERM：`\Swoole\Process::signal(SIGTERM, ...)` 在
+    // master 顶层注册、以及在 `on('Start')` 回调里注册，两次都返回成功但 **handler 从不触发**
+    // ——SWOOLE_PROCESS 模式下 master 的 SIGTERM 由 Swoole 自己接管，用户 handler 轮不到。
+    // 所以不跟它较劲：运维写 var/drain.n<id>，worker 每秒轮询到就开始退役。
+    // k8s 场景用 preStop hook 执行 `./duel drain`（见 demo/README.md）。
+
+    $server->onWorkerStart(function (int $wid) use ($db, $migrationsDir, $duels, $snaps, $settle, $server, $drainFile, $drainTimeoutMs): void {
         if ($wid === 0) {
             // 对账：独立重放一遍日志，和内存账本逐人比对。
             // 这一步会**再读一遍整份日志**（Settle 构造时已经重放过一次），
@@ -281,6 +310,44 @@ function main(): void
                     "total_log" => $rep["total_log"],
                 ]);
             }
+
+            // ---- drain：优雅退役 ----
+            // 只有 0 号 worker 需要（worker_num 恒为 1，多节点是多个进程）。
+            // 触发靠轮询 drain 文件——master 的 SIGTERM 被 Swoole 接管，用户 handler 不触发（实测两次）。
+            // 回调**必须**声明 `int $timerId` 参数：AOT 下闭包的函数签名是固定的，
+            // Swoole 调定时器回调时会传 timerId，签名为空参的闭包在这里静默失败——
+            // 表现是"定时器注册成功但一次都不触发"（踩过：探针文件始终不出现）。
+            // 框架自己的 1ms tick 也是这么声明的。
+            \Swoole\Timer::tick(1000, function (int $timerId) use ($duels, $server, $drainFile, $drainTimeoutMs): void {
+                if (is_file($drainFile)) {
+                    beginNodeDrain($duels, "drain file");
+                }
+                if (!$duels->isDraining()) {
+                    return;
+                }
+                $left = $duels->count();
+                if ($left === 0) {
+                    // 只请求一次：Swoole 的 shutdown 是异步的，定时器还会再跳几次，
+                    // 不设闸就会连着打好几遍 drain done（日志上看像是重复退役）
+                    if ($duels->requestShutdownOnce()) {
+                        Logger::info("drain done, shutting down", [
+                            "ms" => $duels->drainElapsedMs(),
+                        ]);
+                        $server->shutdown();
+                    }
+                    return;
+                }
+                if ($duels->drainElapsedMs() > $drainTimeoutMs) {
+                    // 超时兜底：继续等下去就是"这个进程永远不退"，
+                    // 而它的房间已经很可能是死局（玩家早掉线了）。宁可丢一局，也别卡住发布
+                    Logger::error("drain timeout, forcing shutdown", [
+                        "duels_left" => $left,
+                        "ms" => $duels->drainElapsedMs(),
+                        "timeout_ms" => $drainTimeoutMs,
+                    ]);
+                    $server->shutdown();
+                }
+            });
 
             try {
                 $mig = new Migrator($db, $migrationsDir);
@@ -346,9 +413,22 @@ function main(): void
     });
 
     // ---- 客户端消息 ----
-    $gw->on(Msg::MATCH_JOIN, function (int $fd, int $uid, string $body) use ($matchAddr): void {
+    $gw->on(Msg::MATCH_JOIN, function (int $fd, int $uid, string $body) use ($matchAddr, $duels, $gw): void {
         if ($uid <= 0) {
             return; // 没登录
+        }
+        // 本节点正在退役：**明确回绝**。静默不配对会让玩家以为卡了、反复重试，
+        // 而排进去的对局也会在 create() 那里被拒，白等一轮
+        if ($duels->isDraining()) {
+            // 这个 demo 的协议是 `payload: raw`，所以载荷**必须是字符串**。
+            // 传数组会让 `Gateway::send()` 抛 "payload=raw 时业务消息必须是 string"，
+            // 而 handler 外面有 try/catch —— 异常被吞掉，玩家看不到任何回绝、只会一直等。
+            // （踩过一次：日志里连"拒绝"都没有，只有客户端 timeout。）
+            $gw->send($fd, Msg::NOTICE, json_encode([
+                "code" => "draining",
+                "text" => "本服正在维护，请稍后再试",
+            ]));
+            return;
         }
         Scheduler::instance()->deliver($matchAddr, MatchService::MSG_JOIN, [
             "uid" => $uid,
@@ -461,6 +541,43 @@ function printMigrateStatus(Db $db, string $dir): int
         echo "读取迁移状态失败: " . $e->getMessage() . PHP_EOL;
         return 1;
     }
+}
+
+/**
+ * 运维命令：通知本节点退役（写 drain 标记文件，由进程自己轮询）。
+ *
+ * 为什么不用 SIGTERM：SWOOLE_PROCESS 模式下 master 的 SIGTERM 由 Swoole 接管，
+ * 用户注册的 handler 不触发（顶层与 Start 回调都试过）。文件触发不依赖信号通道，
+ * 容器里、跳板机上、`docker exec` 里都能用。
+ */
+function runDrain(string $file, int $nodeId): int
+{
+    $ok = @file_put_contents($file, (string) time());
+    if ($ok === false) {
+        echo "ERROR   写不了 " . $file . "（目录不存在或只读）" . PHP_EOL;
+        return 1;
+    }
+    echo "OK      已通知 node " . $nodeId . " 退役（" . $file . "）" . PHP_EOL;
+    echo "        服务会在存量房间打完后自己退出；进度看日志里的 drain started / drain done。" . PHP_EOL;
+    echo "        注意：要跟目标进程用同一个 node_id 执行本命令（TSF_ENV=node1 ./duel drain）。" . PHP_EOL;
+    return 0;
+}
+
+/**
+ * 让本节点进入 drain：不再建新房，继续服务存量，等它自己打完。
+ *
+ * 幂等：重复调用只记一次。
+ */
+function beginNodeDrain(DuelManager $duels, string $why): void
+{
+    if ($duels->isDraining()) {
+        return;
+    }
+    $duels->beginDrain();
+    Logger::info("drain started", [
+        "why" => $why,
+        "duels" => $duels->count(),
+    ]);
 }
 
 /**
