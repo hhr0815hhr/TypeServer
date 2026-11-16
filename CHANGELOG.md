@@ -111,6 +111,40 @@ TCP 连接绑在进程上，节点崩了 socket 就没了。要在旧节点做�
 测试：`duel-settle` **34 → 45**（认领过滤 9 项：两个 node 从同一快照目录认领、
 `not_mine` 计数正确、**别人的快照没被删**、各自清掉自己的坏快照；段末溢出返回 0）。
 
+### 阶段 1b：多进程真的跑起来（`run-cluster.sh` 11 项）
+
+**先说端口这个坑**：同机多进程不能共用端口。实测 Swoole 在 `new Server()` 构造时就 bind，
+`set(['reuse_port' => true])` 来不及生效——第二个进程直接 `Address already in use`。
+所以本阶段用**每进程独立端口**（9101 / 9102），真部署时前面挂网关或 LB，
+或者改用 `SWOOLE_BASE` + `SO_REUSEPORT`（留作后续）。
+
+改动：
+
+- **`node_id` 唯一性锁**：`mkdir var/node<N>.lock` 原子占位 + pid 文件，pid 还活着就拒绝启动。
+  这是多进程下最要命的一条——两个进程用同一个 `node_id` 就是**同一个号段两个主人**，
+  各自建出同一个房间号、各自往同一个快照写、`duel:<号>` 互相判重，也就是设计里最怕的"双主"，
+  而且它不报错，只让账慢慢对不上。`kill -9` 留下的残骸会被下一个进程接管（读 pid + 查 `/proc`）。
+- **只读命令不抢锁**：服务在跑时 `wallet-check` / `migrate-status` 仍然可用。
+  会写的 `wallet-debit`/`wallet-credit` 必须抢锁（它们写的就是本节点那份日志，
+  和运行中的服务同时写 = 两个写者）；要在服务运行时扣款，走 GM 通道（和 Scheduler 同一事件循环）。
+- **闸门口径改了**：同进程内多 `Swoole worker` 仍不支持（没有共享调度器），
+  但多**进程**可以——每个进程 `worker_num=1` + 各自 `node_id`/端口。异常信息里直接写了这两句。
+- `config/tsf.node1.json`：用现成的 `TSF_ENV` 机制给 node 1 覆盖 `node_id`/`port`/日志文件，
+  不需要改代码就能起第二个节点。
+
+验收 `bash run-cluster.sh`，11 项全过：
+
+```
+PASS 两个进程都在监听（9101 / 9102）
+PASS node 0 的房间号在 0 段（duel:1）
+PASS node 1 的房间号在 1 段（duel:1000000001）
+PASS node 0 的日志没有 1 段的号
+PASS node 1 的日志没有 0 段的号
+PASS 归并后看到两个节点的 2 条事件     ← wallet-check 读两份日志
+PASS 重复 node_id 被拒绝
+PASS 杀 node 1 后 node 0 不受影响
+```
+
 ## v0.6.0 — 2026-11-16（首次封版）
 
 首个可交付版本。对应里程碑 M0–M6 全部交付，M7（wasm 热更）未做。
@@ -205,7 +239,7 @@ TCP 连接绑在进程上，节点崩了 socket 就没了。要在旧节点做�
 | 场景 | 状态 |
 |:--|:--|
 | 单 worker 房间类玩法、内部框架、demo | 已验证（26 个 bench、1,111 条断言） |
-| 多 worker + 事件日志 | **不支持**（启动会拒绝）；多 worker 整体未验证 |
+| 同进程多 worker | **不支持**（启动会拒绝）；多**进程**可用（各配 node_id + 端口，见 `demo/duel/run-cluster.sh`） |
 | 扣钱 / 余额对账 | v0.6.0 时只有发奖（见上「未发布」）。现在有扣款/充值/对账；余额仍靠启动全量重放，db 战绩与事件日志之间仍无关联 |
 | 大日志量 | 未做 checkpoint/truncate 自动化，启动时间随日志线性增长 |
 | 非 Linux | 只验过 WSL/Linux，Windows/macOS 未测 |

@@ -145,10 +145,11 @@ function main(): void
     $workers = Config::getInt("server.worker_num", 1);
     if ($workers > 1) {
         throw new \RuntimeException(
-            "这个 demo 只支持单 worker，但 server.worker_num=" . $workers . "。"
-            . "实测三处缺口：①快照被每个 worker 各恢复一次，同一房间会有两份状态；"
-            . "②事件日志多进程写会撞号；③房间号各 worker 各数一份，跨 worker 重复会让结算被跳过。"
-            . "要支持多 worker 得先设计「房间归属」（谁负责哪些房间、重启后怎么认领、跨 worker 怎么路由）。"
+            "同一个进程内的多 worker 不支持，但**多进程可以**：server.worker_num=" . $workers . "。"
+            . "Swoole 的 worker 之间没有共享调度器，每个 worker 一份服务表，"
+            . "在进程内「协作」等于把单进程的正确性拆成 N 份互不知情的事实。"
+            . "要多开就起多个进程：每个进程 worker_num=1 + 各自不同的 server.node_id 和 server.port。"
+            . "（`run-cluster.sh` 就是这么起的。）"
         );
     }
     // ---- 事件日志：每个节点一个文件，读侧收全部 ----
@@ -161,6 +162,50 @@ function main(): void
     // 好处是升级不需要停机搬数据，坏处是同一个逻辑日志会横跨两代文件——
     // 归并按 (t, 文件序号, s) 排序，跨代的顺序仍然确定。
     $nodeId = Config::getInt("server.node_id", 0);
+    if ($nodeId < 0 || $nodeId > 255) {
+        throw new \RuntimeException("server.node_id 必须在 0..255，当前 " . $nodeId);
+    }
+
+    // ---- 节点身份锁：同一个 node_id 只能有一个进程 ----
+    //
+    // 这是多进程下最要命的一条：两个进程用同一个 node_id，就是**同一个号段有两个主人**，
+    // 会各自建出同一个房间号、各自往同一个快照文件写、各自的 `duel:<号>` 结算互相判重——
+    // 也就是设计里最怕的"双主"，而且它不会报错，只会让账慢慢对不上。
+    //
+    // 用 mkdir 做原子占位（和 Migrator 的锁同一招：`flock` 不在 AOT 的 std 表面里）。
+    // 锁目录里写 pid，启动时若发现 pid 还活着就拒绝；死了（kill -9 留下的残骸）就接管。
+    // 只读命令不抢锁：服务在跑的时候，运维仍然要能查账（`wallet-check`）和看迁移状态。
+    // 会**写**的命令（wallet-debit / wallet-credit）必须抢锁——它们写的就是本节点那份日志，
+    // 和正在跑的服务同时写就等于两个写者，违反"每个日志文件只有一个写入进程"的前提。
+    // （真要在服务运行时扣款，走 §T6-05 的 GM 通道：它和 Scheduler 同一个事件循环，天然单写者。）
+    $readOnly = $cli === "wallet-check" || $cli === "migrate" || $cli === "migrate-status";
+    $lockDir = $base . "/var/node" . $nodeId . ".lock";
+    $lockPidFile = $lockDir . "/pid";
+    if (!$readOnly && !@mkdir($lockDir, 0777, true)) {
+        $holder = 0;
+        $raw = @file_get_contents($lockPidFile);
+        if (is_string($raw)) {
+            $holder = (int) trim($raw);
+        }
+        $alive = $holder > 0 && is_dir("/proc/" . $holder);
+        if ($alive) {
+            throw new \RuntimeException(
+                "node_id=" . $nodeId . " 已被进程 " . $holder . " 占用。"
+                . "同一个 node_id 只能有一个进程——两个进程共用一个号段就是两个主人，"
+                . "会各自建出同一个房间号（双主）。请给每个进程配不同的 server.node_id。"
+            );
+        }
+        // 上一个是 kill -9 走的，锁是残骸：清掉接管
+        @unlink($lockPidFile);
+        @rmdir($lockDir);
+        if (!@mkdir($lockDir, 0777, true)) {
+            throw new \RuntimeException("无法获取 node_id=" . $nodeId . " 的锁：" . $lockDir);
+        }
+    }
+    if (!$readOnly) {
+        @file_put_contents($lockPidFile, (string) getmypid());
+    }
+
     $settlePath = Config::getString(
         "settle.path",
         $base . "/var/settle.n" . $nodeId . ".log"

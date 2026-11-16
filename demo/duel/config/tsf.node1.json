@@ -1,0 +1,9 @@
+{
+    "server": {
+        "node_id": 1,
+        "port": 9102
+    },
+    "log": {
+        "file": "${base}/var/log/app.n1.log"
+    }
+}

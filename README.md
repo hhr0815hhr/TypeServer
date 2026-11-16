@@ -46,7 +46,7 @@ tsf/                 框架本体（src 核心 + pkg 可选包 + bin/tsf CLI + t
   pkg/               9 个可选包：fsm entity frameloop room aoi match db snapshot eventlog
   ext/codec/         原生帧编解码（C++，可关）
   tools/             config 导出、proto 生成（不进 AOT）
-demo/                duel（完整对局示例）、demo-echo（最小 echo）
+demo/                duel（完整对局示例，含多进程 run-cluster.sh）、demo-echo（最小 echo）
 bench/               58 个目录：功能断言、性能基准、一次性技术探针（probe-*）
 tpc-patches/         对 typephp 编译器的本地补丁（AOT 下必须）
 tools/repo-guard.py  提交前检查：抓「被 .gitignore 误挡的源码」
@@ -73,9 +73,11 @@ spike/               一次性技术验证（S1~S6、E1/E2/E4），只保留结�
 
 这些不是"待优化"，是**刻意的边界**，踩上去不会报错只会静默出错：
 
-1. **事件日志只支持单写入进程。** 两个进程写同一份日志，`seq` 必然冲突
-   （实测 120 条记录只有 61 个不同序号）。多进程要写同类事实，按 worker 分文件。
-   `demo/duel` 里 `worker_num > 1` 会直接拒绝启动。
+1. **事件日志每个文件只支持一个写入进程。** 两个进程写同一份日志，`seq` 必然冲突
+   （实测 120 条记录只有 61 个不同序号）。所以多进程时**按节点分文件**：
+   `var/settle.n<节点号>.log`，读侧归并（`MergedLog`）。
+   `demo/duel` 里同一个进程内开多 `Swoole worker` 会直接拒绝——多开请起多个**进程**
+   （各配不同的 `server.node_id` 与端口，见 `demo/duel/run-cluster.sh`）。
 2. **幂等键一旦取自内存计数器，就必须从持久化真相里恢复。** 房号只在内存里从 1 数起，
    复用就会让新一局被判"已结过账"——钱静默不发，日志也不多一行。
 3. **服务抛异常 = 该服务被销毁**（`Scheduler` 记 error 后 `kill`）。所以"钱"这条路径上

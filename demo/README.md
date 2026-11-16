@@ -66,3 +66,34 @@ Timers.cc:137: cannot convert 'php::Variant' to 'php::Int'
 不写绝对路径的原因：仓库 clone 到别处跑起来，会把日志和库写回**原来那个目录**——
 看起来一切正常，实际在污染另一棵树。这个坑在 2026-11-16 整理仓库时实际验证过。
 
+
+## 多进程（`run-cluster.sh`）
+
+同一台机器起两个进程，各占一个号段：
+
+```bash
+bash run-cluster.sh      # 11 项断言
+```
+
+它干的事：
+
+```
+node 0: server.node_id=0, port=9101   → 房间号从 1 开始
+node 1: server.node_id=1, port=9102   → 房间号从 1000000001 开始
+```
+
+node 1 的配置在 `config/tsf.node1.json`，靠现成的 `TSF_ENV=node1` 机制叠加
+（`Config` 会按 `tsf.json` → `tsf.node1.json` 的顺序覆盖），不需要改代码。
+
+**两个约束要知道**：
+
+- **端口不能共用。** Swoole 在 `new Server()` 构造时就 bind，`reuse_port` 选项来不及生效
+  （实测第二个进程直接 `Address already in use`）。真部署时前面挂网关/LB。
+- **`node_id` 唯一。** 进程启动时用 `var/node<N>.lock`（mkdir 原子占位 + pid）占位，
+  同号第二个进程直接拒绝。两个进程共用一个号段 = 两个主人，会各自建出同一个房间号，
+  是设计里最怕的"双主"，而且不报错，只让账慢慢对不上。
+  `kill -9` 留下的锁会被下一个进程接管（读 pid + 查 `/proc`）。
+
+只读命令（`wallet-check` / `migrate-status`）不抢锁，服务在跑时也能查账；
+会写的 `wallet-debit` / `wallet-credit` 必须抢锁——它们写的就是本节点那份日志。
+要在服务运行时扣款，走 GM 通道（和 Scheduler 同一个事件循环，天然单写者）。
