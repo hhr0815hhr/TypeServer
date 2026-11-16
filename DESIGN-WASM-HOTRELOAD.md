@@ -125,6 +125,39 @@ final class Registry          // 名称 → 当前实例；灰度期可能同时
 建议先只做第 1 步，用一个最小模块（`add` + 一个 E1 里没有的 `mul`）验证
 "新增导出函数不重编宿主"——这一条过了，M7 才成立。
 
+### 第 1 步进度（2026-11-16）
+
+已改 `spike/e1/cpp-src/wasm_bridge.cc`，新增两个通用入口（纯增量，不动既有函数）：
+
+```cpp
+Int php_wasm_call2(Int h, Str fn, Int a, Int b);   // PHP: wasm_call2($h, "add", 1, 2)
+Int php_wasm_call1(Int h, Str fn, Int a);          // PHP: wasm_call1($h, "burn", n)
+```
+
+实现要点：
+
+- **底层本来就是按名调用**（`tp_call1/tp_call2` 接 `const char *name`），E1 只是把它
+  包成了逐函数绑定。所以这一步不需要改 wasmtime 交互，只把名字透出去。
+- 错误码与 `call_idx2` 完全一致（`-1000` 句柄无效 / `-3000` 已 trap 并重建 /
+  `-2000+rc` 其他），trap 后走同一个 `recover()`，调用计数与计时口径也一致——
+  否则两个入口的观测数据没法放在一起看。
+- 计时默认关闭的行为保留了：`clock_gettime` 每次 20–30 ns，开着会把 782 ns 的量级污染。
+
+**验证状态：只做了语法检查，没跑通。**
+
+```
+g++ -std=c++17 -fsyntax-only -I<phpx.h> -I<php 头> wasm_bridge.cc   # 无输出
+```
+
+语法检查只能证明类型与签名合法，**不能**证明"新增导出函数真的不用重编"。要完成第 1 步的
+验收还差三件事：
+
+1. 重建 `e1_stub`（依赖 `libtp_host.so` + wasmtime，见 `spike/e1/project.yml`）；
+2. 在 `spike/e1/main.php` 里加一组调用：`wasm_call2($h, "add", 1, 2)` 应得 3；
+   `wasm_call2($h, "不存在的名字", 0, 0)` 应返回错误码（证明名字是运行时解析的）；
+3. 往模块里加一个 E1 没有的导出（如 `mul`）并重新预编译 `.cwasm`，
+   **不重编 e1_stub** 也能调通——这条才是真正的验收。
+
 ---
 
 ## 六、风险与未验证项
