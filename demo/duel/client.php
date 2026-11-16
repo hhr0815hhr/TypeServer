@@ -20,6 +20,9 @@ const MSG_ATTACK = 5202;
 const MSG_STATE = 5300;
 const MSG_RESULT = 5301;
 
+// 服务端的一句话通知（本服 drain/维护时拒绝匹配）
+const MSG_NOTICE = 5400;
+
 const ATTACK_RANGE = 1500;
 const ATTACK_CD_MS = 800;
 
@@ -90,6 +93,13 @@ while (microtime(true) < $deadline) {
     $r = readFrame($sock, 0.5);
     if ($r === null) {
         continue;
+    }
+    if ($r[0] === MSG_NOTICE) {
+        $n = json_decode($r[1], true);
+        $code = is_array($n) && isset($n["code"]) ? (string) $n["code"] : "notice";
+        $text = is_array($n) && isset($n["text"]) ? (string) $n["text"] : "";
+        echo "[" . $uid . "] NOTICE " . $code . ": " . $text . PHP_EOL;
+        exit(3);
     }
     if ($r[0] === MSG_MATCH_FOUND) {
         $found = json_decode($r[1], true);

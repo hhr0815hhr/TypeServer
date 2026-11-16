@@ -97,3 +97,25 @@ node 1 的配置在 `config/tsf.node1.json`，靠现成的 `TSF_ENV=node1` 机�
 只读命令（`wallet-check` / `migrate-status`）不抢锁，服务在跑时也能查账；
 会写的 `wallet-debit` / `wallet-credit` 必须抢锁——它们写的就是本节点那份日志。
 要在服务运行时扣款，走 GM 通道（和 Scheduler 同一个事件循环，天然单写者）。
+
+## 退役（drain）
+
+```bash
+bash run-drain.sh          # 8 项断言
+./duel drain               # 手工：通知本节点退役（写 var/drain.n0）
+```
+
+语义是**先把存量做完**：不再建新房（匹配回 `NOTICE draining`）→ 等现有对局打完 →
+进程自己退出。超时 `server.drain_timeout_sec`（默认 300 秒）强退并记 error。
+
+**不用 SIGTERM**：SWOOLE_PROCESS 模式下 master 的 SIGTERM 由 Swoole 接管，
+用户注册的 handler 不触发（顶层和 `Start` 回调都实测过）。k8s 里这样写：
+
+```yaml
+lifecycle:
+  preStop:
+    exec:
+      command: ["/bin/sh", "-c", "cd /app/demo/duel && ./duel drain && sleep 30"]
+```
+
+多节点时记得带 `TSF_ENV`：`TSF_ENV=node1 ./duel drain` 写的是 `var/drain.n1`。

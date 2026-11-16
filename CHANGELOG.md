@@ -111,6 +111,37 @@ TCP 连接绑在进程上，节点崩了 socket 就没了。要在旧节点做�
 测试：`duel-settle` **34 → 45**（认领过滤 9 项：两个 node 从同一快照目录认领、
 `not_mine` 计数正确、**别人的快照没被删**、各自清掉自己的坏快照；段末溢出返回 0）。
 
+### 阶段 2：drain（节点退役）——`run-drain.sh` 8 项
+
+退役的语义是**先把存量做完**，不是"收到信号就退"：房间状态在内存里，硬退会让所有
+进行中的对局退回快照（玩家视角是"打到一半被重置"）。
+
+流程：写 `var/drain.n<id>` → 进程每秒轮询到 → 停止建新房（匹配请求回 `NOTICE draining`）
+→ 等 `count() == 0` → 自己 `shutdown()`。超时（默认 300s）强退并记 error。
+
+```
+PASS 服务端轮询到 drain 文件，进入退役
+PASS 新匹配收到 NOTICE draining（客户端退出码 3）
+PASS 被打断不了：老对局拿到 RESULT
+PASS 进程自己退出了（不需要 kill -9）
+PASS 只结算了存量那一局
+```
+
+**为什么不用 SIGTERM**：试过两次让 master 收 SIGTERM——`\Swoole\Process::signal(SIGTERM, ...)`
+在 master 顶层、以及在 `on('Start')` 回调里注册，**两次都返回成功但 handler 从不触发**
+（SWOOLE_PROCESS 模式下 master 的 SIGTERM 由 Swoole 自己接管）。所以改成文件触发，
+不依赖信号通道；k8s 用 `preStop` hook 执行 `./duel drain`。
+
+**过程中踩到两个静默失败**（都已写进 `tsf/README.md` §5.2.2）：
+
+1. `Swoole\Timer::tick` 的回调**必须声明 `int $timerId`**，空参闭包在 AOT 下一次都不触发、
+   且没有任何报错。定位办法：在回调里写探针文件，比看日志快。
+2. `Gateway::send()` 在 `payload: raw` 时**必须传 string**，传数组会抛异常，
+   而消息 handler 外面有 try/catch —— 异常被吞，表现是"玩家一直等匹配"。
+
+顺带修：`runDrain` 的 `drain` 命令要加进"不抢节点锁"的白名单，否则"通知正在跑的服务退役"
+会被服务自己的 `node_id` 锁挡住。
+
 ### 阶段 1b：多进程真的跑起来（`run-cluster.sh` 11 项）
 
 **先说端口这个坑**：同机多进程不能共用端口。实测 Swoole 在 `new Server()` 构造时就 bind，

@@ -42,6 +42,20 @@ final class DuelManager
     private int $nodeId = 0;
 
     /**
+     * 退役中：不再建新房，但**继续服务已有的房间**，直到它们打完。
+     *
+     * 为什么不是"收到信号就退出"：房间状态在内存里，硬退会让所有进行中的对局
+     * 退回快照（玩家视角是"打到一半被重置"）。drain 的语义是"先把存量做完"。
+     */
+    private bool $draining = false;
+
+    /** 进入 drain 的时刻（毫秒），用于超时兜底 */
+    private int $drainAtMs = 0;
+
+    /** 是否已经请求过关闭（防止定时器反复触发） */
+    private bool $shutdownRequested = false;
+
+    /**
      * 下面这三个（`Repo` / `Store` / `Settle`）是**进程内设施**，直接传进每个房间服务的
      * 构造函数。单进程单线程下完全安全——调度器保证同一个服务不会并发执行。
      *
@@ -95,6 +109,10 @@ final class DuelManager
             return 0;
         }
         if (isset($this->addrOf[$uidA]) || isset($this->addrOf[$uidB])) {
+            return 0;
+        }
+        if ($this->draining) {
+            // 建房被拒 ≠ 玩家有错，所以不抛异常、不记 error；由调用方回一条明确提示
             return 0;
         }
 
@@ -267,6 +285,45 @@ final class DuelManager
         unset($this->addrOf[$uid]);
     }
 
+    /**
+     * 请求关闭，且**只返回一次 true**。
+     *
+     * 定时器每 1s 跳一次，而 Swoole 的 `shutdown()` 是异步的——不设闸的话
+     * 会在真正退出前反复"请求关闭"，日志上表现为连着好几遍 drain done。
+     */
+    public function requestShutdownOnce(): bool
+    {
+        if ($this->shutdownRequested) {
+            return false;
+        }
+        $this->shutdownRequested = true;
+        return true;
+    }
+
+    /** 进入退役：之后不再建新房，等待存量打完 */
+    public function beginDrain(): void
+    {
+        if ($this->draining) {
+            return;
+        }
+        $this->draining = true;
+        $this->drainAtMs = (int) (microtime(true) * 1000);
+    }
+
+    public function isDraining(): bool
+    {
+        return $this->draining;
+    }
+
+    /** 已经 drain 了多久（毫秒）；没在 drain 返回 0 */
+    public function drainElapsedMs(): int
+    {
+        if (!$this->draining || $this->drainAtMs === 0) {
+            return 0;
+        }
+        return (int) (microtime(true) * 1000) - $this->drainAtMs;
+    }
+
     /** 当前进行中的对局数 */
     public function count(): int
     {
@@ -279,6 +336,7 @@ final class DuelManager
         return [
             "duels" => intdiv(count($this->addrOf), 2),
             "created" => $this->created,
+            "draining" => $this->draining ? 1 : 0,
         ];
     }
 }
