@@ -380,6 +380,48 @@ function caseReconcile(): void
     $log->close();
 }
 
+
+function caseMergeNodeLogs(): void
+{
+    echo "== [14] 多节点日志：归并读、跨节点对账 ==" . PHP_EOL;
+    $p0 = fresh("node0");
+    $p1 = fresh("node1");
+
+    // 两个节点各写各的文件（房间号按节点分段）
+    $l0 = new EventLog($p0);
+    $s0 = new Settle($l0);
+    $s0->settle(1, 7001);
+    $s0->settle(2, 7002);
+    $l0->close();
+
+    $l1 = new EventLog($p1);
+    $s1 = new Settle($l1);
+    $s1->settle(1000000001, 7001);
+    $l1->close();
+
+    // 读侧把两个文件归并
+    $r0 = new EventLog($p0);
+    $r1 = new EventLog($p1);
+    $both = new Settle($r0, null, [$r0, $r1]);
+
+    T::eq($both->balanceOf(7001), 200, "7001 跨节点两局都算上");
+    T::eq($both->balanceOf(7002), 100, "7002 一局");
+    T::ok($both->isSettled(1), "node 0 的房间在去重表里");
+    T::ok($both->isSettled(1000000001), "node 1 的房间也在");
+
+    $rep = $both->reconcile();
+    T::ok($rep["ok"], "跨节点对账平");
+    T::eq($rep["events"], 3, "归并后 3 条事件");
+    T::eq($rep["players"], 2, "2 个玩家");
+
+    // 归并必须**确定**：重放两次结果一样，否则对账会出现假警报
+    $before = $both->wallet()->all();
+    $both->rebuildFrom();
+    T::ok($both->wallet()->all() === $before, "重放两次结果一致（归并顺序确定）");
+    $r0->close();
+    $r1->close();
+}
+
 function main(): void
 {
     @mkdir(DIR, 0777, true);
@@ -396,6 +438,7 @@ function main(): void
     caseDebitIdempotent();
     caseDebitRebuild();
     caseReconcile();
+    caseMergeNodeLogs();
 
     echo PHP_EOL . "结果: " . T::$pass . " 通过 / " . T::$fail . " 失败" . PHP_EOL;
     exit(T::$fail === 0 ? 0 : 1);

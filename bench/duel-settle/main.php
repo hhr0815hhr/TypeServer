@@ -16,6 +16,7 @@ use Duel\DuelService;
 use Duel\Settle;
 use TSF\EventLog\EventLog;
 use TSF\Service\Message;
+use TSF\Room\RoomIds;
 use TSF\Service\Scheduler;
 
 const DIR = "/tmp/duel_settle_test";
@@ -203,6 +204,44 @@ function caseNoRoomIdReuse(): void
     $log2->close();
 }
 
+
+/**
+ * 房间号按节点分段：node 0 与旧行为一致，node 1 起从 10 亿段开始，互不重叠。
+ */
+function caseSegmentIds(): void
+{
+    echo "== [6] 房间号按节点分段 ==" . PHP_EOL;
+    T::eq(RoomIds::compose(0, 7), 7, "node 0 的号就是序号（向后兼容）");
+    T::eq(RoomIds::compose(1, 7), 1000000007, "node 1 在 10 亿段");
+    T::eq(RoomIds::node(1000000007), 1, "反解节点号");
+    T::eq(RoomIds::seq(1000000007), 7, "反解段内序号");
+    T::eq(RoomIds::nextSeq(1, [1, 2, 3, 1000000005]), 6, "只在本段内取最大");
+    T::eq(RoomIds::compose(256, 1), 0, "越界节点返回 0");
+    // 用 ok 而不是 eq：T::eq 的第一个参数在前面几次调用里已经定型成 int，
+    // AOT 按**首次调用**定型后，这里再传 string 会报
+    // "Cannot re-assign variable from php::Str to php::Int"
+    T::ok(RoomIds::label(1000000007) === "n1#7", "展示形式");
+
+    Scheduler::reset();
+    $path = freshLog("seg");
+    $log = new EventLog($path);
+    $st = new Settle($log);
+    $st->settle(1000000003, 9001);   // node 1 的段
+    $st->settle(42, 9001);           // node 0 的段
+    $log->close();
+
+    $log2 = new EventLog($path);
+    $st2 = new Settle($log2);
+    T::eq($st2->maxRoomIn(1), 1000000003, "段内最大号");
+    T::eq($st2->maxRoomIn(0), 42, "另一段的最大号");
+
+    $mgr = new DuelManager(null, null, null, $st2, 1);
+    T::eq($mgr->create(9101, 9102), 1000000004, "node 1 的下一个号接在本段后面");
+    $mgr2 = new DuelManager(null, null, null, $st2, 0);
+    T::eq($mgr2->create(9201, 9202), 43, "node 0 不受 node 1 的号影响");
+    $log2->close();
+}
+
 function main(): void
 {
     @mkdir(DIR, 0777, true);
@@ -211,6 +250,7 @@ function main(): void
     caseDraw();
     caseRestartAfterWiring();
     caseNoRoomIdReuse();
+    caseSegmentIds();
 
     echo PHP_EOL . "结果: " . T::$pass . " 通过 / " . T::$fail . " 失败" . PHP_EOL;
     exit(T::$fail === 0 ? 0 : 1);
