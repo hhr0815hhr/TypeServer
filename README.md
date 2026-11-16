@@ -60,6 +60,8 @@ tsf/                 框架本体
   ext/codec/         原生帧编解码（C++，可关）
   tools/             config 导出、proto 生成（不进 AOT）
 bench/               功能断言与基准（tsf verify 依赖它，属于框架本体）
+docs/guide/          使用教程（00 快速开始 …）
+docs/                设计文档与 spike 结论
 scripts/             ci-preflight.sh 等
 tpc-patches/         对 typephp 编译器的本地补丁（AOT 下必须）
 .github/workflows/   CI：lint 走托管 runner，verify 走自托管
@@ -78,11 +80,13 @@ spike/               一次性技术验证，只保留结论文档入仓库
 
 ## 文档
 
-根目录只保留 7 份，全部是"当前有效"的：
+文档分两层：**`docs/guide/`** 是使用教程（讲怎么做），其余是参考与依据（讲为什么）。
+根目录只留 README 与 CHANGELOG：
 
 | 想知道 | 看 | 状态 |
 |:--|:--|:--|
-| 框架怎么用、编码约束 | `tsf/README.md` | 权威，按主题分节 |
+| **想上手写东西** | **`docs/guide/`** | **使用教程，按顺序读** |
+| 框架怎么用、编码约束 | `tsf/README.md` | 权威参考，按主题分节（4000 行） |
 | 每个任务做了什么、验收数字 | `docs/FRAMEWORK-TASK.md` | 权威任务表（M0–M7） |
 | 这一版有什么、边界在哪 | `CHANGELOG.md` | 按时间倒序 |
 | 为什么这么分层（含 libhv 取舍） | `docs/ARCHITECTURE-DESIGN.md` | 设计依据 |
