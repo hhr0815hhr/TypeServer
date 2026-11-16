@@ -168,7 +168,10 @@ function main(): void
         exit(runWalletCheck($settle));
     }
 
-    $duels = new DuelManager($publish, $records, $snaps, $settle);
+    // 节点号：房间号按它分段编址（`RoomIds`）。单机保持 0，号还是 1,2,3……
+    // 多进程时每个进程配不同的 node_id，各自的号段互不重叠。
+    $nodeId = Config::getInt("server.node_id", 0);
+    $duels = new DuelManager($publish, $records, $snaps, $settle, $nodeId);
 
     // ---- 迁移：启动只校验，不建表 ----
     // 建表是部署动作（`./duel migrate`），这里只回答两个问题：

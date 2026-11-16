@@ -3,6 +3,8 @@
 namespace Duel;
 
 use TSF\EventLog\EventLog;
+use TSF\EventLog\MergedLog;
+use TSF\Room\RoomIds;
 use TSF\Kernel\Logger;
 
 /**
@@ -61,6 +63,14 @@ final class Settle
 
     private EventLog $log;
 
+    /**
+     * 读侧日志：默认只有自己的那一份；多节点时传入全部节点的文件（见 `MergedLog`）。
+     * 写永远只写 `$log`——房间归属保证同一个房间只由一个节点写，所以不需要多写者协调。
+     *
+     * @var array<EventLog>
+     */
+    private array $readers = [];
+
     private Wallet $wallet;
 
     /** @var array<string, true> 已经折叠过的业务 id */
@@ -81,11 +91,31 @@ final class Settle
     /** @var int 日志里出现过的最大房间号（进程重启后用来避开已经结过账的号） */
     private int $maxRoom = 0;
 
-    public function __construct(EventLog $log, ?Wallet $wallet = null)
+    /** @var array<int, true> 日志里出现过的房间号，按节点分段续号时要用 */
+    private array $rooms = [];
+
+    /**
+     * @param array<EventLog> $readers 读侧日志（多节点时传全部节点的文件）。空 = 只读自己那份
+     */
+    public function __construct(EventLog $log, ?Wallet $wallet = null, array $readers = [])
     {
         $this->log = $log;
+        $this->readers = $readers === [] ? [$log] : $readers;
         $this->wallet = $wallet !== null ? $wallet : new Wallet();
         $this->rebuildFrom();
+    }
+
+    /**
+     * 读出待折叠的事件：单文件直接用，多文件走归并（顺序确定，见 `MergedLog`）。
+     *
+     * @return array<array{s: int, id: string, k: string, t: int, d: array}>
+     */
+    private function readEvents(int $fromSeq): array
+    {
+        if (count($this->readers) === 1) {
+            return $this->readers[0]->replay($fromSeq);
+        }
+        return MergedLog::replay($this->readers, $fromSeq);
     }
 
     /**
@@ -100,7 +130,8 @@ final class Settle
         $this->settled = 0;
         $this->debited = 0;
         $this->maxRoom = 0;
-        foreach ($this->log->replay($fromSeq) as $ev) {
+        $this->rooms = [];
+        foreach ($this->readEvents($fromSeq) as $ev) {
             $this->apply($ev);
         }
         return $this->replayed;
@@ -129,6 +160,9 @@ final class Settle
             $room = isset($d["room"]) ? (int) $d["room"] : 0;
             if ($room > $this->maxRoom) {
                 $this->maxRoom = $room;
+            }
+            if ($room > 0) {
+                $this->rooms[$room] = true;
             }
             $this->wallet->credit(
                 isset($d["winner"]) ? (int) $d["winner"] : 0,
@@ -192,6 +226,7 @@ final class Settle
         if ($roomId > $this->maxRoom) {
             $this->maxRoom = $roomId;
         }
+        $this->rooms[$roomId] = true;
         $this->wallet->credit($winner, $amount);
         $this->lastSeq = $seq;
         return true;
@@ -288,7 +323,7 @@ final class Settle
         $badDebits = [];
         $events = 0;
 
-        foreach ($this->log->replay(1) as $ev) {
+        foreach ($this->readEvents(1) as $ev) {
             $events++;
             $id = (string) $ev["id"];
             if (isset($seen[$id])) {
@@ -381,6 +416,27 @@ final class Settle
     public function maxSettledRoom(): int
     {
         return $this->maxRoom;
+    }
+
+    /**
+     * 本节点号段里出现过的最大房间号（没有则 0）。
+     *
+     * 和 `maxSettledRoom()` 的区别：那个是**全局**最大，只适合单写者；
+     * 多节点时号是分段的（`RoomIds`），各自只关心自己那一段，否则节点 1 会从
+     * 节点 0 的号后面接着数，白扔掉自己整段空间。
+     */
+    public function maxRoomIn(int $node): int
+    {
+        $max = 0;
+        foreach ($this->rooms as $rid => $one) {
+            if (RoomIds::node($rid) !== $node) {
+                continue;
+            }
+            if ($rid > $max) {
+                $max = $rid;
+            }
+        }
+        return $max;
     }
 
     public function isSettled(int $roomId): bool

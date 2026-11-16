@@ -5,6 +5,7 @@ namespace Duel;
 use TSF\Db\Repo;
 use TSF\Kernel\Logger;
 use TSF\Service\Scheduler;
+use TSF\Room\RoomIds;
 use TSF\Snapshot\Restorer;
 use TSF\Snapshot\Snapshot;
 use TSF\Snapshot\Store;
@@ -37,6 +38,9 @@ final class DuelManager
     /** 金币结算，向下传给每个房间（**同一个实例**，去重表才有一致的视图） */
     private ?Settle $settle;
 
+    /** 本进程的节点号：房间号按节点分段编址（见 `TSF\Room\RoomIds`） */
+    private int $nodeId = 0;
+
     /**
      * 下面这三个（`Repo` / `Store` / `Settle`）是**进程内设施**，直接传进每个房间服务的
      * 构造函数。单进程单线程下完全安全——调度器保证同一个服务不会并发执行。
@@ -52,21 +56,30 @@ final class DuelManager
         ?\Closure $publish = null,
         ?Repo $records = null,
         ?Store $store = null,
-        ?Settle $settle = null
+        ?Settle $settle = null,
+        int $nodeId = 0
     ) {
         $this->publish = $publish;
         $this->records = $records;
         $this->store = $store;
         $this->settle = $settle;
+        $this->nodeId = $nodeId;
 
-        // 房间号从"已结算的最大号 + 1"开始。
+        // 房间号从"本节点号段内、已结算的最大号 + 1"开始。
         //
         // 房间号不持久化（每次启动从 1 数起），但结算的幂等键是 `duel:<房间号>`。
         // 如果号复用，重启后的第一局会被 `Settle` 判定"这个 id 已经结过账"而直接跳过——
         // 玩家赢了却没拿到钱，而且日志里什么都不会多一行，极难发现。
         // 快照恢复只挡住"还没结算的房间"，已结算的那些快照已被删除，只能靠事件日志回推。
+        //
+        // 号是**分段**的（`RoomIds`）：只在本节点段内续，别的节点的号不参与，
+        // 否则节点 1 会从节点 0 的号后面接着数，白扔掉自己整段空间。
+        // nodeId=0 时 `compose(0, n) === n`，行为和以前完全一样。
         if ($settle !== null) {
-            $this->nextRoomId = $settle->maxSettledRoom() + 1;
+            $this->nextRoomId = RoomIds::compose(
+                $this->nodeId,
+                RoomIds::nextSeq($this->nodeId, [$settle->maxRoomIn($this->nodeId)])
+            );
         }
     }
 
@@ -179,9 +192,10 @@ final class DuelManager
             foreach ($uids as $uid) {
                 $this->addrOf[(int) $uid] = $addr;
             }
-            // 新房号必须避开已恢复的，否则会撞号覆盖
-            if ($rid >= $this->nextRoomId) {
-                $this->nextRoomId = $rid + 1;
+            // 新房号必须避开已恢复的，否则会撞号覆盖。
+            // 只在本节点段内推进：别的节点的号更大，不代表本节点该接着用
+            if (RoomIds::node($rid) === $this->nodeId && $rid >= $this->nextRoomId) {
+                $this->nextRoomId = RoomIds::compose($this->nodeId, RoomIds::seq($rid) + 1);
             }
         }
 
