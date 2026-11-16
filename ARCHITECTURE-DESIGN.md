@@ -136,7 +136,7 @@ v1 有一处结论性错误，必须更正：
 | **T1.5 WASM 模块**（待验证） | 需隔离与算力上限的中等复杂度逻辑 | 加载 `.wasm` → 实例化 → 原子换指针；fuel/epoch 限流 | < 1s | 否 |
 | **T2 逻辑代码** | 类、方法、新功能 | **worker 滚动重启 + 状态迁移** | 2–5s / worker | 可做到无感 |
 
-> T1.5 是可选增强项：TypePHP 已能输出 WASI 0.2 Component，若 Spike S1 验证"可作为 library component 被宿主实例化并调用"，则用它承接"需要沙箱、可中断、甚至多语言（Rust/Zig/C#→wasm）"的热更逻辑；否则回退为 T1。详见 `ARCHITECTURE-EVOLUTION.md` 提案 E1。
+> T1.5 是可选增强项：TypePHP 已能输出 WASI 0.2 Component，若 Spike S1 验证"可作为 library component 被宿主实例化并调用"，则用它承接"需要沙箱、可中断、甚至多语言（Rust/Zig/C#→wasm）"的热更逻辑；否则回退为 T1。（提案 E1 原文已移除，结论见 `FRAMEWORK-TASK.md` §九。）
 
 **T1 实现**（唯一真正"进程内"的热更通道）：
 

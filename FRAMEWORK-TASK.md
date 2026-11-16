@@ -768,7 +768,7 @@ config/gen/player_level.bin    ← 运行时热加载的数据
 | `spike/s5/roomsvc` 的两级快照 | `typephp/snapshot` 的参考实现 |
 | `spike/e2` 的幂等重放 | `typephp/event-log` 的参考实现 |
 | `spike/s6` 的压测端 | `typephp/testing` 的压测基础 |
-| `IMPLEMENTATION-PLAN.md` | 本任务的执行细则（验收标准同源） |
+| 本文 §五 | 本任务的执行细则（验收标准同源；原 `IMPLEMENTATION-PLAN.md` 已移除） |
 | `implementation-kit/CHECKLIST.md` | M7 完成后逐项过一遍 |
 
 **建议第一步**：先做 T0-01~05 + T1-01（约 5 人日），跑通"起一个能收发的服务"，验证容器/配置/日志/网络这条最小链路——这是后面所有任务的地基，也是最能暴露设计问题的地方。
