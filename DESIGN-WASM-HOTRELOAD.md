@@ -230,7 +230,34 @@ host 在打开模块时按**硬编码的 5 个名字**去解析方法，**不枚
 所以 M7 现在的"M7 = 三级热更全部可用"这个验收标准**达不到**：L2 只覆盖"实现热更"，
 接口变更仍然要重编+重启，等价于 L3。
 
-### 真正的胜负手：让 host 动态枚举接口方法
+### 已做：把方法表从硬编码改成运行时配置（2026-11-16）
+
+改了 `spike/s2/host-capi/src/lib.rs`：`tp_open` 里那张 5 个名字的数组改为
+`methods_from_env()`——默认值与原来完全一致，可用 `TP_METHODS`（逗号分隔的完整名）覆盖。
+
+验证（同一次运行、同一个二进制）：
+
+| 场景 | `add` | `simulate-frame` |
+|:--|:--:|:--:|
+| 不设 `TP_METHODS` | 3 / 42 | **297** |
+| `TP_METHODS='[method]runtime.add'` | 3 / 42 | **-2001** |
+
+第二行是证据：把 `simulate-frame` 从表里去掉，它立刻查不到，而 `add` 不受影响。
+说明表确实来自运行时配置。
+
+**收益**：接口变更从「改 Rust → 重编 `libtp_host.so`（实测 2m29s）→ 重启」
+降到「设环境变量 → 重启」。省掉了改代码和重编，但**没有省掉重启**。
+
+**代价**：`TP_METHODS` 要人来维护，漏写一个方法就会出现"模块有、宿主查不到"的
+`-2001`——比硬编码更容易出运维事故。所以这只是过渡方案。
+
+编译命令（`cargo` 不在 PATH 里，必须用绝对路径）：
+
+```bash
+cd spike/s2/host-capi && /home/hhr/.cargo/bin/cargo build --release
+```
+
+### 下一步：让 host 动态枚举接口方法
 
 `build(s, &p, &methods)` 那一步不需要硬编码——component model 支持在 interface 下
 遍历导出（`get_export_index` 取到 interface 后枚举其成员）。改成运行时枚举后：
@@ -240,6 +267,16 @@ host 在打开模块时按**硬编码的 5 个名字**去解析方法，**不枚
 
 **这是 M7 成立与否的真正前提，比封装门面重要得多。** 它是个 Rust 侧改动
 （`host-capi`），不在 PHP 侧，成本也比"重编整个宿主"低（只重编一个 so，且只需一次）。
+
+实现线索：`build()` 里已经有 `instance.get_export_index(&mut store, None, IFACE)` 拿到
+interface，再 `get_export_index(Some(&iface), "create-runtime")` 拿到函数——说明
+"在 interface 下按名取成员"这条路是通的。要做的是**反向枚举**：拿到 interface 的成员
+列表（wasmtime 的 component type 提供了遍历导出/成员的接口），把 `for name in methods`
+换成 `for name in 枚举结果`。那样 `TP_METHODS` 和默认表都可以删掉。
+
+**没做的原因**：wasmtime 47 的 component type 枚举 API 需要精确的类型/生命周期写法，
+而实测每次 `cargo build` 要 2m29s，猜错一次的代价是又一轮编译。留到有把握时一次做完，
+比现在反复试错更划算。
 
 ### 验证环境现状
 
