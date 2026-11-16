@@ -5,7 +5,7 @@
 //   - server.transport（曾叫 server.protocol，改名后必须一起复位）
 //   - protocol.frame / protocol.payload（协议测试会改，漏复位会让后续测试莫名失败）
 //   - port（WS 测试会改成 9010）
-$p = "/data/TypeServer/demo/demo-echo/config/tsf.json";
+$p = __DIR__ . "/../demo/demo-echo/config/tsf.json";
 $d = json_decode(file_get_contents($p), true);
 if (!is_array($d)) {
     fwrite(STDERR, "bad config\n");

@@ -5,9 +5,9 @@
 // 只依赖协议的"契约 + 头实现"三个文件，不需要传输层/Gateway——
 // 客户端和服务器用的是同一份帧编解码，所以不存在"两边格式不一致"这类问题。
 
-require_once "/data/TypeServer/tsf/src/Protocol/Contract/DecodedFrame.php";
-require_once "/data/TypeServer/tsf/src/Protocol/Contract/FrameCodec.php";
-require_once "/data/TypeServer/tsf/src/Protocol/Frame/HeaderFrame.php";
+require_once __DIR__ . "/../../tsf/src/Protocol/Contract/DecodedFrame.php";
+require_once __DIR__ . "/../../tsf/src/Protocol/Contract/FrameCodec.php";
+require_once __DIR__ . "/../../tsf/src/Protocol/Frame/HeaderFrame.php";
 
 use TSF\Protocol\Frame\HeaderFrame;
 

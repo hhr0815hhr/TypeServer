@@ -1,7 +1,7 @@
 <?php
 
 // 查 duel 的对局记录（示例里用来验证 pkg/db 真的落库了）
-$path = "/data/TypeServer/demo/duel/var/duel.db";
+$path = __DIR__ . "/../../demo/duel/var/duel.db";
 if (!file_exists($path)) {
     echo "库不存在: " . $path . PHP_EOL;
     exit(1);

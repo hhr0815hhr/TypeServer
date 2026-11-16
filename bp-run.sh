@@ -29,7 +29,7 @@ done
 sleep 0.5
 
 echo "=== 背压测试（rate=0, send_fail_limit=20）==="
-php85 /data/TypeServer/demo/bp-test.php 9001 3000 4096
+php85 $(cd "$(dirname "$0")/.." && pwd)/demo/bp-test.php 9001 3000 4096
 
 sleep 0.5
 echo
@@ -45,5 +45,5 @@ else
 fi
 
 pkill -9 -x demo_echo 2>/dev/null
-php85 /data/TypeServer/demo/fix-config.php
+php85 $(cd "$(dirname "$0")/.." && pwd)/demo/fix-config.php
 exit $RC

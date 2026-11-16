@@ -9,9 +9,9 @@
  * 读帧一律"按长度精确读"——按块读会在服务端足够快时丢帧（踩过）。
  */
 
-require_once "/data/TypeServer/tsf/src/Protocol/Contract/FrameCodec.php";
-require_once "/data/TypeServer/tsf/src/Protocol/Frame/HeaderFrame.php";
-require_once "/data/TypeServer/tsf/src/Protocol/Msg.php";
+require_once __DIR__ . "/../tsf/src/Protocol/Contract/FrameCodec.php";
+require_once __DIR__ . "/../tsf/src/Protocol/Frame/HeaderFrame.php";
+require_once __DIR__ . "/../tsf/src/Protocol/Msg.php";
 
 use TSF\Protocol\Frame\HeaderFrame;
 use TSF\Protocol\Msg;

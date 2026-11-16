@@ -3,7 +3,7 @@
 set -u
 cd "$(dirname "$0")" || exit 1
 SRV=./demo_echo
-TEST="php85 /data/TypeServer/demo/m1-test.php"
+TEST="php85 $(cd "$(dirname "$0")/.." && pwd)/demo/m1-test.php"
 CFG=config/tsf.json
 
 patch() { # key=value ...

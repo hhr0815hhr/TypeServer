@@ -35,7 +35,7 @@ for MODE in raw json; do
   echo "=== payload=$MODE ==="
   patch protocol.frame=native protocol.payload=$MODE
   restart
-  php85 /data/TypeServer/demo/proto-test.php 9001 $MODE || FAIL=1
+  php85 $(cd "$(dirname "$0")/.." && pwd)/demo/proto-test.php 9001 $MODE || FAIL=1
   echo
 done
 
@@ -43,5 +43,5 @@ echo "=== 服务端日志里的协议声明 ==="
 grep '"msg":"protocol"' var/log/app.log | tail -2
 
 pkill -9 -x demo_echo 2>/dev/null
-php85 /data/TypeServer/demo/fix-config.php
+php85 $(cd "$(dirname "$0")/.." && pwd)/demo/fix-config.php
 exit $FAIL

@@ -26,7 +26,7 @@ done
 sleep 0.5
 
 echo "=== WebSocket 测试（端口 $WSPORT）==="
-php85 /data/TypeServer/demo/ws-test.php $WSPORT
+php85 $(cd "$(dirname "$0")/.." && pwd)/demo/ws-test.php $WSPORT
 RC=$?
 
 echo
@@ -34,5 +34,5 @@ echo "=== 服务端日志（节选）==="
 grep -E "server listen|gateway ready" var/log/app.log | tail -2
 
 pkill -9 -x demo_echo 2>/dev/null
-php85 /data/TypeServer/demo/fix-config.php
+php85 $(cd "$(dirname "$0")/.." && pwd)/demo/fix-config.php
 exit $RC

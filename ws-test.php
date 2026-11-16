@@ -9,10 +9,10 @@
  * 用法：php85 ws-test.php <port>
  */
 
-require_once "/data/TypeServer/tsf/src/Protocol/Contract/DecodedFrame.php";
-require_once "/data/TypeServer/tsf/src/Protocol/Contract/FrameCodec.php";
-require_once "/data/TypeServer/tsf/src/Protocol/Frame/HeaderFrame.php";
-require_once "/data/TypeServer/tsf/src/Protocol/Msg.php";
+require_once __DIR__ . "/../tsf/src/Protocol/Contract/DecodedFrame.php";
+require_once __DIR__ . "/../tsf/src/Protocol/Contract/FrameCodec.php";
+require_once __DIR__ . "/../tsf/src/Protocol/Frame/HeaderFrame.php";
+require_once __DIR__ . "/../tsf/src/Protocol/Msg.php";
 
 use Swoole\Coroutine;
 use Swoole\Coroutine\Http\Client;

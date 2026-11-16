@@ -9,9 +9,9 @@
  * 用法：php85 proto-test.php <port> <mode:raw|json>
  */
 
-require_once "/data/TypeServer/tsf/src/Protocol/Contract/FrameCodec.php";
-require_once "/data/TypeServer/tsf/src/Protocol/Frame/HeaderFrame.php";
-require_once "/data/TypeServer/tsf/src/Protocol/Msg.php";
+require_once __DIR__ . "/../tsf/src/Protocol/Contract/FrameCodec.php";
+require_once __DIR__ . "/../tsf/src/Protocol/Frame/HeaderFrame.php";
+require_once __DIR__ . "/../tsf/src/Protocol/Msg.php";
 
 use TSF\Protocol\Frame\HeaderFrame;
 use TSF\Protocol\Msg;

@@ -6,7 +6,7 @@
  * 用途：崩溃恢复验证时肉眼确认"崩之前的状态确实被存下来了"。
  */
 
-$dir = "/data/TypeServer/demo/duel/var/snap";
+$dir = __DIR__ . "/../../demo/duel/var/snap";
 if (!is_dir($dir)) {
     echo "快照目录不存在: " . $dir . PHP_EOL;
     exit(1);

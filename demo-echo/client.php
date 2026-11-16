@@ -2,9 +2,9 @@
 
 // 最小客户端：用框架同一份帧实现编解码，验证端到端。
 // 客户端只需要协议的"契约 + 头实现"三个文件（不需要传输层/Gateway）。
-require_once "/data/TypeServer/tsf/src/Protocol/Contract/DecodedFrame.php";
-require_once "/data/TypeServer/tsf/src/Protocol/Contract/FrameCodec.php";
-require_once "/data/TypeServer/tsf/src/Protocol/Frame/HeaderFrame.php";
+require_once __DIR__ . "/../../tsf/src/Protocol/Contract/DecodedFrame.php";
+require_once __DIR__ . "/../../tsf/src/Protocol/Contract/FrameCodec.php";
+require_once __DIR__ . "/../../tsf/src/Protocol/Frame/HeaderFrame.php";
 
 use TSF\Protocol\Frame\HeaderFrame;
 
