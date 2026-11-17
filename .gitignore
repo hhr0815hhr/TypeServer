@@ -72,3 +72,8 @@ bench/wasm-link/fixtures/*/*.wasm
 # spike 是本地技术验证现场（4.4G 构建产物），不入库；
 # 结论性的 SPIKE-*.md 已收到 docs/spike/
 /spike/
+
+# wasm fixture 的构建产物必须忽略。
+# 注意顺序：上面的 !*.json 是白名单，会覆盖掉 fixtures/*/dist/ 的忽略规则
+# （gitignore 里后面的规则覆盖前面的），所以要在它之后再声明一次。
+tests/wasm-link/fixtures/*/dist/**
