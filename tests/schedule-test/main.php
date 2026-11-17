@@ -12,6 +12,7 @@
  * doudizhu 里的每日重置那类用法。
  */
 
+use TSF\Schedule\Cron;
 use TSF\Schedule\Schedule;
 
 final class T
@@ -102,29 +103,91 @@ function caseRegister(): void
     $sch->weekly("weekly_rank", 1, 0, 0, 0, 9002);
     $sch->repeat("heart", 30, 0, 9003);
     $sch->at("activity_open", time() + 3600, 0, 9004);
+    $sch->cron("workday_open", "0 0 9 * * 1-5", 0, 9005);
 
     $list = $sch->listAll();
-    T::eq((string) count($list), "4", "注册了 4 个任务");
+    T::eq((string) count($list), "5", "注册了 5 个任务（含 1 个 cron）");
 
     $names = [];
     foreach ($list as $row) {
         $names[] = (string) $row["name"];
     }
     sort($names);
-    T::eq(implode(",", $names), "activity_open,heart,reset,weekly_rank", "任务名齐全");
+    T::eq(implode(",", $names), "activity_open,heart,reset,weekly_rank,workday_open", "任务名齐全");
 
     // 下次时间应该在将来
     $okFuture = true;
     foreach ($list as $row) {
+        // cron 任务的 next 是 0（它不是「下次时间」驱动，而是每秒判匹配），跳过
+        if ((int) $row["kind"] === 5) {
+            continue;
+        }
         if ((int) $row["next"] <= time()) {
             $okFuture = false;
         }
     }
-    T::ok($okFuture, "所有任务的下次执行时间都在将来");
+    T::ok($okFuture, "非 cron 任务的下次执行时间都在将来");
 
     T::ok($sch->cancel("heart"), "cancel 返回 true");
-    T::eq((string) count($sch->listAll()), "3", "取消后剩 3 个");
+    T::eq((string) count($sch->listAll()), "4", "取消后剩 4 个");
     T::ok(!$sch->cancel("nope"), "取消不存在的任务返回 false");
+}
+
+/** 4. cron 表达式匹配（AOT 下注释里不能写"星号斜杠"，会终止块注释，所以这里用 0/5 表示步进） */
+function caseCron(): void
+{
+    echo "== [4] cron ==" . PHP_EOL;
+
+    $t = mktime(5, 0, 0, 6, 15, 2026);
+    if (is_int($t)) {
+        T::ok(Cron::matches("0 0 5 * * *", $t), "5:00:00 匹配「每天 5 点」");
+        T::ok(!Cron::matches("0 0 5 * * *", $t + 1), "5:00:01 不匹配");
+        T::ok(!Cron::matches("0 0 5 * * *", $t - 60), "4:59:00 不匹配");
+    }
+
+    // 每 5 秒
+    if (is_int($t)) {
+        T::ok(Cron::matches("0/5 * * * * *", $t), "秒 0 匹配「每 5 秒」");
+        T::ok(!Cron::matches("0/5 * * * * *", $t + 1), "秒 1 不匹配");
+        T::ok(Cron::matches("0/5 * * * * *", $t + 5), "秒 5 匹配");
+    }
+
+    // 5 段：秒默认 0
+    if (is_int($t)) {
+        T::ok(Cron::matches("0 5 * * *", $t), "5 段「0 5 * * *」等价于 6 段");
+        T::ok(!Cron::matches("0 5 * * *", $t + 1), "5 段在 5:00:01 不匹配");
+    }
+
+    // 每月 1 号 0 点
+    $first = mktime(0, 0, 0, 7, 1, 2026);
+    if (is_int($first)) {
+        T::ok(Cron::matches("0 0 0 1 * *", $first), "7/1 0:00 匹配「每月 1 号」");
+        T::ok(!Cron::matches("0 0 0 1 * *", $first + 86400), "7/2 不匹配");
+    }
+
+    // 工作日 9 点（2026-06-15 是周一）
+    $mon9 = mktime(9, 0, 0, 6, 15, 2026);
+    $sun9 = mktime(9, 0, 0, 6, 21, 2026);
+    if (is_int($mon9) && is_int($sun9)) {
+        T::ok(Cron::matches("0 0 9 * * 1-5", $mon9), "周一 9 点匹配工作日");
+        T::ok(!Cron::matches("0 0 9 * * 1-5", $sun9), "周日 9 点不匹配工作日");
+    }
+
+    // 日/周「或」关系：0 0 0 1 * 1 = 每月 1 号 或 每周一
+    $firstMon = mktime(0, 0, 0, 6, 1, 2026);    // 6/1 是周一
+    $midMon = mktime(0, 0, 0, 6, 15, 2026);     // 周一但非 1 号
+    $firstOther = mktime(0, 0, 0, 7, 1, 2026);  // 1 号但是周三
+    if (is_int($firstMon) && is_int($midMon) && is_int($firstOther)) {
+        T::ok(Cron::matches("0 0 0 1 * 1", $firstMon), "1 号且周一 → 匹配");
+        T::ok(Cron::matches("0 0 0 1 * 1", $midMon), "周一但非 1 号 → 仍匹配（或关系）");
+        T::ok(Cron::matches("0 0 0 1 * 1", $firstOther), "1 号但非周一 → 仍匹配（或关系）");
+    }
+
+    // 非法表达式
+    T::ok(Cron::parse("0 0 5 *") === [], "4 段 → 非法");
+    T::ok(Cron::parse("99 0 5 * * *") === [], "秒 99 越界 → 非法");
+    T::ok(Cron::parse("0 0 5 * * 9") === [], "周 9 越界 → 非法");
+    T::ok(Cron::parse("0 0 5 * * *") !== [], "合法表达式解析成功");
 }
 
 function main(): void
@@ -132,6 +195,7 @@ function main(): void
     caseDaily();
     caseWeekly();
     caseRegister();
+    caseCron();
 
     echo PHP_EOL . "通过 " . T::$pass . " / 失败 " . T::$fail . PHP_EOL;
 }
