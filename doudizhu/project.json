@@ -1,0 +1,4 @@
+{
+    "name": "doudizhu",
+    "packages": ["fsm", "db", "eventlog"]
+}
