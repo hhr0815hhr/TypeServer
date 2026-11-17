@@ -197,6 +197,17 @@ Scheduler::instance()->register("room", function (): Service {
 $addr = Scheduler::instance()->spawn("room");
 ```
 
+**这段代码实测编译并运行过**（2532 KB 二进制）。为了快速验证，把定时器缩到
+`interval(10ms)` / `timeout(50ms)`，并用 `Scheduler::tick()` 手动推进而不是 `run()`：
+
+```
+spawned addr=1
+count=1          ← spawn 成功，服务数为 1
+rounds=5         ← interval(10ms) 在 50ms 内触发了 5 次
+killed=yes       ← kill 后 has($addr) 为 false
+final count=0    ← 服务确实被销毁
+```
+
 `Message` 只有四个字段（构造签名 `new Message($from, $msgId, $data, $session = 0)`）：
 
 | 字段 | 含义 |
@@ -228,6 +239,11 @@ $addr = Scheduler::instance()->spawn("room");
 
 6. **`Watcher` 依赖调度器**。它是 Service，靠 `interval` 轮询——没有 Scheduler 在跑
    就不会热更。
+
+7. **写测试用 `tick()`，不要 `run()`**。`run()` 会阻塞并接管 Swoole 事件循环；
+   `tick($maxMsgs = 0)` 只推一轮就返回，配合 `usleep()` 可以确定性地驱动定时器和消息，
+   不需要起服务。上文的验证就是这么做的——**这是框架里少有的、能对并发逻辑做确定性
+   测试的口子**，值得记住。
 
 ## 什么时候不该用它
 
