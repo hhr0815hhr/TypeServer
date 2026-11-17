@@ -39,6 +39,12 @@ final class MmoService extends Service
     /** @var array<int, array<int, int>> pid => [x, y]，上一帧自己的位置（用于判断"我需要更新"） */
     private array $lastSelf = [];
 
+    /** @var array<int, int> pid => 断线时刻；有记录说明人掉线了，但角色还站在世界里 */
+    private array $offlineAt = [];
+
+    /** 断线后角色保留的秒数 */
+    private int $offlineKeepSec = 60;
+
     /** @var \Closure */
     private \Closure $publish;
 
@@ -69,6 +75,9 @@ final class MmoService extends Service
         // 帧循环：每 frameMs 给自己投一条 MSG_TICK
         $this->loop = new FrameLoop($this, self::MSG_TICK, $this->frameMs, 200);
         $this->loop->start();
+
+        // 每 10 秒扫一次：断线超过保留期就真正移除
+        $this->interval(10000, Msg::SWEEP);
         \TSF\Kernel\Logger::info("mmo world started", [
             "map" => $this->mapW . "x" . $this->mapH,
             "cell" => $this->cell,
@@ -80,6 +89,10 @@ final class MmoService extends Service
     {
         if ($m->msgId === self::MSG_TICK) {
             $this->onTick();
+            return;
+        }
+        if ($m->msgId === Msg::SWEEP) {
+            $this->sweepOffline();
             return;
         }
 
@@ -100,7 +113,11 @@ final class MmoService extends Service
             return;
         }
         if ($m->msgId === Msg::LEAVE) {
-            $this->onLeave($uid);
+            $disc = false;
+            if (is_array($p) && isset($p["disc"])) {
+                $disc = ((int) $p["disc"]) === 1;
+            }
+            $this->onLeave($uid, $disc);
             return;
         }
     }
@@ -110,8 +127,11 @@ final class MmoService extends Service
     private function onJoin(int $uid, int $fd, string|array|object $p): void
     {
         if (isset($this->players[$uid])) {
-            // 重连：更新 fd，回一个 welcome
+            // 重连：更新 fd、清掉断线标记，回一个 welcome。
+            // 位置不重置 —— 角色一直站在原地，回来后接着走。
             $this->players[$uid]["fd"] = $fd;
+            unset($this->offlineAt[$uid]);
+            \TSF\Kernel\Logger::info("rejoin", ["uid" => $uid]);
             $this->welcome($uid, $fd);
             return;
         }
@@ -150,15 +170,56 @@ final class MmoService extends Service
         ]);
     }
 
-    private function onLeave(int $uid): void
+    /**
+     * 离开世界。
+     *
+     * `$disconnected = true` 表示是断线（不是主动退出）：**保留角色**，只标记离线。
+     * 清掉的后果是刷新一下页面角色就没了、还得重新跑回来；保留之后 60 秒内重连
+     * 能接着站在原地。
+     */
+    private function onLeave(int $uid, bool $disconnected = false): void
     {
         if (!isset($this->players[$uid])) {
             return;
         }
+
+        if ($disconnected) {
+            $this->offlineAt[$uid] = time();
+            // fd 置 0：push 之前会判 <= 0 直接跳过，避免往死连接写
+            $this->players[$uid]["fd"] = 0;
+            // **必须把方向清零**：否则这个角色会一直按最后的方向往前走，
+            // 变成在世界里游荡的幽灵（多人时会看到他在飘）。
+            // 这个 bug 是在"断开 2 秒后重连，发现位置往前跑了 283 单位"时发现的。
+            $this->players[$uid]["dir"] = 0;
+            \TSF\Kernel\Logger::info("offline", ["uid" => $uid]);
+            return;
+        }
+
+        $this->removeEntity($uid);
+    }
+
+    private function removeEntity(int $uid): void
+    {
         $this->aoi->remove($uid);
-        unset($this->players[$uid], $this->seen[$uid], $this->names[$uid]);
-        // 让视野内的人把它删掉
+        unset($this->players[$uid], $this->seen[$uid], $this->names[$uid],
+              $this->lastSelf[$uid], $this->offlineAt[$uid]);
         $this->broadcastGone($uid);
+    }
+
+    /** 清掉超过保留期的离线角色 */
+    private function sweepOffline(): void
+    {
+        $now = time();
+        $dead = [];
+        foreach ($this->offlineAt as $uid => $at) {
+            if ($now - $at > $this->offlineKeepSec) {
+                $dead[] = $uid;
+            }
+        }
+        foreach ($dead as $uid) {
+            \TSF\Kernel\Logger::info("offline expired", ["uid" => $uid]);
+            $this->removeEntity($uid);
+        }
     }
 
     /** 有人离开：所有还在场的人都会收到 GONE（简单做法，8 人房间够用） */

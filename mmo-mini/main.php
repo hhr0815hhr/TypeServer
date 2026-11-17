@@ -94,10 +94,11 @@ function main(): void
         ]));
     });
 
-    // 断线 = 离开世界（回调必须是 (fd, uid) 两参数）
+    // 断线：保留角色 60 秒（disc=1 让服务端知道"这是掉线，不是主动退出"）。
+    // 回调必须是 (fd, uid) 两参数，少一个在 AOT 下会崩。
     $gw->onDisconnect(function (int $fd, int $uid) use ($worldAddr): void {
         Scheduler::instance()->deliver($worldAddr, MmoMsg::LEAVE, json_encode([
-            "uid" => $uid, "fd" => $fd, "p" => [],
+            "uid" => $uid, "fd" => $fd, "p" => ["disc" => 1],
         ]));
     });
 
