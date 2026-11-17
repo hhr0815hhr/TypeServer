@@ -102,7 +102,7 @@ function main(): void
         Scheduler::instance()->deliver($tickAddr, MSG_TICK, "");
     });
 
-    \Swoole\Timer::after(3000, function (int $id) use ($mode): void {
+    \Swoole\Timer::after(3000, function () use ($mode): void {
         $stamps = TickService::$stamps;
         $n = count($stamps);
         echo "打点次数: " . $n . PHP_EOL;
