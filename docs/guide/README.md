@@ -9,8 +9,9 @@
 不建议跳过第一部分直接看示例：那样你会知道"代码长这样"，但不知道"为什么这么拆"，
 改需求时只能照抄。
 
-> 想马上看到东西 → 先读 [00-quickstart.md](00-quickstart.md)（30 分钟跑通一个服务端）。
-> 想了解"为什么这么设计" → `tsf/README.md`（4000 行开发记录）。两者不重复。
+> 想马上看到东西 → [00-quickstart.md](00-quickstart.md)（30 分钟跑通一个服务端）。
+> 想看完整的成品 → [07-walkthrough.md](07-walkthrough.md)（能三人真打的斗地主）。
+> 想了解"为什么这么设计" → `tsf/README.md`（4000 行开发记录）。三者不重复。
 
 ## 分层图
 
@@ -44,7 +45,7 @@
 | 04 | [数据层](04-data.md) | `pkg/db`(仓储/迁移/分片) · `pkg/eventlog` · `pkg/snapshot` | 2800 行 |
 | 05 | [分布式](05-distributed.md) | `Rpc` · `Discovery` · `Shard` · `Cluster` · `Breaker` | 2900 行 |
 | 06 | [运维](06-ops.md) | `Metrics` · `Gm` · `pkg/wasm` · `tsf` 工具链 | 1500 行 |
-| 07 | 深度示例 | 上面六层的综合运用 | — |
+| 07 | [深度示例：一局斗地主](07-walkthrough.md) | 六层拼起来是什么样（1412 行服务端 + 456 行前端） | ✅ 可运行 |
 
 ## 每篇的固定结构
 
