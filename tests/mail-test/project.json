@@ -1,0 +1,4 @@
+{
+    "name": "mail-test",
+    "packages": ["db", "mail"]
+}
