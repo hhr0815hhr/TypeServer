@@ -497,3 +497,60 @@ PHP 字符串拼接每次复制，协议打包里是主要 CPU 开销之一。�
 | 核心 → pkg | 0 处 |
 | pkg → pkg | 1 处（`room` → `fsm`, `frameloop`，已声明） |
 | `ext/` 下出现 `TSF` 命名空间 | 0 处（lint 规则 3） |
+
+---
+
+## 附：final 与字段可见性的使用原则
+
+统计基线（2026-11-17）：`tsf/src` + `tsf/pkg` 共 89 个 `final` 类、11 个非 final。
+问题在于 **`final` 的名单里包含了扩展点**——`Room`、`RoomService`、`RoomManager`、
+`RoomHost`、`Machine`、`MemberTable`、`MatchService`、`MatchQueue` 全是 final，
+且字段**清一色 private、零 protected**。等于"只能调、不能派生"。
+
+### 三条判断标准
+
+| 类别 | 处理 | 例子 |
+|:--|:--|:--|
+| **数据/值对象** | `final` + `private` | `Message`、`DecodedFrame`、`Snapshot`、`Member`、`Addr`、`Packet` |
+| **扩展点** | **不 final + `protected`** | `Room`、`RoomService`、`RoomHost`、`RoomManager`、`Machine`、`MemberTable`、`MatchService`、`MatchQueue` |
+| **实现细节** | `final` | `TcpServer`、`WsServer`、各 Codec 实现（由接口替换，不需要继承） |
+
+数据类 final 是为了保护不变式：`Message` 的四个字段被改类型会破坏整个消息模型。
+实现细节 final 是因为它们的替换路径是接口/工厂，不是继承。
+
+### AOT 是否限制继承
+
+**不限制。已实测**（`demo/doudizhu` 的继承探针，`tsf build` 通过）：
+
+```php
+final class DdzRoom extends Room          // 继承框架类
+{
+    public array $hands = [];             // 子类自加字段
+    public function stateName(): string   // 覆写父类方法
+    {
+        return "[ddz]" . parent::stateName();
+    }
+    public function describe(): string    // 访问父类 protected 成员
+    {
+        return "room=" . $this->id . " seats=" . $this->members->count();
+    }
+}
+```
+
+`instanceof Room` 成立、`parent::` 可用。所以 **`final` 是设计选择，不是技术限制**。
+
+### 为什么扩展点必须开放
+
+业务房间需要持有自己的状态：斗地主的手牌、底牌、庄家、当前出牌。`Room` 只有
+`state / members / frame`。两条路：
+
+1. **全塞进 Service** → `Room` 变成"半个房间"，业务状态和框架状态分居两处，
+   序列化、快照、恢复都要自己拼；
+2. **继承 `Room`** → 一个对象承载完整房间状态。
+
+把零件全 `final` 等于强迫业务走第 1 条，框架的抽象就失去了意义。
+
+### 代价
+
+`protected` 会让内部结构成为半公开契约，未来重构受限。这是**用封装换可扩展性**的
+权衡；对"框架"这个定位来说，业务能派生比内部好重构更重要。
