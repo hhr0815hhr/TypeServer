@@ -23,4 +23,7 @@ final class Msg
     public const PASSED = 1205;     // 某座位过牌
     public const SETTLED = 1206;    // 结算
     public const ERROR = 1207;      // 操作被拒 {"why":"..."}
+
+    // 内部消息（不走网络）：出牌超时触发
+    public const AUTO = 1199;
 }

@@ -37,9 +37,16 @@ final class DdzService extends Service
     /** @var \Closure */
     private \Closure $publish;
 
-    public function __construct(\Closure $publish)
+    /** 出牌超时秒数；0 表示不超时（测试用） */
+    private int $turnSec;
+
+    /** 当前回合的超时定时器 id，0 表示没有 */
+    private int $turnTimer = 0;
+
+    public function __construct(\Closure $publish, int $turnSec = 30)
     {
         $this->publish = $publish;
+        $this->turnSec = $turnSec;
 
         // 状态机由业务构造并配置 —— Room 不认识这四个状态
         $fsm = new Machine(DdzState::WAITING);
@@ -85,6 +92,10 @@ final class DdzService extends Service
         }
         if ($m->msgId === Msg::LEAVE) {
             $this->onLeave($uid, $fd);
+            return;
+        }
+        if ($m->msgId === Msg::AUTO) {
+            $this->onAuto($p);
             return;
         }
     }
@@ -136,6 +147,67 @@ final class DdzService extends Service
     private function error(int $seat, string $why): void
     {
         $this->push($seat, Msg::ERROR, ["why" => $why]);
+    }
+
+    /**
+     * 轮到某人：推 TURN + 起超时定时器。
+     *
+     * 所有"该谁动了"的地方都走这里，避免有的地方起定时器、有的地方不起——
+     * 漏一处就会出现"卡在某个人身上永远不动"。
+     */
+    private function beginTurn(int $seat, bool $mustLead): void
+    {
+        if ($this->turnTimer > 0) {
+            $this->cancelTimer($this->turnTimer);
+            $this->turnTimer = 0;
+        }
+        $this->push($seat, Msg::TURN, ["mustLead" => $mustLead]);
+        if ($this->turnSec > 0) {
+            // 载荷必须和其他业务消息**同构**，两层都不能少：
+            //   1) 必须是 JSON 字符串（传数组会被 (string) 转成 "Array"，json_decode 失败）
+            //   2) 必须有 p 这一层（onMessage 统一从 $argv["p"] 取载荷）
+            // 少任何一层，onAuto 都拿不到座位号，然后静默 return —— 表现就是"超时没反应"。
+            $this->turnTimer = $this->timeout($this->turnSec * 1000, Msg::AUTO, json_encode([
+                "uid" => 0,
+                "fd" => 0,
+                "p" => ["seat" => $seat],
+            ]));
+        }
+    }
+
+    /** 超时自动处理：必须出牌就出最小的一张，否则过 */
+    private function onAuto(string|array|object $p): void
+    {
+        if ($this->room->state() !== DdzState::PLAYING) {
+            return;
+        }
+        $seat = -1;
+        if (is_array($p) && isset($p["seat"])) {
+            $seat = (int) $p["seat"];
+        }
+        // 已经换了回合：这条超时消息作废
+        if ($seat < 0 || $seat !== $this->room->current) {
+            return;
+        }
+        $hand = $this->room->hands[$seat] ?? [];
+        if ($hand === []) {
+            return;
+        }
+
+        $uid = $this->uidOf[$seat] ?? 0;
+        if ($uid <= 0) {
+            return;
+        }
+
+        $mustLead = ($this->room->lastPlaySeat === $seat || $this->room->lastPlaySeat < 0);
+        if ($mustLead) {
+            // 出最小的一张：单张永远合法，不用判断牌型
+            $this->broadcast(Msg::ERROR, ["why" => "座位" . $seat . " 超时，自动出牌"]);
+            $this->onPlay($uid, ["cards" => [$hand[0]]]);
+            return;
+        }
+        $this->broadcast(Msg::ERROR, ["why" => "座位" . $seat . " 超时，自动过牌"]);
+        $this->onPass($uid);
     }
 
     // ---------------- 坐桌 ----------------
@@ -347,7 +419,7 @@ final class DdzService extends Service
 
             $this->broadcast(Msg::TABLE, $this->tableInfo());
             $this->push($seat, Msg::HAND, ["cards" => $this->room->hands[$seat]]);
-            $this->push($seat, Msg::TURN, ["mustLead" => true]);
+            $this->beginTurn($seat, true);
             return;
         }
 
@@ -444,7 +516,7 @@ final class DdzService extends Service
         }
 
         $this->room->current = ($seat + 1) % 3;
-        $this->push($this->room->current, Msg::TURN, ["mustLead" => false]);
+        $this->beginTurn($this->room->current, false);
     }
 
     private function onPass(int $uid): void
@@ -471,12 +543,12 @@ final class DdzService extends Service
             $this->room->current = $this->room->lastPlaySeat;
             $this->room->lastPlay = [];
             $this->room->passCount = 0;
-            $this->push($this->room->current, Msg::TURN, ["mustLead" => true]);
+            $this->beginTurn($this->room->current, true);
             return;
         }
 
         $this->room->current = ($seat + 1) % 3;
-        $this->push($this->room->current, Msg::TURN, ["mustLead" => false]);
+        $this->beginTurn($this->room->current, false);
     }
 
     // ---------------- 结算 ----------------
