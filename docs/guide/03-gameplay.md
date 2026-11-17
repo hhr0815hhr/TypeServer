@@ -22,11 +22,26 @@
 ```
 pkg/fsm   →  Machine       状态与转移（也能用在登录流程、订单、战斗单位）
 pkg/room  →  MemberTable   谁在里面、坐哪、什么身份
-             Room          上面两个的组合，仅此而已
+             Room          成员表 + 帧计数 + 一个不解释含义的状态值
+             ThreeStage    可选的三段式状态机（等待→进行→结算）
 ```
 
 `Room` 本身几乎不含逻辑——它把 `Machine` 和 `MemberTable` 放在一起，暴露 `state()`、
 `members()`、`playerCount()`、`frame()`。
+
+**Room 不内置状态机**，状态机由业务构造后注入：
+
+```php
+// 片段：斗地主自己的四段状态，框架完全不参与
+$fsm = new Machine(10);
+$fsm->allow(10, "call", 20)->allow(20, "start", 30)->allow(30, "settle", 40);
+$room = new Room($id, 3, $fsm);
+$room->setStateName(20, "calling");
+```
+
+早期版本把 `WAITING/PLAYING/SETTLED/CLOSED` 写在 `Room` 里并预设转移——那是把
+"常见状态"当成了"框架语义"，斗地主多一段叫地主就撞墙。现在 `Room` 只存一个 int，
+含义完全由业务定义；不想要状态机就 `setState()` 自己维护，`fsm()` 返回 null。
 
 **这意味着：如果你只需要状态机，别装 room。**
 
