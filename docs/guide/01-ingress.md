@@ -91,7 +91,7 @@ if ($t === "ws") {
 |:--|:--|
 | `new Gateway($server, $sessions, $auth, $limiter, $heartbeat, $maxQueue, $requireAuth, $payloadCodec)` | 构造 |
 | `on(int $msgId, \Closure $fn)` | 注册业务处理器 |
-| `onDisconnect(callable $cb)` | 断线回调（存盘、清理、通知房间） |
+| `onDisconnect(\Closure $cb)` | 断线回调，**签名必须是 `(int $fd, int $uid)`**，两个参数都不能少 |
 | `send(int $fd, int $msgId, $data, int $flags = 0): bool` | 回包 |
 | `setSendFailLimit(int $n)` | 连续发送失败多少次断开 |
 | `boot()` | 启动前初始化（必须在 `$server->start()` 之前） |
@@ -175,6 +175,24 @@ OK: echo matched
 
 5. **心跳是"空闲多久踢"，不是"多久发一次"**。`SessionManager(30)` 表示 30 秒没收到
    任何帧就断开；客户端要在这之前发 `PING`。
+
+6. **`onDisconnect` 的回调必须声明两个参数，且类型写 `\Closure`**。两个坑叠在一起：
+
+   ```php
+   // Gateway 内部是：$cb($fd, $uid)
+   $gw->onDisconnect(function (int $fd, int $uid): void {   // ✓
+       // ...
+   });
+   $gw->onDisconnect(function (int $fd): void { });          // ✗ 少一个参数
+   ```
+
+   少声明一个参数在 PHP 里语法合法、编译期也不报，但 AOT 下运行时直接崩，
+   报 `stdClass->{closure}()` —— 这个报错和"参数个数不对"毫无关系，很难联想。
+
+   同理，**参数类型要写 `\Closure` 而不是 `callable`**：`callable` 在 AOT 里是联合类型
+   （`string|array|Closure|...`），赋给 `?\Closure` 属性时会被转成 `stdClass`，
+   之后调用就报 `Invalid callback`。框架里 `on(int $msgId, \Closure $fn)` 一直正常，
+   正是因为它用了精确类型。
 
 ## 什么时候不该用它
 

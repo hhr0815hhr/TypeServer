@@ -84,6 +84,27 @@ tsf migrate-status . # 只读；有未执行则返回非零
 
 服务启动时**只做 `verify()` + 检查有无未执行，不建表**。
 
+**`main.php` 必须自己处理 `migrate` 参数**。`tsf migrate .` 的实现是
+"编译工程 → 运行 `./<binary> migrate`"，所以产物里要有一段分支：
+
+```php
+// 片段
+$cli = isset($_SERVER["argv"][1]) ? (string) $_SERVER["argv"][1] : "";
+if ($cli === "migrate" || $cli === "migrate-status") {
+    $migrator = new Migrator($db, $base . "/migrations");
+    if ($cli === "migrate") {
+        $migrator->up();
+        exit(0);
+    }
+    $pending = $migrator->status();
+    exit($pending === [] ? 0 : 1);
+}
+```
+
+漏了这段，`tsf migrate` 会把 `migrate` 当成普通参数忽略、直接起服务——部署脚本
+挂在一个永远不返回的迁移上，最后报的是 `Swoole\Server->__construct()` 异常，
+和"迁移"毫无关系。（`demo/duel/main.php` 里也有同样的分支，可以对照。）
+
 原因很具体：原来每个 worker 启动时各调一次 `up()`，记录表能挡住重复执行，
 **但挡不住并发建表**——多个 worker 同时 `CREATE TABLE` 会互相冲突。改成部署步骤，
 这个竞态从根上消失。

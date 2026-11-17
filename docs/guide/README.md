@@ -73,3 +73,25 @@
 **3. 业务层宽松、热点内部强类型。** 对外接口用 PHP `array` 没问题（灵活），
 但每帧都跑的路径要换成具体类型。**不要一上来全局强类型**——先跑通，再按实测优化。
 （参考：AOI 换 `std::vector` 经实测只值 2.7% 收益，不值得改。）
+
+## 已知陷阱（都是踩过的，编译期不报）
+
+这几条的共同点是：**代码看着没问题、编译也过，但运行时行为不对或直接崩**。
+
+| # | 现象 | 原因 | 详见 |
+|:--|:--|:--|:--|
+| 1 | `tsf migrate` 报 `Swoole\Server->__construct()` 异常 | 产物没有 `migrate` 子命令分支，被当成普通启动 | [04](04-data.md) |
+| 2 | `onDisconnect` 回调一来就崩 `stdClass->{closure}()` | 回调必须 `(int $fd, int $uid)` 两个参数 | [01](01-ingress.md) |
+| 3 | 定时器完全不触发 | 纯服务进程没有传输层驱动 `Scheduler::tick()` | [02](02-service.md) |
+| 4 | `Invalid callback` / 闭包变 `stdClass` | 参数写成 `callable` 而不是 `\Closure`（AOT 下联合类型会丢） | [01](01-ingress.md) |
+| 5 | 改了 `tsf/src` 但行为没变 | 增量构建不检测框架源码的变更，要清缓存全量重编 | 见下 |
+
+**第 5 条的具体做法**：
+
+```bash
+rm -rf ~/typephp-src/build/cache   # 或你的 typephp 构建缓存目录
+tsf build .                         # 全量重编，约 25 秒
+```
+
+清缓存后第一次编译会慢，但比"改了半天发现没生效"划算。判断是否踩到这一条：
+**改动的是 `tsf/src` 或 `tsf/pkg`，而不是自己工程里的文件**。

@@ -245,6 +245,18 @@ final count=0    ← 服务确实被销毁
    不需要起服务。上文的验证就是这么做的——**这是框架里少有的、能对并发逻辑做确定性
    测试的口子**，值得记住。
 
+8. **定时器靠传输层驱动，`Scheduler` 自己不会跑**。`WsServer` / `TcpServer` 在
+   `workerStart` 里挂了 `\Swoole\Timer::tick(1, fn() => Scheduler::instance()->tick(2000))`，
+   调度器才有心跳。这意味着：
+
+   - 用 `ServerFactory::make(...)` + `$server->start()` 的常规服务 → 定时器正常
+   - 写"纯服务进程"（没有 Server）→ **必须自己调 `Scheduler::run()` 或定期 `tick()`**，
+     否则 `timeout` / `interval` / `every` 全部静默失效
+   - 连带失效的还有 `Config\Watcher`（配置热更）和 `pkg/frameloop`（帧循环），
+     它们都建立在 `interval` 上
+
+   这个失效**没有任何报错**，表现为"定时器不触发"。排查时先确认调度器在被驱动。
+
 ## 什么时候不该用它
 
 - **无状态的纯函数逻辑**（伤害计算、数值公式）不需要 Service，写成静态类更直接，
