@@ -109,6 +109,76 @@ if ($cli === "migrate" || $cli === "migrate-status") {
 **但挡不住并发建表**——多个 worker 同时 `CREATE TABLE` 会互相冲突。改成部署步骤，
 这个竞态从根上消失。
 
+### MySQL 与 SQLite 的差异（实测）
+
+> 这一节每一条都是连真实 MySQL 8.0.45 跑出来的。在此之前，**所有 db 测试都用
+> `sqlite::memory:`，MySQL 路径一次没执行过** —— 而它当时完全不工作。
+
+#### 三个让 MySQL 静默失败的 bug
+
+| 现象 | 根因 | 修法 |
+|:--|:--|:--|
+| `migrate` 报告成功、**表不存在**、零报错 | `Db::exec` 走 `PDO::prepare`，而 MySQL 的**服务端预处理不支持 DDL**（报 1295 `This command is not supported in the prepared statement protocol yet`）；异常被 `Migrator` 的 `catch` 吞掉 | 参数为空时直接走 `PDO::exec` |
+| 事务**静默失效**（之后所有 `transaction()` 都不再 begin/commit） | `txDepth--` 写在 `try` 里，`commit()` 抛异常就跳过这一句，`txDepth` 永久 +1 | 递减挪到 `try` 外；`rollBack` 也包一层 `try` |
+| 迁移在 MySQL 上必然失败 | `Migrator` 用 `transaction()` 包 DDL，而 MySQL 的 **DDL 会隐式提交**，`commit()` 时"没有活动事务"而抛错 | MySQL 走独立分支，DDL 不进事务 |
+
+第三条的代价要说清：**DDL 不进事务后，"DDL 成功但版本记录写入失败"会留下一张未记录的表**。
+靠迁移语句自身幂等（`CREATE TABLE IF NOT EXISTS`）重跑一次即可。
+
+#### 两个使用陷阱（不是 bug）
+
+**① `#[Id]` 默认非自增**
+
+```php
+#[Id]         // auto = false：INSERT 会显式写 id=0
+#[Id(true)]   // auto = true：不写该列，插入后回填 lastInsertId
+```
+
+默认 `false` 是**有意设计**——游戏服的 uid 通常由账号服或雪花号分配，不是数据库自增。
+但漏写这个参数时症状很迷惑：MySQL 把 `id=0` 当作自增占位符生成 1，而 `Repo` 仍返回 0，
+看起来像"自增失效"。
+
+**② `transaction()` 的闭包必须声明 1 个参数**
+
+```php
+$db->transaction(function (Db $d): void { ... });        // ✓
+$db->transaction(function () use ($db): void { ... });   // ✗
+```
+
+内部是 `$fn($this)`。AOT 下参数个数不匹配直接崩：
+`stdClass::{closure}() expects exactly 0 arguments`。和 `onDisconnect` 是同一类坑。
+
+#### 为什么必须用真库测
+
+sqlite 和 MySQL 在三个关键点上行为不同，任何一个都足以让"测试全绿"的代码在线上失败：
+
+| 维度 | SQLite | MySQL |
+|:--|:--|:--|
+| DDL 的事务语义 | 可回滚，能包在事务里 | **隐式提交**，包事务必炸 |
+| 服务端预处理 | 允许 DDL | **不支持 DDL**（1295） |
+| 类型检查 | 宽松，超长字符串静默截断 | `STRICT_TRANS_TABLES` 下**直接抛异常** |
+
+第三条在业务上其实是好事（早报错比静默截断强），但它意味着**从 sqlite 迁过来的数据可能插不进去**。
+
+#### 迁移工具的验证清单
+
+不管用什么库，至少跑这五项：
+
+- [ ] `up()` 之后**表真的存在**（查 `information_schema`，别看 `up()` 的返回值）
+- [ ] 再跑一次 `up()`，`status()` 里没有 `applied=false` 的项
+- [ ] `Repo` 插一条、读回来、改、删——**自增 id 要回填到实体**
+- [ ] 事务：正常提交要可见，抛异常要回滚
+- [ ] 中文往返（`甲` 写进去读出来还是 `甲`）
+
+**别用 `count()` 判断语义**：
+
+```php
+count($mig->up())      // = 4：返回的是 [shards, executed, skipped, failed] 四个键
+count($mig->status())  // = 迁移文件数，不是"待执行数"
+```
+
+这两个我都在测试里写错过，各假通过了一轮。
+
 ### 事件日志：单写者
 
 `EventLog` 是 append-only，每条带自增 `seq`。**一个文件只允许一个写入进程**：
