@@ -110,6 +110,18 @@ function main(): void
         ]));
     });
 
+    // 断线清理：不处理的话，关掉标签页座位会一直被占，再开就是「桌子满了」
+    //
+    // 注意回调是 **(fd, uid) 两个参数** —— Gateway 里是 `$cb($fd, $uid)`。
+    // 只声明一个参数在 PHP 里语法合法，但在 AOT 下参数个数不匹配会直接崩
+    // （报 `stdClass->{closure}()`，编译期不报错）。有 uid 就不必按 fd 反查了。
+    $gw->onDisconnect(function (int $fd, int $uid) use ($ddzAddr): void {
+        Logger::info("client gone", ["fd" => $fd, "uid" => $uid]);
+        Scheduler::instance()->deliver($ddzAddr, DdzMsg::LEAVE, json_encode([
+            "uid" => $uid, "fd" => $fd, "p" => [],
+        ]));
+    });
+
     $gw->boot();
 
     Logger::info("doudizhu ready", [

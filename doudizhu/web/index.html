@@ -210,6 +210,18 @@ function cardEl(id, small) {
 // ---------------- 渲染 ----------------
 let tableInfo = { seats: [], state: '-', landlord: -1, current: 0 };
 
+// 从 TABLE 的 seats[].uid 反查自己坐哪。
+//
+// 踩过的坑：服务端先推 HAND 再推 TABLE，如果只在 HAND 里解析，那一刻 seats 还是空的，
+// mySeat 会一直是 -1 —— 表现就是「准备按钮永远点不动」（禁用条件是 mySeat < 0）。
+// 所以凡是 tableInfo 更新的地方都要重新解析一次。
+function resolveMySeat() {
+  if (!myUid) return;
+  (tableInfo.seats || []).forEach((s) => {
+    if (s.uid === myUid) mySeat = s.seat;
+  });
+}
+
 function renderTable() {
   $('state').textContent = tableInfo.state || '-';
   $('landlord').textContent = tableInfo.landlord >= 0
@@ -354,19 +366,14 @@ function onFrame(msgId, body) {
   if (msgId === TABLE) {
     tableInfo = data;
     phase = data.state || 'waiting';
+    resolveMySeat();   // 座位信息在 TABLE 里，必须在这里解析
     renderTable();
     renderToolbar();
     return;
   }
   if (msgId === HAND) {
     hand = (data.cards || []).slice().sort((a, b) => a - b);
-    // 找出自己的座位：座位信息在 TABLE 里，靠 uid 对不上，用"手牌张数"没意义，
-    // 所以让服务端下发的 TABLE 里带 seats[].uid，这里反查
-    if (myUid) {
-      (tableInfo.seats || []).forEach((s) => {
-        if (s.uid === myUid) mySeat = s.seat;
-      });
-    }
+    resolveMySeat();
     selected.clear();
     renderHand();
     renderTable();
@@ -432,6 +439,14 @@ function connect() {
 
   ws.onerror = () => setStatus('连接错误', 'bad');
 }
+
+// 支持 ?token=tok-b&addr=ws://... 直接进，方便一次开三个标签页
+(function bootFromQuery() {
+  const q = new URLSearchParams(location.search);
+  if (q.get('token')) $('token').value = q.get('token');
+  if (q.get('addr')) $('addr').value = q.get('addr');
+  if (q.get('auto') === '1') connect();
+})();
 
 $('connect').onclick = connect;
 renderTable();

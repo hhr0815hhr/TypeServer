@@ -84,7 +84,7 @@ final class DdzService extends Service
             return;
         }
         if ($m->msgId === Msg::LEAVE) {
-            $this->onLeave($uid);
+            $this->onLeave($uid, $fd);
             return;
         }
     }
@@ -191,16 +191,62 @@ final class DdzService extends Service
         $this->broadcast(Msg::TABLE, $this->tableInfo());
     }
 
-    private function onLeave(int $uid): void
+    /**
+     * 离桌。`$uid > 0` 是客户端主动离开；`$fd > 0` 是连接断开（断线清理）。
+     *
+     * 断线清理必须做：否则关掉一个标签页，那个座位永远被占着，再开就「桌子满了」。
+     * 这里不区分"断线"和"离桌"——demo 阶段断线即离桌；要做断线重连的话，
+     * 应该改成保留座位 + 超时回收（那需要在线状态字段和定时器）。
+     */
+    private function onLeave(int $uid, int $fd = 0): void
     {
-        $seat = $this->seatOf[$uid] ?? -1;
+        $seat = -1;
+        if ($uid > 0) {
+            $seat = $this->seatOf[$uid] ?? -1;
+        } else {
+            $s = 0;
+            while ($s < 3) {
+                if (($this->fdOf[$s] ?? 0) === $fd && $fd > 0) {
+                    $seat = $s;
+                    break;
+                }
+                $s++;
+            }
+        }
+        \TSF\Kernel\Logger::info("leave", ["uid" => $uid, "fd" => $fd, "seat" => $seat]);
         if ($seat < 0) {
             return;
         }
-        unset($this->seatOf[$uid], $this->uidOf[$seat], $this->fdOf[$seat]);
+
+        $gone = $this->uidOf[$seat] ?? 0;
+        if ($gone > 0) {
+            unset($this->seatOf[$gone]);
+        }
+        unset($this->uidOf[$seat], $this->fdOf[$seat]);
         $this->ready[$seat] = 0;
-        $this->room->remove($uid);
+        if ($gone > 0) {
+            $this->room->remove($gone);
+        }
         $this->room->hands[$seat] = [];
+
+        // 人都走光了就把桌子复位。
+        //
+        // 不复位的后果很具体：上一局停在 calling/playing，新玩家坐桌时被
+        // `state !== WAITING` 挡住，报「本局已开始，只能观战」——表现是
+        // 「重启服务才能再开一局」。空桌复位比"进人时再检查"更可靠。
+        if (count($this->uidOf) === 0) {
+            $this->room->fsm()?->force(DdzState::WAITING);
+            $this->room->hands = [[], [], []];
+            $this->room->bottom = [];
+            $this->room->landlord = -1;
+            $this->room->current = 0;
+            $this->room->lastPlaySeat = -1;
+            $this->room->lastPlay = [];
+            $this->room->passCount = 0;
+            $this->room->bombs = 0;
+            $this->callSeat = 0;
+        }
+
         $this->broadcast(Msg::TABLE, $this->tableInfo());
     }
 
