@@ -1,0 +1,4 @@
+{
+    "name": "db-pg-test",
+    "packages": ["db"]
+}
