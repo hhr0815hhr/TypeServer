@@ -11,6 +11,7 @@
 
 > 想马上看到东西 → [00-quickstart.md](00-quickstart.md)（30 分钟跑通一个服务端）。
 > 想看完整的成品 → [07-walkthrough.md](07-walkthrough.md)（能三人真打的斗地主）。
+> 写代码时反复报奇怪的运行时错误 → 先看 [08-aot-types.md](08-aot-types.md)。
 > 想了解"为什么这么设计" → `tsf/README.md`（4000 行开发记录）。三者不重复。
 
 ## 分层图
@@ -46,6 +47,7 @@
 | 05 | [分布式](05-distributed.md) | `Rpc` · `Discovery` · `Shard` · `Cluster` · `Breaker` | 2900 行 |
 | 06 | [运维](06-ops.md) | `Metrics` · `Gm` · `pkg/wasm` · `tsf` 工具链 | 1500 行 |
 | 07 | [深度示例：一局斗地主](07-walkthrough.md) | 六层拼起来是什么样（1412 行服务端 + 456 行前端） | ✅ 可运行 |
+| 08 | [AOT 下的类型契约](08-aot-types.md) | 为什么 PHP 的合法写法在 AOT 下会炸（五类坑 + 排查方法 + 检查清单） | ✅ 全是真实案例 |
 
 ## 每篇的固定结构
 
