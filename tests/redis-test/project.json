@@ -1,0 +1,4 @@
+{
+    "name": "redis-test",
+    "packages": ["redis"]
+}
