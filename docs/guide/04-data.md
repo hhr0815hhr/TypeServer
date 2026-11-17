@@ -229,6 +229,55 @@ count($mig->status())  // = 迁移文件数，不是"待执行数"
 
 这两个我都在测试里写错过，各假通过了一轮。
 
+### PostgreSQL：反而比 MySQL 顺
+
+同一套代码在 PostgreSQL 15.17 上**一次通过 18 项**，零修改。对比 MySQL 修了三个 bug，值得记下原因。
+
+| 维度 | MySQL | PostgreSQL |
+|:--|:--|:--|
+| `lastInsertId()` | 可用 | **可用**（返回字符串 `'1'`，`Db::lastId()` 里有 `(int)` 转换） |
+| 事务里的 DDL | 隐式提交，包事务必炸 | **可回滚**，直接支持 |
+| 预处理 DDL | 不支持（1295） | 支持 |
+| 类型检查 | 严格（`STRICT_TRANS_TABLES`） | 严格（`22001`） |
+| 迁移方言文件 | `.mysql.sql` | `.pgsql.sql` |
+
+**为什么 pg 不需要修**：上面的三个 MySQL bug，修复都落在 `Db` 核心而不是 MySQL 分支——
+
+```php
+// Db::exec：无参时直接 PDO::exec（不是给 mysql 打补丁）
+if ($args === []) { return $this->conn()->exec($sql); }
+
+// Db::transaction：txDepth 递减挪到 try 外（不是只给 mysql 特殊处理）
+```
+
+所以 pg 自动受益。如果当时选择"给 MySQL 单独写一个 execDdl()"，pg 现在还得再修一遍。
+
+> 这是"修在正确层次"的实证。
+
+**但有一件事必须提前做**：`pdo_pgsql` 不在运行时里。
+
+```
+PDO 驱动（默认）: mysql, sqlite
+PDO 驱动（装好后）: mysql, sqlite, pgsql
+```
+
+typephp 的 AOT 产物加载的是宿主 PHP（`/usr/local/php-8.5-zts`）的 `conf.d`，所以给宿主编一个 `pdo_pgsql.so`，产物也就有了。
+
+仓库里有 `scripts/build-pdo-pgsql.sh`，**重装 php85 后要重跑**。三个坑都在脚本注释里：
+
+1. 必须在**完整 php-src 树**里编（单独 phpize 缺内部头 `ext/pdo/pdo_sql_parser.h`）
+2. 必须显式 `--with-php-config` 指向 8.5（`phpize85` 生成的 configure 默认拿 8.3 的头）
+3. 不能用 `pg_config` 探测 libpq（它报的是写死的系统路径），要用 `PGSQL_CFLAGS` / `PGSQL_LIBS`
+
+**怎么确认驱动真的在工作**：连一个不存在的端口。
+
+```
+could not find driver          → 扩展没加载
+connection ... timeout expired → 驱动加载了，只是服务器不可达
+```
+
+两种失败长得像，原因完全不同。
+
 ### 事件日志：单写者
 
 `EventLog` 是 append-only，每条带自增 `seq`。**一个文件只允许一个写入进程**：
