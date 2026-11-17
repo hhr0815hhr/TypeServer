@@ -77,3 +77,7 @@ bench/wasm-link/fixtures/*/*.wasm
 # 注意顺序：上面的 !*.json 是白名单，会覆盖掉 fixtures/*/dist/ 的忽略规则
 # （gitignore 里后面的规则覆盖前面的），所以要在它之后再声明一次。
 tests/wasm-link/fixtures/*/dist/**
+
+# 编译产物
+tests/*/project.yml
+tests/*/*_test

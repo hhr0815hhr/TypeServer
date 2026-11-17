@@ -1,4 +1,4 @@
-name: redis-test
+name: schedule-test
 version: 0.1.0
 cxx-std: c++17
 cxx-flags: |
@@ -7,5 +7,5 @@ sources:
   - /data/TypeServer/tsf/src
   - /data/TypeServer/tsf/ext/codec/php-src
   - /data/TypeServer/tsf/ext/codec/cpp-src
-  - /data/TypeServer/tsf/pkg/redis/src
-  - /data/TypeServer/tests/redis-test/main.php
+  - /data/TypeServer/tsf/pkg/schedule/src
+  - /data/TypeServer/tests/schedule-test/main.php

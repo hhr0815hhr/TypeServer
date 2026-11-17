@@ -1,0 +1,4 @@
+{
+    "name": "schedule-test",
+    "packages": ["schedule"]
+}
