@@ -32,14 +32,32 @@ final class SlowService extends Service
 
     public function onStart(): void
     {
+        // **故意不在这里建连。**
+        //
+        // onStart 在 spawnOf 时执行，那时不在协程上下文 —— 这里建的连接从建立起
+        // 就是阻塞的，之后在哪个协程里调用都照样卡住整个事件循环。
+        // 实测对比：onStart 建连 → 打点尖峰 14/267；协程内建连 → 0/298。
+        //
+        // 所以留给第一条 onMessage 去建（协程模式下那时已经在协程里了）。
+    }
+
+    private function conn(): ?\Redis
+    {
+        if ($this->redis instanceof \Redis) {
+            return $this->redis;
+        }
         $r = new \Redis();
         try {
-            $r->connect("127.0.0.1", 22379, 3.0);
+            $ok = $r->connect("127.0.0.1", 22379, 3.0);
+            if (!$ok) {
+                return null;
+            }
             $r->auth("CHANGE_ME");
         } catch (\Throwable $e) {
-            $r = null;
+            return null;
         }
         $this->redis = $r;
+        return $r;
     }
 
     public function onMessage(Message $m): void
@@ -47,11 +65,12 @@ final class SlowService extends Service
         if ($m->msgId !== MSG_PING) {
             return;
         }
-        if (!($this->redis instanceof \Redis)) {
+        $r = $this->conn();
+        if ($r === null) {
             return;
         }
         $t0 = hrtime(true);
-        $this->redis->ping();
+        $r->ping();
         $d = (hrtime(true) - $t0) / 1e6;
         self::$totalMs += $d;
         self::$pings++;
