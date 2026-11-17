@@ -8,6 +8,7 @@ use Ddz\DdzService;
 use Ddz\Msg as DdzMsg;
 use Ddz\PlayerRow;
 use TSF\Db\Db;
+use TSF\Db\Migrator;
 use TSF\Db\Repo;
 use TSF\EventLog\EventLog;
 use TSF\Gateway\Gateway;
@@ -30,6 +31,29 @@ function main(): void
     $host = Config::getString("server.host", "0.0.0.0");
     $port = Config::getInt("server.port", 9301);
     $heartbeat = Config::getInt("server.heartbeat_sec", 60);
+
+    // ---- 部署子命令 ----
+    // `tsf migrate .` 的做法是编译后运行 `./doudizhu migrate`，所以产物**必须**
+    // 自己处理这个参数；否则它会被当成"没带参数"直接起服务，部署脚本就挂在那里
+    // 等一个永远不返回的迁移。duel 的 main.php 里也是同样的分支。
+    $cli = isset($_SERVER["argv"][1]) ? (string) $_SERVER["argv"][1] : "";
+    if ($cli === "migrate" || $cli === "migrate-status") {
+        $migDb = new Db(Config::getString("db.dsn", "sqlite:" . $base . "/var/ddz.db"));
+        $migrator = new Migrator($migDb, $base . "/migrations");
+        if ($cli === "migrate") {
+            // up() 的返回值不是"已执行的迁移列表"（count 出来是 4，而实际只有 1 个 .sql），
+            // 拿它报数会给出错误信息。部署脚本只关心成败，所以不报条数。
+            $migrator->up();
+            echo "  done" . PHP_EOL;
+            echo "migrate ok" . PHP_EOL;
+            exit(0);
+        }
+        $pending = $migrator->status();
+        foreach ($pending as $name) {
+            echo "  pending " . (string) $name . PHP_EOL;
+        }
+        exit($pending === [] ? 0 : 1);
+    }
 
     $proto = ProtocolStack::fromConfig(
         Config::getString("protocol.frame", "native"),
