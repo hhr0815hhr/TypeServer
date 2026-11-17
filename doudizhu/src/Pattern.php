@@ -23,6 +23,8 @@ final class Pattern
     public const STRAIGHT = 6;
     public const STRAIGHT_PAIR = 7;
     public const PLANE = 8;
+    public const PLANE_ONE = 11;
+    public const PLANE_PAIR = 12;
     public const BOMB = 9;
     public const ROCKET = 10;
 
@@ -42,6 +44,8 @@ final class Pattern
             self::STRAIGHT => "顺子",
             self::STRAIGHT_PAIR => "连对",
             self::PLANE => "飞机",
+            self::PLANE_ONE => "飞机带单",
+            self::PLANE_PAIR => "飞机带对",
             self::BOMB => "炸弹",
             self::ROCKET => "王炸",
             default => "非法",
@@ -165,6 +169,11 @@ final class Pattern
         }
 
         // 顺子：5 张以上、全单张、连续、不到 2
+        //
+        // 注意：条件成立但形状不对时**不能 return null**。顺子和连对、飞机带单的
+        // 张数特征会重叠（比如 333444 56 是 8 张、3333 4444 也是 8 张），
+        // 提前 return null 会把后面的分支挡死——这个坑在「三带一吃掉飞机」时踩过一次，
+        // 这里是第二、三次。所以「不像」就往下走，只有全部不匹配才在最后返回 null。
         if ($distinct === $count && $count >= 5) {
             if (self::consecutive($cnt)) {
                 $p->type = self::STRAIGHT;
@@ -172,10 +181,9 @@ final class Pattern
                 $p->len = $count;
                 return $p;
             }
-            return null;
         }
 
-        // 连对：3 对以上、每对正好 2 张、连续、不到 2
+        // 连对：3 对以上、每对正好 2 张、连续、不到 2（同样不提前 return null）
         if ($distinct * 2 === $count && $distinct >= 3) {
             $ok = true;
             $i = 0;
@@ -192,7 +200,6 @@ final class Pattern
                 $p->len = $distinct;
                 return $p;
             }
-            return null;
         }
 
         // 纯飞机：2 组以上连续的 3 张，且不带牌
@@ -212,7 +219,72 @@ final class Pattern
                 $p->len = $distinct;
                 return $p;
             }
-            return null;
+        }
+
+        // 飞机带单 / 带对：k 组连续三张（k>=2）+ k 张散牌 或 k 个对子
+        //
+        // 判定方式：枚举段长 k 与起点，要求段内每个 rank 恰好 3 张（炸弹不能拆来凑飞机），
+        // 再看剩余牌的形状——带单时每个 rank 不超过 2 张，带对时每个 rank 恰好 2 张。
+        // 不枚举"任意子集"，是因为飞机必须是连续的，枚举连续段就够了。
+        $k = 2;
+        while ($k <= 6) {
+            $start = 0;
+            while ($start + $k <= Card::MAX_SEQ_RANK + 1) {
+                $segOk = true;
+                $i = $start;
+                while ($i < $start + $k) {
+                    if ($cnt[$i] !== 3) {
+                        $segOk = false;
+                        break;
+                    }
+                    $i++;
+                }
+                if ($segOk) {
+                    $rest = $count - 3 * $k;
+
+                    // 带单：剩余刚好 k 张，且每个 rank 不超过 2 张
+                    if ($rest === $k) {
+                        $bad = false;
+                        $j = 0;
+                        while ($j < Card::COUNT) {
+                            $inSeg = ($j >= $start && $j < $start + $k);
+                            if (!$inSeg && $cnt[$j] > 2) {
+                                $bad = true;
+                                break;
+                            }
+                            $j++;
+                        }
+                        if (!$bad) {
+                            $p->type = self::PLANE_ONE;
+                            $p->rank = $start + $k - 1;
+                            $p->len = $k;
+                            return $p;
+                        }
+                    }
+
+                    // 带对：剩余刚好 2k 张，且每个 rank 恰好 2 张
+                    if ($rest === 2 * $k) {
+                        $bad = false;
+                        $j = 0;
+                        while ($j < Card::COUNT) {
+                            $inSeg = ($j >= $start && $j < $start + $k);
+                            if (!$inSeg && $cnt[$j] !== 0 && $cnt[$j] !== 2) {
+                                $bad = true;
+                                break;
+                            }
+                            $j++;
+                        }
+                        if (!$bad) {
+                            $p->type = self::PLANE_PAIR;
+                            $p->rank = $start + $k - 1;
+                            $p->len = $k;
+                            return $p;
+                        }
+                    }
+                }
+                $start++;
+            }
+            $k++;
         }
 
         return null;

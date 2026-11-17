@@ -1,135 +1,180 @@
 <?php
 
-// 斗地主：WebSocket 服务端。
-//
-// 装配顺序：协议栈 → 传输 → Gateway（推送要用它）→ 牌桌 Service → 消息转发。
-// 和 duel 的区别是这里只有一张桌（单桌 demo），所以不用 RoomManager。
+// 自测：飞机带牌 + 完整一局（跑到结算）
 
+use Ddz\Card;
 use Ddz\DdzService;
-use Ddz\Msg as DdzMsg;
-use TSF\Gateway\Gateway;
-use TSF\Gateway\RateLimiter;
-use TSF\Gateway\SessionManager;
-use TSF\Gateway\TokenAuth;
-use TSF\Kernel\Bootstrap;
-use TSF\Kernel\Config;
-use TSF\Kernel\Logger;
-use TSF\Protocol\ProtocolStack;
-use TSF\Service\Scheduler;
-use TSF\Transport\ServerFactory;
+use Ddz\Msg;
+use Ddz\Pattern;
+use TSF\Service\Message;
+
+function ids(string $spec): array
+{
+    $out = [];
+    $used = [];
+    foreach (explode(" ", trim($spec)) as $tok) {
+        $rank = rankByName($tok);
+        if ($rank === Card::SMALL_JOKER || $rank === Card::BIG_JOKER) {
+            $out[] = $rank;
+        } else {
+            $n = $used[$rank] ?? 0;
+            $out[] = $rank * 4 + $n;
+            $used[$rank] = $n + 1;
+        }
+    }
+    return $out;
+}
+
+function rankByName(string $t): int
+{
+    if ($t === "SJ") { return Card::SMALL_JOKER; }
+    if ($t === "BJ") { return Card::BIG_JOKER; }
+    $m = ["3" => 0, "4" => 1, "5" => 2, "6" => 3, "7" => 4, "8" => 5, "9" => 6,
+          "10" => 7, "J" => 8, "Q" => 9, "K" => 10, "A" => 11, "2" => 12];
+    return $m[$t] ?? -1;
+}
+
+function check(string $spec, int $expect, string $desc): void
+{
+    $p = Pattern::parse(ids($spec));
+    if ($p === null) {
+        echo ($expect === Pattern::INVALID ? "  OK   " : "  FAIL ") . $desc . "（判为非法）" . PHP_EOL;
+        return;
+    }
+    echo ($p->type === $expect ? "  OK   " : "  FAIL ") . $desc
+        . " → " . $p->name() . " len=" . $p->len . PHP_EOL;
+}
+
+function probePatterns(): void
+{
+    echo "=== 飞机带牌 ===" . PHP_EOL;
+    check("3 3 3 4 4 4 5 6", Pattern::PLANE_ONE, "333444 + 5 6（带单）");
+    check("3 3 3 4 4 4 5 5 6 6", Pattern::PLANE_PAIR, "333444 + 55 66（带对）");
+    check("3 3 3 4 4 4 5 5 5 6 7 8", Pattern::PLANE_ONE, "333444555 + 678（三组）");
+    check("3 3 3 4 4 4 5 5", Pattern::INVALID, "333444 + 5（带牌数量不对）");
+    check("3 3 3 4 4 4 5 6 6", Pattern::INVALID, "带单却混进了对子");
+    check("3 3 3 3 4 4 4 5", Pattern::INVALID, "用炸弹拆飞机（3333 不能当 333）");
+    check("3 3 3 4 4 4 5 6 7 7", Pattern::INVALID, "带单多一张");
+    check("2 2 2 A A A 5 6", Pattern::INVALID, "含 2 的飞机");
+
+    echo PHP_EOL . "=== 牌型回归 ===" . PHP_EOL;
+    check("3 4 5 6 7", Pattern::STRAIGHT, "顺子");
+    check("3 3 3 4 4 4", Pattern::PLANE, "纯飞机");
+    check("SJ BJ", Pattern::ROCKET, "王炸");
+}
+
+function send(DdzService $svc, int $uid, int $fd, int $msgId, array $p): void
+{
+    $svc->onMessage(new Message(0, $msgId, json_encode([
+        "uid" => $uid, "fd" => $fd, "p" => $p,
+    ])));
+}
+
+function probeSettle(): void
+{
+    echo PHP_EOL . "=== 完整一局（地主连续出单张，农民一直过，直到结算）===" . PHP_EOL;
+
+    $log = [];
+    $publish = function (int $fd, int $msgId, string|array|object $data) use (&$log): void {
+        $log[] = ["fd" => $fd, "msg" => $msgId,
+                  "data" => is_string($data) ? $data : (string) json_encode($data)];
+    };
+    $svc = new DdzService($publish);
+
+    $i = 0;
+    while ($i < 3) {
+        send($svc, 1001 + $i, 10 + $i, Msg::SEAT, []);
+        $i++;
+    }
+    $i = 0;
+    while ($i < 3) {
+        send($svc, 1001 + $i, 10 + $i, Msg::READY, []);
+        $i++;
+    }
+    // 座位 0 叫地主
+    send($svc, 1001, 10, Msg::CALL, ["call" => true]);
+
+    // 取地主手牌
+    $hand = [];
+    foreach ($log as $row) {
+        if ($row["msg"] === Msg::HAND && $row["fd"] === 10) {
+            $d = json_decode($row["data"], true);
+            if (count($d["cards"] ?? []) > 0) {
+                $hand = $d["cards"];
+            }
+        }
+    }
+    echo "  地主起手: " . count($hand) . " 张" . PHP_EOL;
+    $log = [];
+
+    // 地主每次出最小的一张，两个农民过
+    $rounds = 0;
+    $settled = "";
+    while ($hand !== [] && $rounds < 30) {
+        $one = $hand[0];
+        send($svc, 1001, 10, Msg::PLAY, ["cards" => [$one]]);
+
+        $rejected = "";
+        $newHand = $hand;
+        foreach ($log as $row) {
+            if ($row["msg"] === Msg::ERROR && $row["fd"] === 10) {
+                $rejected = $row["data"];
+            }
+            if ($row["msg"] === Msg::HAND && $row["fd"] === 10) {
+                $d = json_decode($row["data"], true);
+                $newHand = $d["cards"] ?? [];
+            }
+            if ($row["msg"] === Msg::SETTLED) {
+                $settled = $row["data"];
+            }
+        }
+        $log = [];
+
+        if ($rejected !== "") {
+            echo "  出牌被拒（第 " . ($rounds + 1) . " 轮）: " . $rejected . PHP_EOL;
+            break;
+        }
+        $hand = $newHand;
+
+        if ($settled !== "") {
+            break;
+        }
+
+        // 两个农民过
+        send($svc, 1002, 11, Msg::PASS, []);
+        send($svc, 1003, 12, Msg::PASS, []);
+        foreach ($log as $row) {
+            if ($row["msg"] === Msg::SETTLED) {
+                $settled = $row["data"];
+            }
+        }
+        $log = [];
+        $rounds++;
+    }
+
+    echo "  出牌轮数: " . $rounds . "，剩余手牌: " . count($hand) . " 张" . PHP_EOL;
+    if ($settled === "") {
+        echo "  FAIL 没有触发结算" . PHP_EOL;
+        return;
+    }
+    $d = json_decode($settled, true);
+    echo "  结算: 地主" . ($d["landlordWin"] ? "胜" : "负")
+        . " 倍数×" . $d["mult"]
+        . " 春天=" . ($d["spring"] === "" ? "否" : $d["spring"]) . PHP_EOL;
+    foreach ($d["rows"] as $r) {
+        echo "    座位" . $r["seat"] . " " . ($r["win"] ? "赢 " : "输 ")
+            . $r["delta"] . "（剩 " . $r["left"] . "）" . PHP_EOL;
+    }
+    // 校验：地主 1 打 2，农民赢则地主 -2×score，两个农民各 +score
+    $sum = 0;
+    foreach ($d["rows"] as $r) {
+        $sum += $r["delta"];
+    }
+    echo "  分数守恒（应为 0）: " . $sum . ($sum === 0 ? " OK" : " FAIL") . PHP_EOL;
+}
 
 function main(): void
 {
-    $base = __DIR__;
-    Bootstrap::boot($base, "doudizhu");
-    Bootstrap::ensureDirs([$base . "/var/log"]);
-
-    $host = Config::getString("server.host", "0.0.0.0");
-    $port = Config::getInt("server.port", 9301);
-    $heartbeat = Config::getInt("server.heartbeat_sec", 60);
-
-    // 帧用原生实现；载荷用 json —— 浏览器端 JSON.stringify 直接对得上
-    $proto = ProtocolStack::fromConfig(
-        Config::getString("protocol.frame", "native"),
-        Config::getString("protocol.payload", "json")
-    );
-
-    $server = ServerFactory::make(
-        Config::getString("server.transport", "ws"),
-        $host,
-        $port,
-        $proto->frame(),
-        [
-            "worker_num" => Config::getInt("server.worker_num", 1),
-            "max_conn" => Config::getInt("server.max_conn", 200),
-            "nodelay" => Config::getBool("server.nodelay", true),
-        ]
-    );
-
-    $sessions = new SessionManager($heartbeat);
-    $auth = new TokenAuth(
-        Config::getMap("server.auth.tokens"),
-        Config::getString("server.auth.secret", "")
-    );
-    $limiter = new RateLimiter(
-        Config::getInt("server.rate_per_sec", 100),
-        Config::getInt("server.rate_burst", 200)
-    );
-
-    $gw = new Gateway(
-        $server,
-        $sessions,
-        $auth,
-        $limiter,
-        $heartbeat,
-        1000,
-        Config::getBool("server.auth.require", true),
-        $proto->payload()
-    );
-    $gw->setSendFailLimit(50);
-
-    // 牌桌服务：推送通过闭包回到 Gateway，Service 本身不依赖传输层
-    $ddzAddr = Scheduler::instance()->spawnOf(function () use ($gw): DdzService {
-        return new DdzService(function (int $fd, int $msgId, string|array|object $data) use ($gw): void {
-            $gw->send($fd, $msgId, $data);
-        });
-    });
-
-    // ---- 客户端消息 → 牌桌 ----
-    // 统一带上 uid 与 fd：Service 需要知道"谁发的"和"回哪去"。
-    // 用 JSON 字符串而不是数组，是因为 Message::$data 的类型是 string|array|object，
-    // 而数组里再嵌 mixed 会踩全框架"不出现 mixed"的红线。
-    $gw->on(DdzMsg::SEAT, function (int $fd, int $uid, string|array|object $data) use ($ddzAddr): void {
-        Scheduler::instance()->deliver($ddzAddr, DdzMsg::SEAT, json_encode([
-            "uid" => $uid, "fd" => $fd, "p" => $data,
-        ]));
-    });
-    $gw->on(DdzMsg::READY, function (int $fd, int $uid, string|array|object $data) use ($ddzAddr): void {
-        Scheduler::instance()->deliver($ddzAddr, DdzMsg::READY, json_encode([
-            "uid" => $uid, "fd" => $fd, "p" => $data,
-        ]));
-    });
-    $gw->on(DdzMsg::CALL, function (int $fd, int $uid, string|array|object $data) use ($ddzAddr): void {
-        Scheduler::instance()->deliver($ddzAddr, DdzMsg::CALL, json_encode([
-            "uid" => $uid, "fd" => $fd, "p" => $data,
-        ]));
-    });
-    $gw->on(DdzMsg::PLAY, function (int $fd, int $uid, string|array|object $data) use ($ddzAddr): void {
-        Scheduler::instance()->deliver($ddzAddr, DdzMsg::PLAY, json_encode([
-            "uid" => $uid, "fd" => $fd, "p" => $data,
-        ]));
-    });
-    $gw->on(DdzMsg::PASS, function (int $fd, int $uid, string|array|object $data) use ($ddzAddr): void {
-        Scheduler::instance()->deliver($ddzAddr, DdzMsg::PASS, json_encode([
-            "uid" => $uid, "fd" => $fd, "p" => $data,
-        ]));
-    });
-    $gw->on(DdzMsg::LEAVE, function (int $fd, int $uid, string|array|object $data) use ($ddzAddr): void {
-        Scheduler::instance()->deliver($ddzAddr, DdzMsg::LEAVE, json_encode([
-            "uid" => $uid, "fd" => $fd, "p" => $data,
-        ]));
-    });
-
-    // 断线清理：不处理的话，关掉标签页座位会一直被占，再开就是「桌子满了」
-    //
-    // 注意回调是 **(fd, uid) 两个参数** —— Gateway 里是 `$cb($fd, $uid)`。
-    // 只声明一个参数在 PHP 里语法合法，但在 AOT 下参数个数不匹配会直接崩
-    // （报 `stdClass->{closure}()`，编译期不报错）。有 uid 就不必按 fd 反查了。
-    $gw->onDisconnect(function (int $fd, int $uid) use ($ddzAddr): void {
-        Logger::info("client gone", ["fd" => $fd, "uid" => $uid]);
-        Scheduler::instance()->deliver($ddzAddr, DdzMsg::LEAVE, json_encode([
-            "uid" => $uid, "fd" => $fd, "p" => [],
-        ]));
-    });
-
-    $gw->boot();
-
-    Logger::info("doudizhu ready", [
-        "host" => $host,
-        "port" => $port,
-        "transport" => Config::getString("server.transport", "ws"),
-        "payload" => $proto->payloadName(),
-    ]);
-
-    $server->start();
+    probePatterns();
+    probeSettle();
 }
