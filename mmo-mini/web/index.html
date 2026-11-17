@@ -40,6 +40,7 @@
   <div><span class="k">可见</span> <b id="vis">0</b> 人</div>
   <div><span class="k">帧</span> <b id="fps">0</b> fps</div>
   <div><span class="k">格子</span> <b id="cell">-</b></div>
+  <div><span class="k">位置</span> <b id="edge">-</b></div>
 </div>
 
 <div id="help">WASD / 方向键移动 · 浅色框内是可见范围（3×3 格）</div>
@@ -57,7 +58,7 @@
 // ---------------- 协议 ----------------
 const LOGIN = 1, LOGIN_OK = 2, PING = 100, PONG = 101;
 const JOIN = 2101, MOVE = 2102, LEAVE = 2103;
-const WELCOME = 2201, SYNC = 2202, GONE = 2203;
+const WELCOME = 2201, SYNC = 2202, GONE = 2203, ERROR = 2204;
 
 // ---------------- 帧编解码（native：8 字节头，大端） ----------------
 function encodeFrame(msgId, bodyStr) {
@@ -190,6 +191,13 @@ function onFrame(msgId, body) {
     if (d.pid !== myPid) ents.delete(d.pid);
     return;
   }
+
+  if (msgId === ERROR) {
+    alert('无法进入世界：' + (d.why || '未知原因'));
+    $("join").style.display = "flex";
+    if (ws) ws.close();
+    return;
+  }
 }
 
 // ---------------- 渲染 ----------------
@@ -281,6 +289,16 @@ function draw() {
 
   $("pos").textContent = Math.round(self.x) + ", " + Math.round(self.y);
   $("vis").textContent = visible;
+
+  // 边界提示：服务端会把坐标 clamp 在 [0, mapW]，但客户端不提示的话，
+  // 玩家只会觉得"按了方向键但不动"
+  const pad = 20;
+  let edge = "";
+  if (self.x <= pad) edge += "← 西 ";
+  if (self.x >= world.mapW - pad) edge += "东 → ";
+  if (self.y <= pad) edge += "↑ 北 ";
+  if (self.y >= world.mapH - pad) edge += "南 ↓ ";
+  $("edge").textContent = edge === "" ? "界内" : ("到达边界 " + edge);
 }
 
 // ---------------- 主循环（插值） ----------------

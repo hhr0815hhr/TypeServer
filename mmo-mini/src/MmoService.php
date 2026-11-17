@@ -45,6 +45,9 @@ final class MmoService extends Service
     /** 断线后角色保留的秒数 */
     private int $offlineKeepSec = 60;
 
+    /** 房间人数上限（含断线但未清理的） */
+    private int $maxPlayers = 8;
+
     /** @var \Closure */
     private \Closure $publish;
 
@@ -56,8 +59,9 @@ final class MmoService extends Service
     private int $speed;
     private int $frameMs;
 
-    public function __construct(\Closure $publish, int $mapW = 2000, int $mapH = 2000, int $cell = 200, int $speed = 6, int $frameMs = 50)
+    public function __construct(\Closure $publish, int $mapW = 2000, int $mapH = 2000, int $cell = 200, int $speed = 6, int $frameMs = 50, int $maxPlayers = 8)
     {
+        $this->maxPlayers = $maxPlayers > 0 ? $maxPlayers : 8;
         $this->publish = $publish;
         $this->mapW = $mapW;
         $this->mapH = $mapH;
@@ -133,6 +137,12 @@ final class MmoService extends Service
             unset($this->offlineAt[$uid]);
             \TSF\Kernel\Logger::info("rejoin", ["uid" => $uid]);
             $this->welcome($uid, $fd);
+            return;
+        }
+
+        // 满员拒绝。断线未清理的角色也算人数 —— 否则 60 秒内可能挤进超过上限的人
+        if (count($this->players) >= $this->maxPlayers) {
+            ($this->publish)($fd, Msg::ERROR, ["why" => "世界已满（上限 " . $this->maxPlayers . " 人）"]);
             return;
         }
 

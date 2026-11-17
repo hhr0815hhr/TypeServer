@@ -74,7 +74,8 @@ function main(): void
             Config::getInt("game.map_h", 2000),
             Config::getInt("game.cell", 200),
             Config::getInt("game.speed", 6),
-            Config::getInt("game.frame_ms", 50)
+            Config::getInt("game.frame_ms", 50),
+            Config::getInt("game.max_players", 8)
         );
     });
 

@@ -410,6 +410,10 @@ function onFrame(msgId, body) {
     rows.forEach((r) => {
       log('  座位' + r.seat + (r.win ? ' 赢 ' : ' 输 ') + r.delta);
     });
+    // 结算后的余额（服务端从 db 读的，不是客户端自己累加）
+    (data.coins || []).forEach((c) => {
+      log('  座位' + c.seat + ' 余额 ' + c.coins);
+    });
     $('playArea').innerHTML = '<span class="hint">' +
       (data.landlordWin ? '地主胜' : '农民胜') + ' · 倍数 ×' + data.mult + '</span>';
     return;

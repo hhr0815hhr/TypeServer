@@ -4,6 +4,7 @@ namespace Ddz;
 
 use TSF\Db\Repo;
 use TSF\EventLog\EventLog;
+use TSF\Room\Member;
 use TSF\Fsm\Machine;
 use TSF\Service\Message;
 use TSF\Service\Service;
@@ -47,6 +48,9 @@ final class DdzService extends Service
 
     /** 断线后保留座位的秒数 */
     private int $offlineKeepSec = 60;
+
+    /** @var array<int, int> uid => fd，观战者（局中进来的，不占座位、看不到手牌） */
+    private array $spectators = [];
 
     /** @var \Closure */
     private \Closure $publish;
@@ -153,6 +157,14 @@ final class DdzService extends Service
         }
     }
 
+    /** 按 fd 直接推（观战者没有座位号） */
+    private function pushTo(int $fd, int $msgId, string|array|object $data): void
+    {
+        if ($fd > 0) {
+            ($this->publish)($fd, $msgId, $data);
+        }
+    }
+
     private function broadcast(int $msgId, string|array|object $data): void
     {
         $s = 0;
@@ -161,6 +173,10 @@ final class DdzService extends Service
                 $this->push($s, $msgId, $data);
             }
             $s++;
+        }
+        // 观战者也要看得到桌面变化和出牌。手牌是 push() 单发的，不会漏给他们。
+        foreach ($this->spectators as $suid => $fd) {
+            $this->pushTo($fd, $msgId, $data);
         }
     }
 
@@ -287,8 +303,12 @@ final class DdzService extends Service
         }
 
         if ($this->room->state() !== DdzState::WAITING) {
-            // 局中进来只能看，不占座
-            ($this->publish)($fd, Msg::ERROR, ["why" => "本局已开始，只能观战（demo 未实现观战）"]);
+            // 局中进来当观战者：进成员表（SPECTATOR），收桌面和出牌广播，但收不到手牌
+            $this->room->addAs($uid, Member::SPECTATOR, "sp" . $uid);
+            $this->spectators[$uid] = $fd;
+            \TSF\Kernel\Logger::info("spectate", ["uid" => $uid]);
+            $this->pushTo($fd, Msg::TABLE, $this->tableInfo());
+            $this->pushTo($fd, Msg::ERROR, ["why" => "已作为观战者加入（看不到手牌，不能操作）"]);
             return;
         }
 
@@ -319,7 +339,7 @@ final class DdzService extends Service
         $this->seatOf[$uid] = $seat;
         $this->uidOf[$seat] = $uid;
         $this->fdOf[$seat] = $fd;
-        $this->room->addAs($uid, 1, "p" . $uid);   // Member::PLAYER = 1
+        $this->room->addAs($uid, Member::PLAYER, "p" . $uid);   // Member::PLAYER = 1
         $this->ready[$seat] = 0;
 
         $this->push($seat, Msg::HAND, ["cards" => []]);
@@ -335,6 +355,13 @@ final class DdzService extends Service
      */
     private function onLeave(int $uid, int $fd = 0): void
     {
+        // 观战者掉线：从观战表里删掉就行，不动座位
+        if (isset($this->spectators[$uid])) {
+            unset($this->spectators[$uid]);
+            $this->room->remove($uid);
+            return;
+        }
+
         $seat = -1;
         if ($uid > 0) {
             $seat = $this->seatOf[$uid] ?? -1;
@@ -636,10 +663,11 @@ final class DdzService extends Service
      *
      * @param array<int, array<string, int>> $rows
      */
-    private function persist(int $winnerSeat, int $landlord, int $mult, string $spring, array $rows): void
+    /** @return array<int, array<string, int>> 每个座位结算后的余额 */
+    private function persist(int $winnerSeat, int $landlord, int $mult, string $spring, array $rows): array
     {
         if ($this->players === null || $this->log === null) {
-            return;
+            return [];
         }
 
         $this->roundSeq++;
@@ -654,6 +682,7 @@ final class DdzService extends Service
         ]);
         $this->log->commit();
 
+        $bal = [];
         foreach ($rows as $row) {
             $seat = (int) $row["seat"];
             $uid = $this->uidOf[$seat] ?? 0;
@@ -671,7 +700,9 @@ final class DdzService extends Service
             }
             $p->coins = $p->coins + (int) $row["delta"];
             $this->players->update($p);
+            $bal[] = ["seat" => $seat, "coins" => $p->coins];
         }
+        return $bal;
     }
 
     /** 清掉超过保留期的断线座位 */
@@ -842,7 +873,7 @@ final class DdzService extends Service
         // 顺序有讲究：日志在前、余额在后。崩在两者之间时，日志里有一条结算记录、
         // 余额没动 —— 重启后可以按日志补账（重放），反过来就查不出来了。
         // 这也是 eventlog 存在的意义：它是"事实"，余额是"事实的推导结果"。
-        $this->persist($winnerSeat, $landlord, $mult, $spring, $rows);
+        $balances = $this->persist($winnerSeat, $landlord, $mult, $spring, $rows);
 
         $this->broadcast(Msg::SETTLED, [
             "lander" => $winnerSeat,
@@ -850,6 +881,7 @@ final class DdzService extends Service
             "mult" => $mult,
             "spring" => $spring,
             "rows" => $rows,
+            "coins" => $balances,   // 结算后的余额（来自 db），客户端直接显示
         ]);
 
         // 复位成等待，下一局重新准备
