@@ -1,116 +1,102 @@
 <?php
 
-// 阶段 1.5：验证 Room 的可扩展性改造真的生效。
-//
-// 改造前 Room 把状态语义焊死在 1..4：stateName() 对第五个状态返回 "closed"（错的，
-// 不是"未知"），loadFrom() 把第五个状态改成 WAITING（恢复出来是错的）。
-// 这个文件就是证明这两个洞补上了。
+// 验证 Room 不再内置任何状态语义：
+//   1) 不传状态机 → 裸状态值，业务自己 setState
+//   2) 注入自定义状态机 → 斗地主四段（等待/叫地主/出牌/结算）
+//   3) 用 ThreeStage 辅助类 → 默认三段式仍然可用（duel 走这条路）
 
-use Ddz\Card;
-use Ddz\Pattern;
+use TSF\Fsm\Machine;
 use TSF\Room\Member;
 use TSF\Room\Room;
-use TSF\Room\RoomManager;
-use TSF\Service\Message;
-use TSF\Service\Scheduler;
-use TSF\Service\Service;
+use TSF\Room\ThreeStage;
 
-/** 斗地主的「叫地主」状态。业务自定义，框架不认识 */
-const DDZ_CALLING = 5;
-
-function buildRoom(int $id): Room
+function probeBareState(): void
 {
-    $room = new Room($id, 3);
+    echo "=== 1) 不传状态机（裸状态）===" . PHP_EOL;
+    $r = new Room(1, 3);
+    echo "  初始 state=" . $r->state() . " name=" . $r->stateName() . PHP_EOL;
 
-    // 业务声明：叫地主阶段允许进人（还能观战）、但不推帧
-    $room->setStateName(DDZ_CALLING, "calling");
-    $room->setJoinableStates([Room::WAITING, DDZ_CALLING]);
-    $room->setRunningStates([Room::PLAYING]);
-
-    // 转移：等待 --call--> 叫地主 --start--> 进行
-    $room->fsm()->allow(Room::WAITING, "call", DDZ_CALLING);
-    $room->fsm()->allow(DDZ_CALLING, "start", Room::PLAYING);
-    return $room;
+    // 业务自己定义的「叫地主」
+    $r->setState(5);
+    $r->setStateName(5, "calling");
+    echo "  setState(5) 后 name=" . $r->stateName() . PHP_EOL;
+    echo "  fsm() 是 null: " . ($r->fsm() === null ? "yes" : "no") . PHP_EOL;
 }
 
-function probeFlexibleStates(): void
+function probeCustomFsm(): void
 {
-    echo "=== 自定义状态能否工作 ===" . PHP_EOL;
+    echo PHP_EOL . "=== 2) 注入自定义状态机（斗地主四段）===" . PHP_EOL;
 
-    $room = buildRoom(1);
-    echo "  初始: " . $room->stateName() . PHP_EOL;
+    // 业务定义自己的状态号与转移，框架一概不参与
+    $fsm = new Machine(10);
+    $fsm->allow(10, "call", 20)      // 等待 → 叫地主
+        ->allow(20, "start", 30)      // 叫地主 → 出牌
+        ->allow(30, "settle", 40);    // 出牌 → 结算
 
-    echo "  WAITING 进人: " . ($room->add(1001) ? "ok" : "no") . PHP_EOL;
+    $r = new Room(2, 3, $fsm);
+    $r->setStateName(10, "waiting");
+    $r->setStateName(20, "calling");
+    $r->setStateName(30, "playing");
+    $r->setStateName(40, "settled");
 
-    $fired = $room->fsm()->fire("call");
-    echo "  fire(call): " . ($fired ? "ok" : "fail")
-        . " → state=" . $room->state() . " name=" . $room->stateName() . PHP_EOL;
+    echo "  初始: " . $r->stateName() . " (state=" . $r->state() . ")" . PHP_EOL;
 
-    // 关键 1：第五个状态的名字不是 "closed" 了
-    echo "  名字正确: " . ($room->stateName() === "calling" ? "OK" : "FAIL(" . $room->stateName() . ")") . PHP_EOL;
+    $r->fsm()->fire("call");
+    echo "  fire(call): " . $r->stateName() . " (state=" . $r->state() . ")" . PHP_EOL;
 
-    // 关键 2：CALLING 允许进人（业务声明过）
-    echo "  CALLING 进人: " . ($room->add(1002) ? "ok" : "no") . PHP_EOL;
+    $r->fsm()->fire("start");
+    echo "  fire(start): " . $r->stateName() . PHP_EOL;
 
-    // 关键 3：CALLING 不推帧
-    echo "  CALLING 推帧: " . ($room->tick(50) ? "advanced" : "blocked") . "（应为 blocked）" . PHP_EOL;
+    // Room 不判断能不能进人 —— 出牌阶段依然允许（业务自己要不要拦是业务的事）
+    echo "  出牌阶段进人: " . ($r->add(1001) ? "ok（Room 不拦，业务自己判断）" : "no") . PHP_EOL;
 
-    $room->fsm()->fire("start");
-    echo "  fire(start) → " . $room->stateName()
-        . "，推帧: " . ($room->tick(50) ? "advanced" : "blocked") . "（应为 advanced）" . PHP_EOL;
-
-    // 关键 4：loadFrom 能恢复自定义状态，不被改成 WAITING
-    $fresh = buildRoom(2);
-    $ok = $fresh->loadFrom(["state" => DDZ_CALLING, "members" => []]);
-    echo "  loadFrom(CALLING): " . ($ok ? "ok" : "fail")
-        . " → state=" . $fresh->stateName()
-        . ($fresh->state() === DDZ_CALLING ? " OK" : " FAIL(被改写)") . PHP_EOL;
+    $r->fsm()->fire("settle");
+    echo "  fire(settle): " . $r->stateName() . PHP_EOL;
+    $r->close();
+    echo "  close() 后进人: " . ($r->add(1002) ? "ok" : "no（已关闭，这个 Room 确实知道）") . PHP_EOL;
 }
 
-/** 只为了验证「业务 Service 能注入 RoomManager」 */
-final class DdzProbeService extends Service
+function probeThreeStage(): void
 {
-    public int $roomId = 0;
-    public int $max = 0;
+    echo PHP_EOL . "=== 3) ThreeStage 默认三段式（duel 走这条）===" . PHP_EOL;
+    $r = ThreeStage::room(3, 4);
+    echo "  初始: " . $r->stateName() . PHP_EOL;
+    $r->fsm()->fire("start");
+    echo "  fire(start): " . $r->stateName() . PHP_EOL;
+    $r->fsm()->fire("finish");
+    echo "  fire(finish): " . $r->stateName() . PHP_EOL;
 
-    public function __construct(int $roomId, int $max)
-    {
-        $this->roomId = $roomId;
-        $this->max = $max;
-    }
-
-    public function onMessage(Message $m): void
-    {
-        // 斗地主的出牌、叫地主都从这里进 —— 默认的 RoomService 承载不了
-    }
+    // 帧推进：Room 不再按状态判断，调用方自己决定
+    echo "  tick(50): " . ($r->tick(50) ? "ok" : "blocked") . " frame=" . $r->frame() . PHP_EOL;
 }
 
-function probeInjectedService(): void
+function probeSnapshot(): void
 {
-    echo PHP_EOL . "=== 业务 Service 注入 ===" . PHP_EOL;
+    echo PHP_EOL . "=== 4) 快照：自定义状态能正确恢复 ===" . PHP_EOL;
+    $fsm = new Machine(10);
+    $fsm->allow(10, "call", 20);
+    $src = new Room(4, 3, $fsm);
+    $src->setStateName(20, "calling");
+    $src->fsm()->fire("call");
+    $src->add(1001, "甲");
 
-    $mgr = new RoomManager(RoomManager::MODE_DEDICATED, 50, 200);
-    $roomId = $mgr->create(3, false, function (int $id, int $max): Service {
-        return new DdzProbeService($id, $max);
-    });
-    echo "  create 返回 roomId=" . $roomId . PHP_EOL;
+    $data = $src->toArray();
+    echo "  导出 state=" . $data["state"] . " members=" . count($data["members"]) . PHP_EOL;
 
-    $addr = $mgr->addrOf($roomId);
-    echo "  房间服务地址=" . $addr . PHP_EOL;
-
-    $svc = Scheduler::instance()->serviceOf($addr);
-    $isOurs = $svc instanceof DdzProbeService;
-    echo "  注入生效: " . ($isOurs ? "OK（拿到的是 DdzProbeService）" : "FAIL（仍是默认 RoomService）") . PHP_EOL;
+    $fsm2 = new Machine(10);
+    $fsm2->allow(10, "call", 20);
+    $dst = new Room(5, 3, $fsm2);
+    $dst->setStateName(20, "calling");
+    $ok = $dst->loadFrom($data);
+    echo "  恢复: " . ($ok ? "ok" : "fail")
+        . " → state=" . $dst->stateName() . " (state=" . $dst->state() . ")"
+        . " members=" . $dst->memberCount() . PHP_EOL;
 }
 
 function main(): void
 {
-    probeFlexibleStates();
-    probeInjectedService();
-
-    echo PHP_EOL . "=== 牌型判定回归（确认没被改坏）===" . PHP_EOL;
-    $p = Pattern::parse([0, 4, 8, 12, 16]);
-    echo "  顺子: " . ($p !== null ? $p->name() : "非法") . PHP_EOL;
-    $pl = Pattern::parse([0, 1, 2, 4, 5, 6]);
-    echo "  飞机: " . ($pl !== null ? $pl->name() : "非法") . PHP_EOL;
+    probeBareState();
+    probeCustomFsm();
+    probeThreeStage();
+    probeSnapshot();
 }
