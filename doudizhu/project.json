@@ -1,4 +1,4 @@
 {
     "name": "doudizhu",
-    "packages": ["fsm", "db", "eventlog"]
+    "packages": ["fsm", "room", "db", "eventlog"]
 }
