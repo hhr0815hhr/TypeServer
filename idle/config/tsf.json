@@ -1,0 +1,20 @@
+{
+  "app": { "name": "idle" },
+  "log": { "level": "info", "file": "/data/TypeServer/demo/idle/var/log/app.log" },
+  "protocol": { "frame": "native", "payload": "protobuf" },
+  "server": {
+    "host": "0.0.0.0",
+    "port": 9501,
+    "transport": "tcp",
+    "worker_num": 1,
+    "heartbeat_sec": 30,
+    "auth": { "require": false, "tokens": {}, "secret": "" }
+  },
+  "db": {
+    "dsn": "mysql:host=127.0.0.1;port=52315;dbname=tsf;charset=utf8mb4",
+    "user": "root",
+    "pass": "CHANGE_ME"
+  },
+  "redis": { "host": "127.0.0.1", "port": 22379, "auth": "CHANGE_ME", "timeout": 3 },
+  "idle": { "rate_per_minute": 10, "cap_seconds": 28800, "welcome_coins": 100 }
+}
