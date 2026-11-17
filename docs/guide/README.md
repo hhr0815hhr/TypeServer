@@ -13,6 +13,7 @@
 > 想看完整的成品 → [07-walkthrough.md](07-walkthrough.md)（能三人真打的斗地主）。
 > 写代码时反复报奇怪的运行时错误 → 先看 [08-aot-types.md](08-aot-types.md)。
 > 在纠结「这段逻辑该写 PHP 还是上 wasm」→ [09-wasm-or-typephp.md](09-wasm-or-typephp.md)。
+> 想知道「零件都好了怎么拼成一个业务」→ [10-assembly.md](10-assembly.md)。
 > 想了解"为什么这么设计" → `tsf/README.md`（4000 行开发记录）。三者不重复。
 
 ## 分层图
@@ -85,6 +86,7 @@ flowchart TD
 | 07 | [深度示例：一局斗地主](07-walkthrough.md) | 六层拼起来是什么样（1412 行服务端 + 456 行前端） | ✅ 可运行 |
 | 08 | [AOT 下的类型契约](08-aot-types.md) | 为什么 PHP 的合法写法在 AOT 下会炸（五类坑 + 排查方法 + 检查清单） | ✅ 全是真实案例 |
 | 09 | [编译成 native 还是 wasm](09-wasm-or-typephp.md) | 同一个 tpc 的两种输出目标；什么时候该热更（判断流程 + 真实例子） | ✅ 基于工具链源码 |
+| 10 | [总装](10-assembly.md) | 把零件拼成一个能跑的业务（五个「缝」的坑 + 上线验证清单） | ✅ 基于 idle demo |
 
 ## 每篇的固定结构
 
