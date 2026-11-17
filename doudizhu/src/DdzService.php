@@ -36,6 +36,18 @@ final class DdzService extends Service
     /** 本轮从哪个座位开始叫地主 */
     private int $callSeat = 0;
 
+    /** @var array<int, int> seat => 断线时刻；有记录表示该座位的人掉线了，座位还留着 */
+    private array $offlineAt = [];
+
+    /** @var array<int, int> seat => 1，该座位是机器人 */
+    private array $bots = [];
+
+    /** @var array<string, int> 机器人名字池 */
+    private array $botNames = ["小明", "小红", "老王"];
+
+    /** 断线后保留座位的秒数 */
+    private int $offlineKeepSec = 60;
+
     /** @var \Closure */
     private \Closure $publish;
 
@@ -76,8 +88,18 @@ final class DdzService extends Service
         $this->ready = [0 => 0, 1 => 0, 2 => 0];
     }
 
+    public function onStart(): void
+    {
+        // 每 10 秒扫一次断线座位，超过保留期就真正清掉
+        $this->interval(10000, Msg::SWEEP);
+    }
+
     public function onMessage(Message $m): void
     {
+        if ($m->msgId === Msg::SWEEP) {
+            $this->sweepOffline();
+            return;
+        }
         $raw = (string) $m->data;
         $argv = json_decode($raw, true);
         if (!is_array($argv)) {
@@ -115,6 +137,10 @@ final class DdzService extends Service
             $this->onAuto($p);
             return;
         }
+        if ($m->msgId === Msg::ADD_BOT) {
+            $this->onAddBot();
+            return;
+        }
     }
 
     // ---------------- 推送 ----------------
@@ -148,6 +174,8 @@ final class DdzService extends Service
                 "seat" => $s,
                 "uid" => $this->uidOf[$s] ?? 0,
                 "ready" => $this->ready[$s] ?? 0,
+                "offline" => isset($this->offlineAt[$s]) ? 1 : 0,
+                "bot" => isset($this->bots[$s]) ? 1 : 0,
                 "count" => count($this->room->hands[$s] ?? []),
             ];
             $s++;
@@ -179,6 +207,16 @@ final class DdzService extends Service
             $this->turnTimer = 0;
         }
         $this->push($seat, Msg::TURN, ["mustLead" => $mustLead]);
+
+        // 机器人（或已掉线的人）：用 1 秒短超时代打，别让真人干等 30 秒
+        $quick = isset($this->bots[$seat]) || isset($this->offlineAt[$seat]);
+        if ($quick) {
+            $this->turnTimer = $this->timeout(1000, Msg::AUTO, json_encode([
+                "uid" => 0, "fd" => 0, "p" => ["seat" => $seat],
+            ]));
+            return;
+        }
+
         if ($this->turnSec > 0) {
             // 载荷必须和其他业务消息**同构**，两层都不能少：
             //   1) 必须是 JSON 字符串（传数组会被 (string) 转成 "Array"，json_decode 失败）
@@ -211,8 +249,9 @@ final class DdzService extends Service
             return;
         }
 
+        // 机器人的 uid 是负数，也要能代打 —— 所以这里不能要求 uid > 0
         $uid = $this->uidOf[$seat] ?? 0;
-        if ($uid <= 0) {
+        if ($uid === 0) {
             return;
         }
 
@@ -231,12 +270,19 @@ final class DdzService extends Service
 
     private function onSeat(int $uid, int $fd, string|array|object $p): void
     {
-        // 已经在座：只更新 fd（重连）
+        // 已经在座 = 重连：恢复 fd、清掉断线标记、补发手牌和当前回合
         if (isset($this->seatOf[$uid])) {
             $seat = $this->seatOf[$uid];
             $this->fdOf[$seat] = $fd;
-            $this->push($seat, Msg::TABLE, $this->tableInfo());
+            unset($this->offlineAt[$seat]);
+            \TSF\Kernel\Logger::info("rejoin", ["uid" => $uid, "seat" => $seat]);
+
             $this->push($seat, Msg::HAND, ["cards" => $this->room->hands[$seat] ?? []]);
+            $this->broadcast(Msg::TABLE, $this->tableInfo());
+            if ($this->room->current === $seat) {
+                $mustLead = ($this->room->lastPlaySeat === $seat || $this->room->lastPlaySeat < 0);
+                $this->push($seat, Msg::TURN, ["mustLead" => $mustLead]);
+            }
             return;
         }
 
@@ -308,10 +354,26 @@ final class DdzService extends Service
         }
 
         $gone = $this->uidOf[$seat] ?? 0;
+
+        // 局中掉线：保留座位，只标记离线。
+        //
+        // 直接清掉的后果是：刷新一下页面座位就没了、手牌也丢了，而且如果正好轮到他，
+        // 整桌就卡在等人上。保留座位后，掉线的人由现有的超时机制自动代打（托管），
+        // 60 秒内回来还能接着打。
+        $playing = ($this->room->state() === DdzState::PLAYING
+            || $this->room->state() === DdzState::CALLING);
+        if ($playing && $gone > 0 && !isset($this->bots[$seat])) {
+            $this->offlineAt[$seat] = time();
+            unset($this->fdOf[$seat]);
+            \TSF\Kernel\Logger::info("player offline", ["uid" => $gone, "seat" => $seat]);
+            $this->broadcast(Msg::TABLE, $this->tableInfo());
+            return;
+        }
+
         if ($gone > 0) {
             unset($this->seatOf[$gone]);
         }
-        unset($this->uidOf[$seat], $this->fdOf[$seat]);
+        unset($this->uidOf[$seat], $this->fdOf[$seat], $this->offlineAt[$seat], $this->bots[$seat]);
         $this->ready[$seat] = 0;
         if ($gone > 0) {
             $this->room->remove($gone);
@@ -353,12 +415,7 @@ final class DdzService extends Service
         }
         $this->ready[$seat] = 1;
         $this->broadcast(Msg::TABLE, $this->tableInfo());
-
-        // 三人齐且都准备 → 发牌
-        if (count($this->uidOf) === 3 && ($this->ready[0] ?? 0) === 1
-            && ($this->ready[1] ?? 0) === 1 && ($this->ready[2] ?? 0) === 1) {
-            $this->deal();
-        }
+        $this->maybeStart();
     }
 
     private function deal(): void
@@ -615,6 +672,113 @@ final class DdzService extends Service
             $p->coins = $p->coins + (int) $row["delta"];
             $this->players->update($p);
         }
+    }
+
+    /** 清掉超过保留期的断线座位 */
+    private function sweepOffline(): void
+    {
+        $now = time();
+        $dead = [];
+        foreach ($this->offlineAt as $seat => $at) {
+            if ($now - $at > $this->offlineKeepSec) {
+                $dead[] = $seat;
+            }
+        }
+        foreach ($dead as $seat) {
+            \TSF\Kernel\Logger::info("offline expired", ["seat" => $seat]);
+            $this->forceLeave($seat);
+        }
+    }
+
+    /** 真正清掉一个座位（断线超时，或未开局时主动离开） */
+    private function forceLeave(int $seat): void
+    {
+        $uid = $this->uidOf[$seat] ?? 0;
+        if ($uid > 0) {
+            unset($this->seatOf[$uid]);
+            $this->room->remove($uid);
+        }
+        unset($this->uidOf[$seat], $this->fdOf[$seat], $this->offlineAt[$seat], $this->bots[$seat]);
+        $this->ready[$seat] = 0;
+        $this->room->hands[$seat] = [];
+
+        if (count($this->uidOf) === 0) {
+            $this->resetTable();
+        }
+        $this->broadcast(Msg::TABLE, $this->tableInfo());
+    }
+
+    /** 空桌复位（原来写在 onLeave 里，现在两处都要用） */
+    private function resetTable(): void
+    {
+        $this->room->fsm()?->force(DdzState::WAITING);
+        $this->room->hands = [[], [], []];
+        $this->room->bottom = [];
+        $this->room->landlord = -1;
+        $this->room->current = 0;
+        $this->room->lastPlaySeat = -1;
+        $this->room->lastPlay = [];
+        $this->room->passCount = 0;
+        $this->room->bombs = 0;
+        $this->callSeat = 0;
+        $this->ready = [0 => 0, 1 => 0, 2 => 0];
+    }
+
+    /**
+     * 补一个机器人到空位。
+     *
+     * 机器人不是 AI，只是"不会掉线的玩家"：轮到它时由短超时自动出牌（出最小的单张）。
+     * 目的是让一个人也能开局测试，而不是做一个能打赢的对手。
+     */
+    private function onAddBot(): void
+    {
+        if ($this->room->state() !== DdzState::WAITING) {
+            $this->broadcast(Msg::ERROR, ["why" => "开局后才能加"]);
+            return;
+        }
+        $seat = -1;
+        $s = 0;
+        while ($s < 3) {
+            if (!isset($this->uidOf[$s])) {
+                $seat = $s;
+                break;
+            }
+            $s++;
+        }
+        if ($seat < 0) {
+            $this->broadcast(Msg::ERROR, ["why" => "没有空位"]);
+            return;
+        }
+
+        // 机器人用负数 uid，和真人（正数）区分开
+        $botUid = -1 - $seat;
+        $this->uidOf[$seat] = $botUid;
+        // **必须同时登记 seatOf**：代打时走的是 onPlay($uid, ...)，
+        // 那里第一件事就是 `$seat = $this->seatOf[$uid]` —— 漏了这一步，
+        // 机器人能"轮到它"但永远不出牌（其实是静默 return，没有任何报错）。
+        $this->seatOf[$botUid] = $seat;
+        $this->bots[$seat] = 1;
+        $this->room->addAs($botUid, 1, "bot" . $seat);
+        $this->ready[$seat] = 1;
+        \TSF\Kernel\Logger::info("add bot", ["seat" => $seat]);
+
+        $this->broadcast(Msg::TABLE, $this->tableInfo());
+        $this->maybeStart();
+    }
+
+    /** 三人齐且都准备 → 发牌（原逻辑写在 onReady 里，加机器人后两处都要调） */
+    private function maybeStart(): void
+    {
+        if ($this->room->state() !== DdzState::WAITING) {
+            return;
+        }
+        if (count($this->uidOf) < 3) {
+            return;
+        }
+        if (($this->ready[0] ?? 0) !== 1 || ($this->ready[1] ?? 0) !== 1 || ($this->ready[2] ?? 0) !== 1) {
+            return;
+        }
+        $this->deal();
     }
 
     private function settle(int $winnerSeat): void

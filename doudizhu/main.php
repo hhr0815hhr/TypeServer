@@ -142,6 +142,12 @@ function main(): void
         ]));
     });
 
+    $gw->on(DdzMsg::ADD_BOT, function (int $fd, int $uid, string|array|object $data) use ($ddzAddr): void {
+        Scheduler::instance()->deliver($ddzAddr, DdzMsg::ADD_BOT, json_encode([
+            "uid" => $uid, "fd" => $fd, "p" => $data,
+        ]));
+    });
+
     // 断线清理：不处理的话，关掉标签页座位会一直被占，再开就是「桌子满了」。
     // 回调是 **(fd, uid) 两个参数**——Gateway 里是 $cb($fd, $uid)，
     // 只声明一个参数在 AOT 下会崩（报 stdClass->{closure}()），编译期不报。

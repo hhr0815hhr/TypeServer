@@ -14,6 +14,7 @@ final class Msg
     public const PLAY = 1104;       // 出牌 {"cards":[0,4,8]}
     public const PASS = 1105;       // 过 {}
     public const LEAVE = 1106;      // 离桌 {}
+    public const ADD_BOT = 1108;    // 补一个机器人到空位 {}
 
     // 服务端 → 客户端
     public const TABLE = 1201;      // 桌面状态（谁在桌上、状态、轮到谁）
@@ -24,6 +25,7 @@ final class Msg
     public const SETTLED = 1206;    // 结算
     public const ERROR = 1207;      // 操作被拒 {"why":"..."}
 
-    // 内部消息（不走网络）：出牌超时触发
-    public const AUTO = 1199;
+    // 内部消息（不走网络）
+    public const AUTO = 1199;       // 出牌超时
+    public const SWEEP = 1198;      // 断线清扫（每 10 秒一次）
 }

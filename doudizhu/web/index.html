@@ -115,7 +115,8 @@
 <script>
 // ---------------- 协议常量 ----------------
 const LOGIN = 1, LOGIN_OK = 2, LOGIN_FAIL = 3, PING = 100, PONG = 101, ERR = 400;
-const SEAT = 1101, READY = 1102, CALL = 1103, PLAY = 1104, PASS = 1105, LEAVE = 1106;
+const SEAT = 1101, READY = 1102, CALL = 1103, PLAY = 1104, PASS = 1105, LEAVE = 1106,
+      ADD_BOT = 1108;
 const TABLE = 1201, HAND = 1202, TURN = 1203, PLAYED = 1204, PASSED = 1205,
       SETTLED = 1206, ERROR = 1207;
 
@@ -234,9 +235,12 @@ function renderTable() {
     if (s.seat === mySeat) return;
     const d = document.createElement('div');
     d.className = 'seat' + (s.seat === tableInfo.current ? ' active' : '');
+    const who = s.bot ? '机器人' : (s.uid ? String(s.uid) : '空');
+    const stateTxt = s.offline ? '<span style="color:#e56b5d">断线中…</span>'
+      : (s.ready ? '已准备' : '未准备');
     d.innerHTML = `
-      <div class="name">座位 ${s.seat}${s.uid ? ' · ' + s.uid : ' · 空'}</div>
-      <div class="meta">${s.ready ? '已准备' : '未准备'} · 剩 ${s.count} 张</div>
+      <div class="name">座位 ${s.seat} · ${who}</div>
+      <div class="meta">${stateTxt} · 剩 ${s.count} 张</div>
       ${tableInfo.landlord === s.seat ? '<div class="landlord">地主</div>' : ''}
     `;
     box.appendChild(d);
@@ -281,6 +285,11 @@ function renderToolbar() {
     const me = (tableInfo.seats || []).find((s) => s.seat === mySeat);
     const rdy = me && me.ready;
     add(rdy ? '已准备' : '准备', 'primary', () => sendJson(READY, {}), rdy || mySeat < 0);
+    // 人不够时可以补机器人 —— 一个人也能开局
+    const empty = (tableInfo.seats || []).filter((x) => !x.uid).length;
+    if (empty > 0) {
+      add('加机器人', '', () => sendJson(ADD_BOT, {}));
+    }
   } else if (phase === 'calling') {
     // 只有轮到自己时才给按钮
     if (tableInfo.current === mySeat) {
