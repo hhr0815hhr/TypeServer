@@ -88,6 +88,7 @@
 | 3 | 定时器完全不触发 | 纯服务进程没有传输层驱动 `Scheduler::tick()` | [02](02-service.md) |
 | 4 | `Invalid callback` / 闭包变 `stdClass` | 参数写成 `callable` 而不是 `\Closure`（AOT 下联合类型会丢） | [01](01-ingress.md) |
 | 5 | 改了 `tsf/src` 但行为没变 | 增量构建不检测框架源码的变更，要清缓存全量重编 | 见下 |
+| 6 | `migrate` 成功但表不存在 | MySQL 的服务端预处理不支持 DDL（1295），异常被吞 | [04](04-data.md#mysql-与-sqlite-的差异实测) |
 
 **第 5 条的具体做法**：
 
