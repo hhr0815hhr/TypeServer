@@ -65,15 +65,65 @@ $n = $repo->update($p);
 ### 分片：调用代码与不分片完全一样
 
 ```php
-// 片段：不分片
-$repo = new Repo(Player::class, new Db("sqlite:/var/app.db"));
+// 不分片
+$repo = new Repo(Player::class, new Db("mysql:host=db;dbname=game"));
 
-// 分片：只换第二个参数
-$repo = new Repo(Player::class, new Shards("sqlite:/var/app_%d.db", 4));
+// 分片：只换第二个参数（DSN 模板**必须**含 {i}）
+$repo = new Repo(Player::class, new Shards("mysql:host=db;dbname=game_{i}", 4));
 ```
 
 `Shards` 按 key 取模选库（`forKey($key)` / `shardOf($key)`）。**调用方代码零改动**——
-这是 `Source` 抽象的全部意义。`$repo->isSharded()` 可以在需要时判断。
+这是 `Source` 抽象的全部意义。
+
+#### 三条必须知道的约束
+
+都是实测出来的，不是从文档读来的。
+
+**① 分片实体的主键不能自增**
+
+```
+db: 实体 [Player] 用自增主键，不能分片——分片需要主键由业务分配
+```
+
+`Repo` 用**主键**算分片（`forKey($id)`）。而各分片的 `AUTO_INCREMENT` 会算出**相同的 id**
+写到不同库——表面看就是"同一个玩家出现两次"，而且这种错误要等数据对账才会发现。
+
+```php
+#[Id(true)]   // ✗ 不能分片
+#[Id]         // ✓ 主键由业务分配（uid 直接当主键）
+```
+
+**② 没有跨库事务**
+
+`Db::transaction()` 是单库的，`Shards` 不提供分布式事务。跨分片的一致性只能靠业务保证
+（比如"一个玩家的资产只在它所属的那个分片改"），或者上两阶段提交——**框架没有**。
+
+这不是缺陷，是分片架构的固有代价。但设计"跨服转账""全服排行榜"这类功能时必须先想清楚。
+
+**③ 分片键 = 主键**
+
+因为 `forKey` 用的是主键，**分片键由主键决定**。想让 uid 分片，就让 uid 当主键；
+想按"公会 id"分片，就得让公会 id 当主键。这是设计上的简化，代价是"按非主键字段分片"
+需要改框架。
+
+#### 实测数据（2 分片，uid 1-4）
+
+| 分片库 | 记录 |
+|:--|:--|
+| `game_0` | uid 2、4 |
+| `game_1` | uid 1、3 |
+
+`Migrator` 会遍历所有分片各跑一次迁移（`foreach ($src->every() as $db)`），
+所以**建表脚本要么幂等（`IF NOT EXISTS`），要么每个分片都全新**。
+
+#### 另一个容易误判的点
+
+```php
+$key = $repo->insert($p);   // 非自增主键时**返回 0**
+```
+
+主键在实体里，不需要回填/返回。**判插入成功要看数据是否落库，不能看返回值**——
+测试里我因为这个把 4 次成功的插入判成了失败。
 
 ### 迁移是部署步骤，不是启动步骤
 
