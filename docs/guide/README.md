@@ -41,7 +41,7 @@
 | 01 | 接入层 | `Transport`(TCP/WS) · `Gateway`(会话/限流/握手) · `Protocol`(帧+消息) · `Proto` | 2400 行 |
 | 02 | 服务层 | `Service`(注册/邮箱/调度) · `Timer`(堆/定时/Cron) · `Config`(读取/热更) | 1900 行 |
 | 03 | [玩法层](03-gameplay.md) | `pkg/room` · `pkg/frameloop` · `pkg/aoi` · `pkg/match` · `pkg/fsm` · `pkg/entity` | 2700 行 |
-| 04 | 数据层 | `pkg/db`(仓储/迁移/分片) · `pkg/eventlog` · `pkg/snapshot` | 2800 行 |
+| 04 | [数据层](04-data.md) | `pkg/db`(仓储/迁移/分片) · `pkg/eventlog` · `pkg/snapshot` | 2800 行 |
 | 05 | 分布式 | `Rpc` · `Discovery` · `Shard` · `Cluster` · `Breaker` | 2900 行 |
 | 06 | 运维 | `Metrics` · `Gm` · `pkg/wasm` · `tsf` 工具链 | 1500 行 |
 | 07 | 深度示例 | 上面六层的综合运用 | — |
