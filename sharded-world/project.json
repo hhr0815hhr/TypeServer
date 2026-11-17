@@ -1,0 +1,4 @@
+{
+    "name": "sharded-world",
+    "packages": ["room", "fsm", "aoi", "frameloop"]
+}
