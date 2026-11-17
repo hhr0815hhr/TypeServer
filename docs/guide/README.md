@@ -12,6 +12,7 @@
 > 想马上看到东西 → [00-quickstart.md](00-quickstart.md)（30 分钟跑通一个服务端）。
 > 想看完整的成品 → [07-walkthrough.md](07-walkthrough.md)（能三人真打的斗地主）。
 > 写代码时反复报奇怪的运行时错误 → 先看 [08-aot-types.md](08-aot-types.md)。
+> 在纠结「这段逻辑该写 PHP 还是上 wasm」→ [09-wasm-or-typephp.md](09-wasm-or-typephp.md)。
 > 想了解"为什么这么设计" → `tsf/README.md`（4000 行开发记录）。三者不重复。
 
 ## 分层图
