@@ -1,0 +1,6 @@
+-- 只在 MySQL 上跑（Migrator 按 DSN 驱动匹配后缀）
+CREATE TABLE IF NOT EXISTS tsf_t_player (
+    id    INT AUTO_INCREMENT PRIMARY KEY,
+    name  VARCHAR(32) NOT NULL,
+    coins INT NOT NULL DEFAULT 0
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

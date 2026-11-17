@@ -1,0 +1,4 @@
+{
+    "name": "db-mysql-test",
+    "packages": ["db"]
+}
