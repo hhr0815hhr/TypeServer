@@ -1,0 +1,4 @@
+{
+    "name": "mmo-mini",
+    "packages": ["room", "fsm", "aoi", "frameloop"]
+}

@@ -1,0 +1,28 @@
+{
+    "app": { "name": "mmo-mini" },
+    "log": { "level": "info", "file": "${base}/var/log/app.log" },
+    "protocol": { "frame": "native", "payload": "json" },
+    "game": {
+        "map_w": 2000,
+        "map_h": 2000,
+        "cell": 200,
+        "speed": 6,
+        "frame_ms": 50
+    },
+    "server": {
+        "host": "0.0.0.0",
+        "port": 9401,
+        "transport": "ws",
+        "worker_num": 1,
+        "max_conn": 200,
+        "nodelay": true,
+        "heartbeat_sec": 60,
+        "rate_per_sec": 100,
+        "rate_burst": 200,
+        "auth": {
+            "require": true,
+            "secret": "mmo-dev-secret",
+            "tokens": { "tok-a": 1001, "tok-b": 1002, "tok-c": 1003, "tok-d": 1004 }
+        }
+    }
+}
