@@ -24,7 +24,10 @@ use TSF\Db\Table;
 #[Table("tsf_t_player")]
 final class PlayerRow
 {
-    #[Id]
+    // auto=true 才是自增。默认 false 是有意为之：游戏服的 uid 通常由账号服/雪花号分配，
+    // 不是数据库自增。漏写这个参数时，insert 会显式插 id=0，
+    // MySQL 把 0 当自增占位符生成 1，而 Repo 仍然返回 0 —— 看起来像「自增失效」。
+    #[Id(true)]
     public int $id = 0;
 
     #[Col]
@@ -74,7 +77,10 @@ function main(): void
 
     // ---- 清理旧测试表 ----
     $db->exec("DROP TABLE IF EXISTS tsf_t_player");
-    $db->exec("DROP TABLE IF EXISTS tsf_t_schema_migrations");
+    // 注意：Migrator::TABLE 是 "schema_migrations"，**不带任何前缀**。
+    // 之前这里 DROP 的是 tsf_schema_migrations，等于没清 —— 上一轮的 version 记录还在，
+    // 于是本轮 up() 走 skipped 分支：executed=0、failed=0，看起来像「什么都没发生」。
+    $db->exec("DROP TABLE IF EXISTS schema_migrations");
 
     // ---------------- 2a. 手动建表诊断 ----------------
     // Migrator 的 catch 会把异常吞掉，先确认 Db::exec 本身能不能执行 DDL
@@ -96,6 +102,27 @@ function main(): void
         T::ok(false, "手动建表抛异常", $e->getMessage());
     }
 
+    // ---------------- 2-pre. 目录诊断 ----------------
+    // AOT 编译后 __DIR__ 可能不是源码目录（可能指向编译时路径或运行时 cwd），
+    // 如果它不对，Migrator 的 scan() 会因为 is_dir 失败而返回空，
+    // 表现就是 executed=0 且 failed=0。
+    echo PHP_EOL . "== [2-pre] 目录诊断 ==" . PHP_EOL;
+    $dirProbe = __DIR__ . "/migrations";
+    T::ok(true, "__DIR__ = " . __DIR__);
+    T::ok(is_dir($dirProbe), "migrations 目录存在? " . $dirProbe);
+    if (is_dir($dirProbe)) {
+        $fs = scandir($dirProbe);
+        T::ok(is_array($fs) && count($fs) > 2, "目录里有文件", "count=" . (is_array($fs) ? count($fs) : -1));
+        if (is_array($fs)) {
+            foreach ($fs as $f) {
+                if ($f === "." || $f === "..") {
+                    continue;
+                }
+                T::ok(true, "  文件: " . $f);
+            }
+        }
+    }
+
     // ---------------- 2. Migrator ----------------
     echo PHP_EOL . "== [2] Migrator（mysql 方言）==" . PHP_EOL;
     $dir = __DIR__ . "/migrations";
@@ -107,6 +134,9 @@ function main(): void
     $failed = $res["failed"] ?? [];
     T::eq((string) count($executed), "1", "执行了 1 条迁移");
     T::eq((string) count($failed), "0", "没有失败");
+    // skipped 必须一起断言：executed=0 且 failed=0 时，唯一的可能就是被 skipped 了
+    // （上一轮的 version 记录还在）。只看 executed/failed 会误判成「什么都没发生」。
+    T::eq((string) ($res["skipped"] ?? -1), "0", "跳过 0 条");
     if (count($failed) > 0) {
         T::ok(false, "失败原因", $mig->lastError);
     }
@@ -119,9 +149,16 @@ function main(): void
     T::eq((string) (int) $hasTable, "1", "表 tsf_t_player 已建");
 
     // 幂等：再跑一次不应重复执行
-    // up() 的返回值不是「本次执行了几条」，判幂等要看 status()
+    // status() 返回的是「全部迁移 + applied 标记」，**不是**「待执行列表」。
+    // 用 count(status()) 判断幂等，又是拿数量当语义（这次数的是"有几个迁移文件"）。
     $mig->up();
-    T::eq((string) count($mig->status()), "0", "重复 up() 后没有待执行迁移");
+    $pending = 0;
+    foreach ($mig->status() as $row) {
+        if (!(bool) ($row["applied"] ?? false)) {
+            $pending++;
+        }
+    }
+    T::eq((string) $pending, "0", "重复 up() 后没有待执行迁移");
 
     $status = $mig->verify();
     T::ok(true, "verify() 可调用", "返回 " . count($status) . " 项");
@@ -195,16 +232,18 @@ function main(): void
 
     // ---------------- 4. 事务 ----------------
     echo PHP_EOL . "== [4] 事务 ==" . PHP_EOL;
-    $db->transaction(function () use ($db): void {
-        $db->exec("INSERT INTO tsf_t_player (name, coins) VALUES (?, ?)", ["事务内", 999]);
+    // 闭包必须声明 1 个参数：transaction() 内部调用 `$fn($this)`，
+    // AOT 下参数个数不匹配直接崩（报 stdClass::{closure}() expects exactly 0 arguments）。
+    $db->transaction(function (Db $d): void {
+        $d->exec("INSERT INTO tsf_t_player (name, coins) VALUES (?, ?)", ["事务内", 999]);
     });
     $cnt = $db->value("SELECT COUNT(*) FROM tsf_t_player WHERE name = ?", ["事务内"], 0);
     T::eq((string) (int) $cnt, "1", "事务提交后可见");
 
     // 回滚
     try {
-        $db->transaction(function () use ($db): void {
-            $db->exec("INSERT INTO tsf_t_player (name, coins) VALUES (?, ?)", ["要回滚", 1]);
+        $db->transaction(function (Db $d): void {
+            $d->exec("INSERT INTO tsf_t_player (name, coins) VALUES (?, ?)", ["要回滚", 1]);
             throw new \RuntimeException("故意抛错");
         });
         T::ok(false, "事务内的异常应该冒出来");
@@ -232,8 +271,7 @@ function main(): void
     // ---------------- 6. 清理 ----------------
     echo PHP_EOL . "== [6] 清理 ==" . PHP_EOL;
     $db->exec("DROP TABLE IF EXISTS tsf_t_player");
-    $db->exec("DROP TABLE IF EXISTS tsf_t_schema_migrations");
-    $db->exec("DROP TABLE IF EXISTS tsf_schema_migrations");
+    $db->exec("DROP TABLE IF EXISTS schema_migrations");
     $left = $db->value(
         "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name LIKE 'tsf_t_%'",
         [],
