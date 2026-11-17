@@ -2,6 +2,8 @@
 
 namespace Ddz;
 
+use TSF\Db\Repo;
+use TSF\EventLog\EventLog;
 use TSF\Fsm\Machine;
 use TSF\Service\Message;
 use TSF\Service\Service;
@@ -43,10 +45,25 @@ final class DdzService extends Service
     /** 当前回合的超时定时器 id，0 表示没有 */
     private int $turnTimer = 0;
 
-    public function __construct(\Closure $publish, int $turnSec = 30)
-    {
+    /** 玩家余额仓储；为 null 时不落库（纯内存跑法） */
+    private ?Repo $players = null;
+
+    /** 对局日志；与 $players 一起决定是否开启持久化 */
+    private ?EventLog $log = null;
+
+    /** 局号：每结算一局 +1，用作日志的业务 id（幂等键的一部分） */
+    private int $roundSeq = 0;
+
+    public function __construct(
+        \Closure $publish,
+        int $turnSec = 30,
+        ?Repo $players = null,
+        ?EventLog $log = null
+    ) {
         $this->publish = $publish;
         $this->turnSec = $turnSec;
+        $this->players = $players;
+        $this->log = $log;
 
         // 状态机由业务构造并配置 —— Room 不认识这四个状态
         $fsm = new Machine(DdzState::WAITING);
@@ -553,6 +570,53 @@ final class DdzService extends Service
 
     // ---------------- 结算 ----------------
 
+    /**
+     * 写日志 + 改余额。
+     *
+     * 幂等：日志的业务 id 用 `ddz:<局号>`，同一局不会写两条（局号只在结算时自增一次）。
+     * 真正要防的是"结算函数被重复调用"——那条路径目前不存在（出完牌即结算并复位），
+     * 所以这里不做查重，只保证 id 稳定，将来要重放核对时用它当键。
+     *
+     * @param array<int, array<string, int>> $rows
+     */
+    private function persist(int $winnerSeat, int $landlord, int $mult, string $spring, array $rows): void
+    {
+        if ($this->players === null || $this->log === null) {
+            return;
+        }
+
+        $this->roundSeq++;
+        $key = "ddz:" . $this->roundSeq;
+
+        $this->log->append($key, "settle", [
+            "winner" => $winnerSeat,
+            "landlord" => $landlord,
+            "mult" => $mult,
+            "spring" => $spring,
+            "rows" => $rows,
+        ]);
+        $this->log->commit();
+
+        foreach ($rows as $row) {
+            $seat = (int) $row["seat"];
+            $uid = $this->uidOf[$seat] ?? 0;
+            if ($uid <= 0) {
+                continue;
+            }
+            $p = $this->players->find($uid);
+            if ($p === null || !($p instanceof PlayerRow)) {
+                // 首次见到这个玩家：给初始筹码
+                $p = new PlayerRow();
+                $p->uid = $uid;
+                $p->coins = 1000;
+                $p->name = "p" . $uid;
+                $this->players->insert($p);
+            }
+            $p->coins = $p->coins + (int) $row["delta"];
+            $this->players->update($p);
+        }
+    }
+
     private function settle(int $winnerSeat): void
     {
         $this->room->fsm()?->fire("settle");
@@ -608,6 +672,13 @@ final class DdzService extends Service
             ];
             $s++;
         }
+
+        // ---- 落库：先写事件日志，再改余额 ----
+        //
+        // 顺序有讲究：日志在前、余额在后。崩在两者之间时，日志里有一条结算记录、
+        // 余额没动 —— 重启后可以按日志补账（重放），反过来就查不出来了。
+        // 这也是 eventlog 存在的意义：它是"事实"，余额是"事实的推导结果"。
+        $this->persist($winnerSeat, $landlord, $mult, $spring, $rows);
 
         $this->broadcast(Msg::SETTLED, [
             "lander" => $winnerSeat,

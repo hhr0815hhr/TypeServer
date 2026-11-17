@@ -6,6 +6,10 @@
 
 use Ddz\DdzService;
 use Ddz\Msg as DdzMsg;
+use Ddz\PlayerRow;
+use TSF\Db\Db;
+use TSF\Db\Repo;
+use TSF\EventLog\EventLog;
 use TSF\Gateway\Gateway;
 use TSF\Gateway\RateLimiter;
 use TSF\Gateway\SessionManager;
@@ -67,11 +71,16 @@ function main(): void
     $gw->setSendFailLimit(50);
 
     // 牌桌服务：推送通过闭包回到 Gateway，Service 本身不依赖传输层
+    // 落库：余额表 + 对局日志。dsn 里 ${base} 由 Bootstrap 展开。
+    $db = new Db(Config::getString("db.dsn", "sqlite:" . $base . "/var/ddz.db"));
+    $players = new Repo(PlayerRow::class, $db);
+    $settleLog = new EventLog($base . "/var/settle.log");
+
     $turnSec = Config::getInt("game.turn_timeout_sec", 30);
-    $ddzAddr = Scheduler::instance()->spawnOf(function () use ($gw, $turnSec): DdzService {
+    $ddzAddr = Scheduler::instance()->spawnOf(function () use ($gw, $turnSec, $players, $settleLog): DdzService {
         return new DdzService(function (int $fd, int $msgId, string|array|object $data) use ($gw): void {
             $gw->send($fd, $msgId, $data);
-        }, $turnSec);
+        }, $turnSec, $players, $settleLog);
     });
 
     // ---- 客户端消息 → 牌桌 ----
