@@ -7,12 +7,11 @@
  *   python3 tests/redis-test/mock_redis.py 6379 &
  *   ./redis_test
  *
- * 这个测试故意只依赖 RESP 协议的**行为**，不依赖真 redis 的实现细节：
- * 命令编码、五种回复类型、nil、数组、错误、重连。
+ * 现在客户端是包装 php-redis 扩展的，所以不再测协议编码，只测行为：
+ * 基本命令、nil、哈希、有序集合、重连、pipeline。
  */
 
 use TSF\Redis\Client;
-use TSF\Redis\Resp;
 
 final class T
 {
@@ -35,19 +34,6 @@ final class T
     {
         self::ok($got === $want, $label, "got=" . var_export($got, true) . " want=" . var_export($want, true));
     }
-}
-
-/** 1. 编码：命令要拼成 RESP2 的数组格式 */
-function caseEncode(): void
-{
-    echo "== [1] 命令编码 ==" . PHP_EOL;
-    $r = Resp::encode(["SET", "k", "v"]);
-    T::eq($r, "*3\r\n$3\r\nSET\r\n$1\r\nk\r\n$1\r\nv\r\n", "SET k v");
-    $r2 = Resp::encode(["PING"]);
-    T::eq($r2, "*1\r\n$4\r\nPING\r\n", "PING");
-    // 中文按字节算长度，不是字符数
-    $r3 = Resp::encode(["SET", "名字", "甲"]);
-    T::ok(strpos($r3, "$6\r\n") !== false, "中文字段按字节计长");
 }
 
 /** 2. 基本命令（依赖 mock 或真 redis） */
@@ -153,7 +139,6 @@ function main(): void
     echo "目标 redis: " . $host . ":" . $port
         . ($pass === "" ? "（无密码）" : "（有密码）") . PHP_EOL . PHP_EOL;
 
-    caseEncode();
     caseBasic($host, $port, $pass);
     caseHash($host, $port, $pass);
     caseZset($host, $port, $pass);
