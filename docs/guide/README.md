@@ -36,6 +36,41 @@
 **依赖是单向的**：上层可以调下层，下层不知道上层。所以你可以只用 01+02 写一个小服务，
 也可以一路加到 06。
 
+## 一段逻辑该编译成什么
+
+```mermaid
+flowchart TD
+    A[这段逻辑] --> B{需要不停服更新?}
+
+    B -->|是| C{接口稳定吗?}
+    B -->|否| D["tsf build<br/>native 可执行文件"]
+
+    C -->|否| E["先用 native<br/>接口稳定后再换"]
+    C -->|是| F["tsf module build<br/>wasm + canary/swap 热更"]
+
+    D --> G{性能不够?}
+    G -->|够| H([完成])
+    G -->|不够| I{度量过吗?}
+
+    I -->|没有| J["先埋点（Metrics / hrtime）<br/>别凭感觉"]
+    J --> G
+    I -->|有| K{算法问题?}
+
+    K -->|是| L["改算法<br/>换编译目标无用"]
+    L --> G
+    K -->|否| M["改写法：避免动态调用<br/>减少数组拷贝、缓存反射"]
+    M --> G
+
+    style F fill:#e8f5e9,stroke:#43a047
+    style D fill:#e3f2fd,stroke:#1e88e5
+    style H fill:#f5f5f5,stroke:#9e9e9e
+```
+
+> 两者是**同一个 `tpc` 的两个输出目标**，切换只需改 `project.yml` 一行。
+> 判断标准只有一条：**需要不停服更新吗？** 性能不是首要判据——代码同源。
+>
+> 详见 [09-wasm-or-typephp.md](09-wasm-or-typephp.md)。
+
 ## 目录
 
 | # | 篇目 | 覆盖的模块 | 规模 |
