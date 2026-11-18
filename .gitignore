@@ -16,6 +16,8 @@
 # 否则会出现「本机编得过、clone 下来编不过」——ext/codec 的 .cc 就这么漏过一次。
 # 提交前跑 `python3 tools/repo-guard.py` 可以抓这类漏网。
 !*.php
+# PHP 扩展的 configure 配方（ext/interp）
+!*.m4
 !*.md
 !*.sh
 !*.sql
