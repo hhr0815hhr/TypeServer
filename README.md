@@ -26,7 +26,7 @@
     "repositories": [
         { "type": "vcs", "url": "https://github.com/hhr0815hhr/TypeServer" }
     ],
-    "require": { "typephp/tsf": "dev-tsf-only" },
+    "require": { "hhr0815hhr/tsf": "dev-tsf-only" },
     "minimum-stability": "dev"
 }
 ```
@@ -41,7 +41,7 @@ composer install
 > `tsf-only` 是用 `git subtree split` 从 `tsf/` 子目录拆出来的分支，根目录就是包本身（142 个文件 / 3.2MB）。
 > 用 `dev-main` 会把整个 monorepo（含 bench、tests、docs，929 个文件 / 28MB）装进 vendor。
 >
-> **漏了 `repositories` 会报**：`typephp/tsf ... could not be found in any version` ——
+> **漏了 `repositories` 会报**：`hhr0815hhr/tsf ... could not be found in any version` ——
 > Composer 默认只查 Packagist。另外 `dev-*` 分支需要 `minimum-stability: dev`。
 
 **第 2 步：工具链（约 42MB，解压 168MB）**
