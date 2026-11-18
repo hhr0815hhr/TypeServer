@@ -1,5 +1,8 @@
 # TSF（TypePHP Server Framework）架构设计与任务分解
 
+> **注意（2026-11-18）**：本文里的 wasm 相关内容已移除 —— wasm 是沙箱，
+> 访问不到宿主数据，无法替代 Lua。当前方案见 [research/hot-reload.md](research/hot-reload.md)。
+
 > 版本：v0.1 草案 · 编制时间：2026-11-12 · 状态更新：M0–M6 已交付（对应 TSF v0.6.0）
 > 依据：S1 / S2 / S3 / S4 / S5 / S6 六项技术验证 + E1 / E2 / E4 三项落地骨架（`spike/` 下有可复现代码）
 > 定位：**通用高性能游戏服务器框架**，用 TypePHP（AOT）+ PHP 取代「C++ + Lua」

@@ -1,5 +1,8 @@
 # TypePHP 游戏服务端 —— 架构设计与可行性评估
 
+> **注意（2026-11-18）**：本文里的 wasm 相关内容已移除 —— wasm 是沙箱，
+> 访问不到宿主数据，无法替代 Lua。当前方案见 [research/hot-reload.md](research/hot-reload.md)。
+
 > **版本**：v2.1（2026-11-11 修订）
 > **输入**：`typeGame.md`（架构构想）
 > **核验基线**：TypePHP **v0.9.6**（`src/Translator.php: VERSION = '0.9.6'`，源码 HEAD `4fb6d1d`，51 篇中文文档 + 源码 + examples）

@@ -1,5 +1,21 @@
 # 变更记录
 
+---
+
+## wasm 路线已移除（2026-11-18）
+
+**移除内容**：`pkg/wasm`、`tests/wasm-link`、`implementation-kit`、`docs/DESIGN-WASM-HOTRELOAD.md`、`docs/guide/09-wasm-or-typephp.md`。
+
+**原因**：wasm 是沙箱，跨边界只有 `tp_call2(2 个 long long) → long long`，
+**访问不到宿主数据**，无法承担「PHP 脚本代替 Lua」的目标（Lua 的核心价值是脚本直接操作 C++ 数据）。
+
+**替代方案**：`pkg/script` + `ext/interp` 扩展 —— AOT 二进制内嵌 PHP 解释器，
+脚本 `return` 闭包，宿主传对象进去，**脚本改的就是宿主那个对象**（已实测）。
+详见 [docs/research/hot-reload.md](docs/research/hot-reload.md)。
+
+**保留**：`ext/interp/README.md` 和 `docs/research/hot-reload.md` 里与 wasm 的对比 —— 那是"为什么不用"的决策依据。
+
+
 ## 未发布
 
 ### 新增：扣款、充值、对账（金币账本补齐贷方）

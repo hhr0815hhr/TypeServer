@@ -96,7 +96,7 @@ tpc --version                  # TypePHP Compiler (AOT) v0.9.6
 | 加玩法（房间 / 帧循环 / 状态机 / AOI） | `docs/guide/03-gameplay.md` |
 | 用 db / redis / mail / schedule | `docs/guide/04-data.md` + `tsf/pkg/<name>/pkg.json` |
 | 分布式（RPC / 服务发现 / 分片 / 跨服 / 熔断） | `docs/guide/05-distributed.md` |
-| 该用 native 还是 wasm | `docs/guide/09-wasm-or-typephp.md` |
+
 | **编译报错 / 运行期异常 / 静默失败** | **`references/error-codes.md`** |
 | 类型契约（什么类型能编过） | `docs/guide/08-aot-types.md` + `typephp-refactor` skill |
 

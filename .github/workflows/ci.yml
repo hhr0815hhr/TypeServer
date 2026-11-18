@@ -59,7 +59,6 @@ jobs:
       - uses: actions/checkout@v4
 
       # runner 的默认 PATH 里没有 cargo install 与 wasi-sdk 的产物，
-      # 不显式加进来的话 preflight 会把已装好的 wit-bindgen / wasmtime 报成缺失。
       # 这是"环境装好了但 CI 说没有"这类问题的根源。
       - name: 加入工具链目录
         run: |

@@ -63,7 +63,7 @@ tsf new mylogin --login
 | config | `protocol` / `server` / `auth` | `login`（host / port / secret / ttl / gateway） |
 | 默认端口 | 9001 | **9101** |
 
-> 路由、中间件、加接口的具体写法见 [12 · HTTP 接口](12-http-api.md)。
+> 路由、中间件、加接口的具体写法见 [12 · HTTP 接口](11-http-api.md)。
 
 ## 四、token：签和验必须是同一份代码
 

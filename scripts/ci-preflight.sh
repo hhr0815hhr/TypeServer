@@ -2,7 +2,6 @@
 # 验证套件的前置条件检查。
 #
 # 为什么要有这个脚本：`tsf verify` 失败时的报错来自最深的那一层
-# （"WASI toolchain check failed"、"function wasm_load is undefined"），
 # 看不出是环境缺东西还是代码真的坏了。把检查前置，能一眼分清这两类失败。
 #
 # 本地也能跑：新人接手第一件事应该是 bash scripts/ci-preflight.sh。
@@ -43,19 +42,15 @@ else
     bad "swoole" "扩展未加载"
 fi
 
-# wasm 套件需要额外三样；缺了只影响 wasm，不影响其它 8 个套件
 # 注意 wit-bindgen 通常装在 ~/.cargo/bin，默认不在 PATH 里（cargo 也不在）。
 # 这里显式认它，否则会误报"没装"——这个误报我踩过一次。
 missing=""
-for t in wasm32-wasip2-clang wasmtime wit-bindgen; do
     if ! command -v "$t" > /dev/null 2>&1 && [ ! -x "$HOME/.cargo/bin/$t" ]; then
         missing="$missing $t"
     fi
 done
 if [ -z "$missing" ]; then
-    ok "wasm 工具链" "clang/wasmtime/wit-bindgen 就绪"
 else
-    warn "wasm 工具链" "缺:$missing —— wasm 套件会跳过，其余可跑"
     echo "         wit-bindgen 一般在 ~/.cargo/bin，需要加进 PATH："
     echo "         export PATH=\"\$HOME/.cargo/bin:\$PATH\""
 fi
@@ -74,7 +69,6 @@ fi
 if [ -n "$PRE" ]; then
     ok "tp-precompile" "$PRE"
 else
-    warn "tp-precompile" "未找到（wasm 套件会失败）"
     echo "         先 cd spike/s2/host-capi && cargo build --release，或设 TSF_PRECOMPILE"
 fi
 

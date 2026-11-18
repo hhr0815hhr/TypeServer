@@ -12,7 +12,6 @@
 > 想马上看到东西 → [00-quickstart.md](00-quickstart.md)（30 分钟跑通一个服务端）。
 > 想看完整的成品 → [07-walkthrough.md](07-walkthrough.md)（能三人真打的斗地主）。
 > 写代码时反复报奇怪的运行时错误 → 先看 [08-aot-types.md](08-aot-types.md)。
-> 在纠结「这段逻辑该写 PHP 还是上 wasm」→ [09-wasm-or-typephp.md](09-wasm-or-typephp.md)。
 > 想知道「零件都好了怎么拼成一个业务」→ [10-assembly.md](10-assembly.md)。
 > 想了解"为什么这么设计" → `tsf/README.md`（4000 行开发记录）。三者不重复。
 
@@ -47,7 +46,7 @@ flowchart TD
     B -->|否| D["tsf build<br/>native 可执行文件"]
 
     C -->|否| E["先用 native<br/>接口稳定后再换"]
-    C -->|是| F["tsf module build<br/>wasm + canary/swap 热更"]
+    C -->|是| F["pkg/script<br/>热更脚本 + 灰度"]
 
     D --> G{性能不够?}
     G -->|够| H([完成])
@@ -70,7 +69,6 @@ flowchart TD
 > 两者是**同一个 `tpc` 的两个输出目标**，切换只需改 `project.yml` 一行。
 > 判断标准只有一条：**需要不停服更新吗？** 性能不是首要判据——代码同源。
 >
-> 详见 [09-wasm-or-typephp.md](09-wasm-or-typephp.md)。
 
 ## 目录
 
@@ -82,13 +80,12 @@ flowchart TD
 | 03 | [玩法层](03-gameplay.md) | `pkg/room` · `pkg/frameloop` · `pkg/aoi` · `pkg/match` · `pkg/fsm` · `pkg/entity` | 2700 行 |
 | 04 | [数据层](04-data.md) | `pkg/db`(仓储/迁移/分片) · `pkg/eventlog` · `pkg/snapshot` | 2800 行 |
 | 05 | [分布式](05-distributed.md) | `Rpc` · `Discovery` · `Shard` · `Cluster` · `Breaker` | 2900 行 |
-| 06 | [运维](06-ops.md) | `Metrics` · `Gm` · `pkg/wasm` · `tsf` 工具链 | 1500 行 |
+| 06 | [运维](06-ops.md) | `Metrics` · `Gm` · `pkg/script` · `tsf` 工具链 | 1500 行 |
 | 07 | [深度示例：一局斗地主](07-walkthrough.md) | 六层拼起来是什么样（1412 行服务端 + 456 行前端） | ✅ 可运行 |
 | 08 | [AOT 下的类型契约](08-aot-types.md) | 为什么 PHP 的合法写法在 AOT 下会炸（五类坑 + 排查方法 + 检查清单） | ✅ 全是真实案例 |
-| 09 | [编译成 native 还是 wasm](09-wasm-or-typephp.md) | 同一个 tpc 的两种输出目标；什么时候该热更（判断流程 + 真实例子） | ✅ 基于工具链源码 |
-| 10 | [总装](10-assembly.md) | 把零件拼成一个能跑的业务（五个「缝」的坑 + 上线验证清单） | ✅ 基于 idle demo |
-| 11 | [登录服](11-login-service.md) | HTTP 和 TCP 怎么分工；token 签/验共用一份代码；两个工程怎么串 | ✅ 端到端实测 |
-| 12 | [HTTP 接口](12-http-api.md) | 路由、统一响应、三个中间件的顺序、加一个新接口 | ✅ 8 项实测 |
+| 09 | [总装](09-assembly.md) | 把零件拼成一个能跑的业务（五个「缝」的坑 + 上线验证清单） | ✅ 基于 idle demo |
+| 10 | [登录服](10-login-service.md) | HTTP 和 TCP 怎么分工；token 签/验共用一份代码；两个工程怎么串 | ✅ 端到端实测 |
+| 11 | [HTTP 接口](11-http-api.md) | 路由、统一响应、三个中间件的顺序、加一个新接口 | ✅ 8 项实测 |
 
 ## 每篇的固定结构
 
@@ -109,7 +106,7 @@ flowchart TD
 
 **1. 这是 AOT，不是解释执行。** 源码在编译期变成机器码，性能接近原生（单 worker
 稳态 116 万 msg/s），代价是**运行期改代码必须重编**。开发期 `tsf watch` 把重编压到
-**1651 ms**（实测）；线上不停服是另一套机制（wasm 模块热更），见 06 篇。
+**1651 ms**（实测）；线上不停服是另一套机制（脚本热更），见 06 篇。
 
 **2. 类型必须写全。** 局部变量一旦被推断成 `int`，后面不能再赋 `string`。`mixed`
 被 lint 禁止，`array<string, mixed>` 也在红线内。这不是风格问题，是能不能编译的问题。

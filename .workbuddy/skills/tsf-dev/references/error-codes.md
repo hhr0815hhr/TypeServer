@@ -316,7 +316,7 @@ PHP Fatal error: Allowed memory size of 536870912 bytes exhausted
 **真实原因**：AOT 是**编译型**，产物是二进制。`embedded-files` 的运行时 `require`
 从**构建期生成的 opcode 表**加载，改磁盘文件不生效；`eval()` 和动态 `include` 也不可用。
 
-**修法**：重新 `tsf build`。热更只能走三条路：配置数据、wasm 模块、滚动重启。
+**修法**：重新 `tsf build`。热更只能走三条路：配置数据、内嵌 PHP 脚本（pkg/script）、滚动重启。
 
 ---
 

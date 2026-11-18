@@ -45,9 +45,7 @@ TSF 环境自检   tsf 0.7.0
   ✓ php-config                 8.5.12  /usr/local/php-8.5-zts/bin/php-config
   ✓ C++ 编译器                 /usr/bin/g++
 
-可选项（只有写 wasm 热更模块才需要，见 09-wasm-or-typephp.md）
-  ✓ wasm32-wasip2-clang        ~/.local/bin/wasm32-wasip2-clang
-  ✓ wasmtime                   ~/.local/bin/wasmtime
+可选项
   ! wit-bindgen                缺 —— 生成接口绑定
   ! tp-precompile              缺 —— 预编译成 .cwasm
 

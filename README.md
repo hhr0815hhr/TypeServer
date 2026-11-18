@@ -5,7 +5,7 @@
 **当前版本 v0.7.0**：M0–M7 全部交付。
 
 一句话说清它换来什么：**性能接近原生（单 worker 稳态 116 万 msg/s），但保留 PHP 的开发效率**。
-代价是 AOT 之后改不了运行中的代码，所以热更靠「配置热更 + wasm 模块 + 滚动重启」三条轨道替代 Lua。
+代价是 AOT 之后改不了运行中的代码，所以热更靠「配置热更 + 内嵌 PHP 脚本（pkg/script）+ 滚动重启」三条轨道。
 
 ---
 
@@ -55,7 +55,7 @@ Composer 只能装 PHP 代码，装不了编译器本体和 C++ 后端（clang�
 ## 30 秒上手
 
 环境确认：`tsf doctor` 全绿即可。它验的是 PHP 8.5 ZTS、swoole、phpx、tpc、
-php-config 版本一致性、C++ 编译器（+ wasm 工具链可选项）。
+php-config 版本一致性、C++ 编译器。
 
 这套工具链目前只在 WSL/Linux 上验证过。
 
@@ -87,7 +87,6 @@ PASS  fd             fd/内存守卫（10 项）
 PASS  cluster        集群/房间归属（11 项）
 PASS  drain          进程 drain（8 项）
 PASS  rejoin         断线重连（6 项）
-PASS  wasm           wasm 热更链路（灰度/回滚）
 ```
 
 `tsf verify --list` 看清单，`tsf verify <id>` 只跑一个。缺工具链的套件会标 `SKIP`
@@ -101,7 +100,7 @@ PASS  wasm           wasm 热更链路（灰度/回滚）
 tsf/                 框架本体
   src/               15 个核心模块：Transport/Gateway/Protocol/Service/Rpc/Cluster/
                      Discovery/Shard/Breaker/Metrics/Gm/Config/Kernel/Timer/Proto
-  pkg/               10 个可选包：fsm entity frameloop room aoi match db snapshot eventlog wasm
+  pkg/               9 个可选包：fsm entity frameloop room aoi match db snapshot eventlog script
   ext/codec/         原生帧编解码（C++，可关）
   tools/             config 导出、proto 生成（不进 AOT）
 bench/               功能断言与基准（tsf verify 依赖它，属于框架本体）
@@ -136,7 +135,7 @@ spike/               一次性技术验证，只保留结论文档入仓库
 | 这一版有什么、边界在哪 | `CHANGELOG.md` | 按时间倒序 |
 | 为什么这么分层（含 libhv 取舍） | `docs/ARCHITECTURE-DESIGN.md` | 设计依据 |
 | 房间归属怎么做 | `docs/DESIGN-ROOM-OWNERSHIP.md` | 已实现 |
-| wasm 热更怎么做（含踩的坑） | `docs/DESIGN-WASM-HOTRELOAD.md` | 已实现 |
+| 脚本热更怎么做（含踩的坑） | `docs/research/hot-reload.md` | ✅ 已验证 |
 | CI 与自托管 runner | `docs/CI-RUNNER.md` | — |
 | 架构审计遗留问题 | `tsf/AUDIT-2026-11-15.md` | — |
 | 编译器补丁与升级须知 | `tpc-patches/README.md` | — |

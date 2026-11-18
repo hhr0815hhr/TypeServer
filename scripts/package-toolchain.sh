@@ -19,7 +19,6 @@
 #
 #   - PHP 8.5 ZTS 本身（含 libphp.so）—— 几百 MB + 系统依赖，必须用户自己装
 #   - clang / g++ / libgmp / libmprf      —— 系统包
-#   - wasi-sdk / wasmtime / wit-bindgen   —— 只有写 wasm 模块才需要
 #
 # 所以在别的机器上解包后，tsf doctor 仍然可能报缺项 —— 这是设计如此：
 # 能打包的打包，不能打包的明确告知，不做"看起来装好了但跑不起来"的假象。
