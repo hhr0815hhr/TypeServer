@@ -19,19 +19,8 @@
 
 **第 1 步：框架 + `tsf` 命令（约 3.2MB）**
 
-包还没发到 Packagist，所以要先在 `composer.json` 里声明来源：
-
-```json
-{
-    "repositories": [
-        { "type": "vcs", "url": "https://github.com/hhr0815hhr/tsf" }
-    ],
-    "require": { "hhr0815hhr/tsf": "^0.7" }
-}
-```
-
 ```bash
-composer install
+composer require hhr0815hhr/tsf
 ```
 
 装完得到 `vendor/bin/tsf`。
@@ -39,11 +28,6 @@ composer install
 > **为什么是独立仓库**：框架源码在 `hhr0815hhr/tsf`（根目录就是包，142 个文件 / 3.2MB），
 > 本仓库通过 git submodule 引用它。这样 `composer require` 只装框架本身，
 > 不会把 bench、tests、docs 一起拖下来。
->
-> **漏了 `repositories` 会报**：`hhr0815hhr/tsf ... could not be found in any version` ——
-> Composer 默认只查 Packagist。
->
-> **发到 Packagist 之后**，`repositories` 可以删掉，直接 `composer require hhr0815hhr/tsf`。
 
 **第 2 步：工具链（约 42MB，解压 168MB）**
 
