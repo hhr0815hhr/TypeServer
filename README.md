@@ -26,8 +26,7 @@
     "repositories": [
         { "type": "vcs", "url": "https://github.com/hhr0815hhr/tsf" }
     ],
-    "require": { "hhr0815hhr/tsf": "dev-main" },
-    "minimum-stability": "dev"
+    "require": { "hhr0815hhr/tsf": "^0.7" }
 }
 ```
 
@@ -42,9 +41,9 @@ composer install
 > 不会把 bench、tests、docs 一起拖下来。
 >
 > **漏了 `repositories` 会报**：`hhr0815hhr/tsf ... could not be found in any version` ——
-> Composer 默认只查 Packagist。另外 `dev-*` 分支需要 `minimum-stability: dev`。
+> Composer 默认只查 Packagist。
 >
-> **发到 Packagist 之后**，这两行可以删掉，直接 `composer require hhr0815hhr/tsf`。
+> **发到 Packagist 之后**，`repositories` 可以删掉，直接 `composer require hhr0815hhr/tsf`。
 
 **第 2 步：工具链（约 42MB，解压 168MB）**
 
