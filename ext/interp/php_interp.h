@@ -4,6 +4,6 @@
 extern zend_module_entry interp_module_entry;
 #define phpext_interp_ptr &interp_module_entry
 
-#define PHP_INTERP_VERSION "0.3.0"
+#define PHP_INTERP_VERSION "0.4.0"
 
 #endif

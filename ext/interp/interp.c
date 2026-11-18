@@ -84,12 +84,10 @@ PHP_FUNCTION(interp_require_file)
     if (Z_TYPE(retval) == IS_UNDEF) {
         RETURN_TRUE;
     }
-    if (Z_TYPE(retval) == IS_STRING) {
-        RETVAL_STR(Z_STR(retval));
-        return;
-    }
-    zval_ptr_dtor(&retval);
-    RETURN_TRUE;
+    /* 任意类型都原样返回 —— 让脚本能 return 一个闭包或数组作为"导出表"。
+     * 这一点很重要：PHP 不允许重复定义同名函数，所以热更的脚本不能靠
+     * function xxx() 导出，只能 return 闭包（每次 require 得到新闭包）。 */
+    RETURN_COPY_VALUE(&retval);
 }
 /* }}} */
 
@@ -153,6 +151,49 @@ PHP_FUNCTION(interp_call_obj)
 }
 /* }}} */
 
+/* {{{ interp_invoke(callable $fn, object $obj): mixed
+ *
+ * 调用一个「运行期拿到的」闭包。
+ *
+ * 为什么不直接在 PHP 侧写 $fn($obj)：
+ * AOT 编译期必须确定调用目标的签名，$fn 是运行期才知道的闭包，
+ * tpc 会拒绝（见 docs/guide/08 的"闭包/动态调用"那条）。
+ * 所以动态调用统一走这个 C 层入口。
+ */
+PHP_FUNCTION(interp_invoke)
+{
+    zval *fn;
+    zval *obj;
+    zval  retval;
+    zval  args[1];
+
+    ZEND_PARSE_PARAMETERS_START(2, 2)
+        Z_PARAM_ZVAL(fn)
+        Z_PARAM_ZVAL(obj)
+    ZEND_PARSE_PARAMETERS_END();
+
+    if (!zend_is_callable(fn, 0, NULL)) {
+        zend_error(E_WARNING, "interp_invoke: argument 1 is not callable");
+        RETURN_FALSE;
+    }
+
+    ZVAL_COPY(&args[0], obj);
+
+    /* 第一个参数传 NULL：从 $fn 本身取调用目标（闭包 / 类方法 / 函数名都行） */
+    if (call_user_function(NULL, NULL, fn, &retval, 1, args) != SUCCESS) {
+        zval_ptr_dtor(&args[0]);
+        zend_error(E_WARNING, "interp_invoke: call failed");
+        RETURN_FALSE;
+    }
+    zval_ptr_dtor(&args[0]);
+
+    if (Z_TYPE(retval) == IS_UNDEF) {
+        RETURN_TRUE;
+    }
+    RETURN_COPY_VALUE(&retval);
+}
+/* }}} */
+
 /* {{{ interp_probe(): array  —— 报告运行时状态，用来诊断为什么跑不起来 */
 PHP_FUNCTION(interp_probe)
 {
@@ -178,6 +219,7 @@ static const zend_function_entry interp_functions[] = {
     PHP_FE(interp_eval_string,  arginfo_interp_eval_string)
     PHP_FE(interp_require_file, arginfo_interp_eval_string)
     PHP_FE(interp_call_obj,     arginfo_interp_eval_string)
+    PHP_FE(interp_invoke,       arginfo_interp_eval_string)
     PHP_FE(interp_probe,        arginfo_interp_probe)
     PHP_FE_END
 };
