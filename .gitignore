@@ -81,3 +81,4 @@ tests/wasm-link/fixtures/*/dist/**
 # 编译产物
 tests/*/project.yml
 tests/*/*_test
+dist/
