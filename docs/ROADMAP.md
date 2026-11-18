@@ -22,9 +22,11 @@
       实测：maxRestarts=3 时前 3 次重启、第 4 次放弃，addr 归 0。
       **没做**：`one_for_all` / `rest_for_one`（多实例联动重启），当前场景不需要。
 
-- [ ] **`pkg/http` / `pkg/script` 进 `verify-all.sh`**
-      现在的 197 项断言没覆盖这两个新包。
-      估算 1 天。
+- [x] **`pkg/http` / `pkg/script` 进 `tsf verify`** —— 已完成（2026-11-18）
+      `tests/script-test`（16 项）+ `tests/http-test`（8 项），都接进 `verifySuites`。
+      跑出两个真问题：`Script::reload` 没清 opcache（同进程热更读到旧字节码）、
+      测试自己的字符串替换写错（`+ 100` vs `"gold", 100`）。
+      顺带确认了一个设计：CORS 要注册两次（`use` 管预检、`after` 管正常响应）。
 
 - [ ] **`ext/interp` 进 CI**
       扩展编译没进流水线，clone 下来要手动 `phpize85`。
@@ -65,6 +67,11 @@
       wasm 那篇删了，现在缺正面叙述"为什么不用 wasm"。
       研究记录（`docs/research/hot-reload.md`）里有，但不在教程序列里。
       估算 半天。
+
+- [ ] **`pkg/http` 支持 405**
+      现在「路径存在但方法不对」返回 404。HTTP 规范要求 405 + Allow 头。
+      改 `Router::dispatch` 时能一起做：记住"这个路径注册过哪些方法"。
+      估算 2 小时。
 
 - [ ] **`pkg/http` 的 `after()` 写进教程**
       现在只在代码注释里。教程 11 讲了 CORS 两次注册，但没展开 `after()`。
