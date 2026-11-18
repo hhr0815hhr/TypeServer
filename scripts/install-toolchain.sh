@@ -41,15 +41,14 @@ VER="${TSF_TOOLCHAIN_VERSION:-v0.7.0}"
 if [ -n "${TSF_TOOLCHAIN_URL:-}" ]; then
     URL="$TSF_TOOLCHAIN_URL"
 else
-    # 默认走 tsf 仓库的 toolchain 分支（raw 链接）。
+    # 默认走 tsf 仓库的 GitHub Release。
     #
-    # 为什么不用 release 附件：GitHub 的 release **网页上传**限 25MB，这个包 42MB，
-    # 只能用 `gh release create` 或 API 上传（支持 2GB）。等 release 建好之后，
-    # 用 TSF_TOOLCHAIN_URL 指定完整地址即可（比拼 BASE 更不容易出错）：
-    #   TSF_TOOLCHAIN_URL=https://github.com/hhr0815hhr/tsf/releases/download/v0.7.0/tsf-toolchain-linux-x86_64-v0.7.0.tar.gz
+    # 注意 42MB 的包**不能用网页上传**（限 25MB），发布时必须用
+    # `gh release create` 或 API（支持 2GB）。这里只是下载，不限。
     #
-    # 包放在 tsf 仓库的独立分支上（不是 main），main 的 clone 体积不受影响。
-    BASE="${TSF_TOOLCHAIN_BASE:-https://raw.githubusercontent.com/hhr0815hhr/tsf/toolchain}"
+    # 国内网络如果拉不动 github.com，用 TSF_TOOLCHAIN_URL 指镜像：
+    #   TSF_TOOLCHAIN_URL=https://your-mirror/tsf-toolchain-linux-x86_64-v0.7.0.tar.gz
+    BASE="${TSF_TOOLCHAIN_BASE:-https://github.com/hhr0815hhr/tsf/releases/download/$VER}"
     URL="$BASE/tsf-toolchain-$OS-$ARCH-$VER.tar.gz"
 fi
 
@@ -78,9 +77,14 @@ case "$URL" in
         cp "$SRC" "$TMP/pkg.tar.gz"
         ;;
     *)
-        # 不加 --progress-bar：curl 默认只在终端里显示进度，管道重定向时不刷屏。
-        # 之前加了 --progress-bar，结果 `| grep` 一下就是 50KB 的进度字符。
-        if ! curl -fL -o "$TMP/pkg.tar.gz" "$URL"; then
+        # 进度条写到 stderr。直接跑（stderr 是终端）时保留，方便看进度；
+        # 通过 `| grep` / `> log` 重定向时静默 —— 否则输出会被几十 KB 的进度字符刷爆。
+        if [ -t 2 ]; then
+            curl_flags="-fL"
+        else
+            curl_flags="-fsL"
+        fi
+        if ! curl $curl_flags -o "$TMP/pkg.tar.gz" "$URL"; then
             echo >&2
             echo "下载失败。" >&2
             echo "  1. 确认这个地址存在: $URL" >&2
