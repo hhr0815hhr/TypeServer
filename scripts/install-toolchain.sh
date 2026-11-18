@@ -41,9 +41,14 @@ VER="${TSF_TOOLCHAIN_VERSION:-v0.7.0}"
 if [ -n "${TSF_TOOLCHAIN_URL:-}" ]; then
     URL="$TSF_TOOLCHAIN_URL"
 else
-    BASE="${TSF_TOOLCHAIN_BASE:-https://github.com/hhr0815hhr/TypeServer/releases}"
-    URL="$BASE/download/$VER/tsf-toolchain-$OS-$ARCH-$VER.tar.gz"
-    # 提示：release 的 tag 必须和包文件名里的版本一致
+    # 默认走 raw 分支，不用 release 附件。
+    #
+    # 原因：GitHub 的 **release 网页上传限 25MB**，这个包 42MB 传不上去；
+    # API 上传支持 2GB，但需要 token。raw 没有这个限制，公开仓库也不需要认证。
+    #
+    # 包放在独立的 toolchain 分支上（不是 main），这样主仓库的 clone 体积不受影响。
+    BASE="${TSF_TOOLCHAIN_BASE:-https://raw.githubusercontent.com/hhr0815hhr/TypeServer/toolchain}"
+    URL="$BASE/tsf-toolchain-$OS-$ARCH-$VER.tar.gz"
 fi
 
 echo "平台    : $OS-$ARCH"
@@ -68,7 +73,9 @@ case "$URL" in
         cp "$SRC" "$TMP/pkg.tar.gz"
         ;;
     *)
-        if ! curl -fL --progress-bar -o "$TMP/pkg.tar.gz" "$URL"; then
+        # 不加 --progress-bar：curl 默认只在终端里显示进度，管道重定向时不刷屏。
+        # 之前加了 --progress-bar，结果 `| grep` 一下就是 50KB 的进度字符。
+        if ! curl -fL -o "$TMP/pkg.tar.gz" "$URL"; then
             echo >&2
             echo "下载失败。" >&2
             echo "  1. 确认这个地址存在: $URL" >&2
