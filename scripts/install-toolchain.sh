@@ -41,13 +41,15 @@ VER="${TSF_TOOLCHAIN_VERSION:-v0.7.0}"
 if [ -n "${TSF_TOOLCHAIN_URL:-}" ]; then
     URL="$TSF_TOOLCHAIN_URL"
 else
-    # 默认走 raw 分支，不用 release 附件。
+    # 默认走 tsf 仓库的 toolchain 分支（raw 链接）。
     #
-    # 原因：GitHub 的 **release 网页上传限 25MB**，这个包 42MB 传不上去；
-    # API 上传支持 2GB，但需要 token。raw 没有这个限制，公开仓库也不需要认证。
+    # 为什么不用 release 附件：GitHub 的 release **网页上传**限 25MB，这个包 42MB，
+    # 只能用 `gh release create` 或 API 上传（支持 2GB）。等 release 建好之后，
+    # 用 TSF_TOOLCHAIN_URL 指定完整地址即可（比拼 BASE 更不容易出错）：
+    #   TSF_TOOLCHAIN_URL=https://github.com/hhr0815hhr/tsf/releases/download/v0.7.0/tsf-toolchain-linux-x86_64-v0.7.0.tar.gz
     #
-    # 包放在独立的 toolchain 分支上（不是 main），这样主仓库的 clone 体积不受影响。
-    BASE="${TSF_TOOLCHAIN_BASE:-https://raw.githubusercontent.com/hhr0815hhr/TypeServer/toolchain}"
+    # 包放在 tsf 仓库的独立分支上（不是 main），main 的 clone 体积不受影响。
+    BASE="${TSF_TOOLCHAIN_BASE:-https://raw.githubusercontent.com/hhr0815hhr/tsf/toolchain}"
     URL="$BASE/tsf-toolchain-$OS-$ARCH-$VER.tar.gz"
 fi
 
