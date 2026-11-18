@@ -9,9 +9,41 @@
 
 ---
 
+## 安装
+
+> **需要 PHP 8.5 ZTS（线程安全版）。** 8.4 及以下 `composer require` 直接拒绝；
+> NTS 版能装上，但会在**链接期**报一堆和版本无关的错误（phpx 依赖 ZTS 的线程模型）。
+>
+> 装完先跑 `tsf doctor` —— 它逐项检查 PHP/ZTS、swoole、phpx、tpc、php-config 版本一致性、clang，
+> 缺什么直接给修复命令。
+
+```bash
+# 1) 框架 + tsf 命令（约 28MB）
+composer require typephp/tsf:dev-main
+
+# 2) 工具链：typephp 编译器（约 42MB，解压 168MB）
+curl -fsSL <发布地址>/install-toolchain.sh | bash
+export TPC=~/.tsf/toolchain/typephp/bin/tpc.php
+export TSF_PHP=php85
+
+# 3) 自检
+./vendor/bin/tsf doctor
+```
+
+**为什么是两步**：tsf 不是纯 PHP 框架 —— 它调用 typephp 编译器（`tpc`）把 PHP 编译成 C++。
+Composer 只能装 PHP 代码，装不了编译器本体和 C++ 后端（clang），所以工具链单独发。
+
+> 工具链还没正式发布。在那之前，可以自己打一个：
+> `scripts/package-toolchain.sh`（产物 42MB），然后用
+> `TSF_TOOLCHAIN_URL=file:///path/to/pkg.tar.gz bash scripts/install-toolchain.sh` 装。
+
+---
+
 ## 30 秒上手
 
-前置：PHP 8.5 **ZTS**、`libphpx`、`typephp 0.9.6`（+ 两个本地补丁，见 `tpc-patches/`）。
+环境确认：`tsf doctor` 全绿即可。它验的是 PHP 8.5 ZTS、swoole、phpx、tpc、
+php-config 版本一致性、C++ 编译器（+ wasm 工具链可选项）。
+
 这套工具链目前只在 WSL/Linux 上验证过。
 
 ```bash
