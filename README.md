@@ -17,7 +17,7 @@
 > 装完先跑 `tsf doctor` —— 它逐项检查 PHP/ZTS、swoole、phpx、tpc、php-config 版本一致性、clang，
 > 缺什么直接给修复命令。
 
-**第 1 步：框架 + `tsf` 命令（约 28MB）**
+**第 1 步：框架 + `tsf` 命令（约 3.2MB）**
 
 包还没发到 Packagist，所以要先在 `composer.json` 里声明来源：
 
@@ -26,7 +26,7 @@
     "repositories": [
         { "type": "vcs", "url": "https://github.com/hhr0815hhr/TypeServer" }
     ],
-    "require": { "typephp/tsf": "dev-main" },
+    "require": { "typephp/tsf": "dev-tsf-only" },
     "minimum-stability": "dev"
 }
 ```
@@ -37,10 +37,12 @@ composer install
 
 装完得到 `vendor/bin/tsf`。
 
-> **漏了 `repositories` 会报这个错**：`typephp/tsf ... could not be found in any version` ——
-> Composer 默认只查 Packagist，而 Packagist 上没有这个包。
+> **为什么是 `dev-tsf-only` 而不是 `dev-main`**：
+> `tsf-only` 是用 `git subtree split` 从 `tsf/` 子目录拆出来的分支，根目录就是包本身（142 个文件 / 3.2MB）。
+> 用 `dev-main` 会把整个 monorepo（含 bench、tests、docs，929 个文件 / 28MB）装进 vendor。
 >
-> 另外 `dev-main` 需要 `minimum-stability: dev`，否则报稳定性不满足。
+> **漏了 `repositories` 会报**：`typephp/tsf ... could not be found in any version` ——
+> Composer 默认只查 Packagist。另外 `dev-*` 分支需要 `minimum-stability: dev`。
 
 **第 2 步：工具链（约 42MB，解压 168MB）**
 
