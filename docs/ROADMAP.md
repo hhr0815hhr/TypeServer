@@ -34,10 +34,12 @@
 
 ## P2 运维能力（有真实流量前做）
 
-- [ ] **`pkg/snapshot`（状态快照）**
-      已实测：10 万玩家 json 存 40ms / 读 122ms（11.2 MB）。
-      做热更前落盘、重启恢复。这是「PHP 替 Lua」的最后一块。
-      估算 2-3 天。
+- [x] **`pkg/snapshot`** —— 0.x 就已有，不是待办
+      原实现比原计划的更完整：抽象 `Store` + `FileStore`/`MemoryStore` 两个实现
+      + `Snapshot`（分块 + 版本号）+ `Restorer`（批量恢复，带耗时告警）+ `Codec`。
+      我最初以为是待办，动手写了个简化版，覆盖掉 `Store.php` 后把 `FileStore`
+      的继承打断了（`final` 不能继承）。已 `git checkout` 恢复，我的实现在这次提交里删掉。
+      **教训：做之前先 `ls` 一下目标目录，别凭 ROADMAP 的描述直接开写。**
 
 - [ ] **`tsf mem` / `tsf top`（内存可视化）**
       Erlang `observer` 的等价物，目前完全空白。

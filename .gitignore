@@ -88,3 +88,20 @@ tests/wasm-link/fixtures/*/dist/**
 tests/*/project.yml
 tests/*/*_test
 dist/
+
+# phpize 生成的构建文件（ext/interp）
+ext/interp/build/
+ext/interp/configure
+ext/interp/config.h*
+ext/interp/Makefile*
+ext/interp/*.lo
+ext/interp/*.la
+ext/interp/.libs/
+ext/interp/modules/
+ext/interp/autom4te.cache/
+ext/interp/run-tests.php
+ext/interp/ltmain.sh
+ext/interp/missing
+ext/interp/install-sh
+ext/interp/config.guess
+ext/interp/config.sub
