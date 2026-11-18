@@ -106,8 +106,9 @@ cd hello && ../vendor/bin/tsf serve .
 ./vendor/bin/tsf new .
 ./vendor/bin/tsf serve .
 
-# 登录服同理
+# 登录服同理（--login 放前放后都行）
 ./vendor/bin/tsf new . --login
+./vendor/bin/tsf new --login .
 ```
 
 **方式二的前提**：当前目录里没有 `main.php` / `project.json`（不是已经建过工程）。
