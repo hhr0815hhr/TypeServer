@@ -24,9 +24,9 @@
 ```json
 {
     "repositories": [
-        { "type": "vcs", "url": "https://github.com/hhr0815hhr/TypeServer" }
+        { "type": "vcs", "url": "https://github.com/hhr0815hhr/tsf" }
     ],
-    "require": { "hhr0815hhr/tsf": "dev-tsf-only" },
+    "require": { "hhr0815hhr/tsf": "dev-main" },
     "minimum-stability": "dev"
 }
 ```
@@ -37,12 +37,14 @@ composer install
 
 装完得到 `vendor/bin/tsf`。
 
-> **为什么是 `dev-tsf-only` 而不是 `dev-main`**：
-> `tsf-only` 是用 `git subtree split` 从 `tsf/` 子目录拆出来的分支，根目录就是包本身（142 个文件 / 3.2MB）。
-> 用 `dev-main` 会把整个 monorepo（含 bench、tests、docs，929 个文件 / 28MB）装进 vendor。
+> **为什么是独立仓库**：框架源码在 `hhr0815hhr/tsf`（根目录就是包，142 个文件 / 3.2MB），
+> 本仓库通过 git submodule 引用它。这样 `composer require` 只装框架本身，
+> 不会把 bench、tests、docs 一起拖下来。
 >
 > **漏了 `repositories` 会报**：`hhr0815hhr/tsf ... could not be found in any version` ——
 > Composer 默认只查 Packagist。另外 `dev-*` 分支需要 `minimum-stability: dev`。
+>
+> **发到 Packagist 之后**，这两行可以删掉，直接 `composer require hhr0815hhr/tsf`。
 
 **第 2 步：工具链（约 42MB，解压 168MB）**
 
