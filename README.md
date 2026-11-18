@@ -22,7 +22,7 @@
 composer require typephp/tsf:dev-main
 
 # 2) 工具链：typephp 编译器（约 42MB，解压 168MB）
-curl -fsSL <发布地址>/install-toolchain.sh | bash
+curl -fsSL https://raw.githubusercontent.com/hhr0815hhr/TypeServer/main/scripts/install-toolchain.sh | bash
 export TPC=~/.tsf/toolchain/typephp/bin/tpc.php
 export TSF_PHP=php85
 
