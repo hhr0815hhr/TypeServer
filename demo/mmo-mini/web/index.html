@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>mmo-mini · tsf demo</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #10161d; }
+  body { font: 13px/1.5 "PingFang SC","Microsoft YaHei",system-ui,sans-serif; color: #dbe6f0; }
+  #c { display: block; width: 100vw; height: 100vh; }
+  #hud {
+    position: fixed; left: 12px; top: 12px; padding: 10px 14px;
+    background: rgba(18,26,36,.82); border: 1px solid #2a3a4d; border-radius: 8px;
+    line-height: 1.8; pointer-events: none;
+  }
+  #hud b { color: #d8a94a; }
+  #hud .k { color: #7f95ad; }
+  #help {
+    position: fixed; left: 12px; bottom: 12px; padding: 8px 14px;
+    background: rgba(18,26,36,.82); border: 1px solid #2a3a4d; border-radius: 8px;
+    color: #7f95ad;
+  }
+  #join {
+    position: fixed; inset: 0; background: rgba(8,12,18,.94);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+  }
+  #join h1 { font-size: 22px; margin: 0 0 4px; color: #d8a94a; font-weight: 600; }
+  #join input { padding: 8px 12px; width: 260px; text-align: center;
+    background: #1b2530; color: #dbe6f0; border: 1px solid #2a3a4d; border-radius: 6px; }
+  #join button { padding: 8px 26px; background: #2e7d5b; color: #fff;
+    border: 0; border-radius: 6px; cursor: pointer; font-size: 14px; }
+  #join .tip { color: #7f95ad; font-size: 12px; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="hud">
+  <div><span class="k">坐标</span> <b id="pos">-</b></div>
+  <div><span class="k">可见</span> <b id="vis">0</b> 人</div>
+  <div><span class="k">帧</span> <b id="fps">0</b> fps</div>
+  <div><span class="k">格子</span> <b id="cell">-</b></div>
+  <div><span class="k">位置</span> <b id="edge">-</b></div>
+</div>
+
+<div id="help">WASD / 方向键移动 · 浅色框内是可见范围（3×3 格）</div>
+
+<div id="join">
+  <h1>mmo-mini</h1>
+  <input id="token" value="tok-a" placeholder="token: tok-a / tok-b / tok-c / tok-d">
+  <input id="addr" value="ws://127.0.0.1:9401" placeholder="ws 地址">
+  <input id="name" value="路人甲" placeholder="名字">
+  <button id="go">进入世界</button>
+  <div class="tip">多开几个标签页（换 token）就能互相看见</div>
+</div>
+
+<script>
+// ---------------- 协议 ----------------
+const LOGIN = 1, LOGIN_OK = 2, PING = 100, PONG = 101;
+const JOIN = 2101, MOVE = 2102, LEAVE = 2103;
+const WELCOME = 2201, SYNC = 2202, GONE = 2203, ERROR = 2204;
+
+// ---------------- 帧编解码（native：8 字节头，大端） ----------------
+function encodeFrame(msgId, bodyStr) {
+  const body = new TextEncoder().encode(bodyStr);
+  const len = 8 + body.length;
+  const buf = new ArrayBuffer(len);
+  const dv = new DataView(buf);
+  dv.setUint32(0, len, false);
+  dv.setUint16(4, msgId, false);
+  dv.setUint8(6, 0);
+  dv.setUint8(7, 0);
+  new Uint8Array(buf).set(body, 8);
+  return buf;
+}
+
+let rxBuf = new Uint8Array(0);
+function feed(buf, onFrame) {
+  const inc = new Uint8Array(buf);
+  const merged = new Uint8Array(rxBuf.length + inc.length);
+  merged.set(rxBuf, 0);
+  merged.set(inc, rxBuf.length);
+  rxBuf = merged;
+  for (;;) {
+    if (rxBuf.length < 8) return;
+    const dv = new DataView(rxBuf.buffer, rxBuf.byteOffset, rxBuf.byteLength);
+    const len = dv.getUint32(0, false);
+    if (len < 8 || len > 1048576) { rxBuf = new Uint8Array(0); return; }
+    if (rxBuf.length < len) return;
+    const msgId = dv.getUint16(4, false);
+    const body = new TextDecoder().decode(rxBuf.subarray(8, len));
+    rxBuf = rxBuf.subarray(len);
+    onFrame(msgId, body);
+  }
+}
+
+// ---------------- 状态 ----------------
+let ws = null;
+let myPid = 0;
+let world = { mapW: 2000, mapH: 2000, cell: 200, speed: 6, frameMs: 50 };
+let self = { x: 0, y: 0 };
+/** pid => {x, y, tx, ty, name}  x/y 是渲染位置，tx/ty 是服务端最近一次给的位置 */
+const ents = new Map();
+const keys = new Set();
+
+const $ = (id) => document.getElementById(id);
+
+function sendRaw(msgId, bodyStr) {
+  if (!ws || ws.readyState !== 1) return;
+  ws.send(encodeFrame(msgId, bodyStr));
+}
+function sendJson(msgId, obj) { sendRaw(msgId, JSON.stringify(obj)); }
+
+// ---------------- 输入 ----------------
+const KEYMAP = {
+  KeyW: [0, -1], KeyS: [0, 1], KeyA: [-1, 0], KeyD: [1, 0],
+  ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0],
+};
+
+function currentDir() {
+  let dx = 0, dy = 0;
+  keys.forEach((code) => {
+    const m = KEYMAP[code];
+    if (m) { dx += m[0]; dy += m[1]; }
+  });
+  // 同时按两个方向时，规范化成 -1/0/1（服务端只接受这三个值）
+  if (dx > 0) dx = 1; if (dx < 0) dx = -1;
+  if (dy > 0) dy = 1; if (dy < 0) dy = -1;
+  return { dx, dy };
+}
+
+let lastDir = { dx: 0, dy: 0 };
+setInterval(() => {
+  const d = currentDir();
+  // 只在变化时发，省带宽：按住不动的话服务端会按上一次的方向继续走
+  if (d.dx !== lastDir.dx || d.dy !== lastDir.dy) {
+    sendJson(MOVE, d);
+    lastDir = d;
+  }
+}, 60);
+
+window.addEventListener("keydown", (e) => {
+  if (KEYMAP[e.code]) { keys.add(e.code); e.preventDefault(); }
+});
+window.addEventListener("keyup", (e) => {
+  if (KEYMAP[e.code]) { keys.delete(e.code); e.preventDefault(); }
+});
+window.addEventListener("blur", () => keys.clear());
+
+// ---------------- 消息 ----------------
+function onFrame(msgId, body) {
+  if (msgId === LOGIN_OK) {
+    sendJson(JOIN, { name: $("name").value || "路人甲" });
+    $("join").style.display = "none";
+    return;
+  }
+  if (msgId === PONG) return;
+
+  let d = null;
+  try { d = JSON.parse(body); } catch (e) { return; }
+
+  if (msgId === WELCOME) {
+    myPid = d.pid;
+    world = { mapW: d.mapW, mapH: d.mapH, cell: d.cell, speed: d.speed, frameMs: d.frameMs };
+    self = { x: d.x, y: d.y };
+    ents.set(d.pid, { x: d.x, y: d.y, tx: d.x, ty: d.y, name: d.name || "我" });
+    $("cell").textContent = d.cell + "px · " + world.mapW + "×" + world.mapH;
+    return;
+  }
+
+  if (msgId === SYNC) {
+    self = { x: d.self.x, y: d.self.y };
+    const me = ents.get(myPid);
+    if (me) { me.tx = d.self.x; me.ty = d.self.y; }
+
+    (d.add || []).forEach((e) => {
+      ents.set(e.pid, { x: e.x, y: e.y, tx: e.x, ty: e.y, name: e.name || ("p" + e.pid) });
+    });
+    (d.upd || []).forEach((e) => {
+      const cur = ents.get(e.pid);
+      if (cur) { cur.tx = e.x; cur.ty = e.y; }
+      else { ents.set(e.pid, { x: e.x, y: e.y, tx: e.x, ty: e.y, name: "p" + e.pid }); }
+    });
+    (d.del || []).forEach((pid) => {
+      if (pid !== myPid) ents.delete(pid);
+    });
+    return;
+  }
+
+  if (msgId === GONE) {
+    if (d.pid !== myPid) ents.delete(d.pid);
+    return;
+  }
+
+  if (msgId === ERROR) {
+    alert('无法进入世界：' + (d.why || '未知原因'));
+    $("join").style.display = "flex";
+    if (ws) ws.close();
+    return;
+  }
+}
+
+// ---------------- 渲染 ----------------
+const cvs = $("c");
+const ctx = cvs.getContext("2d");
+
+function resize() {
+  cvs.width = window.innerWidth;
+  cvs.height = window.innerHeight;
+}
+window.addEventListener("resize", resize);
+resize();
+
+/** 世界坐标 → 屏幕坐标（相机以自己为中心） */
+function cam() {
+  return { x: self.x - cvs.width / 2, y: self.y - cvs.height / 2 };
+}
+
+function draw() {
+  const w = cvs.width, h = cvs.height;
+  ctx.fillStyle = "#10161d";
+  ctx.fillRect(0, 0, w, h);
+
+  const c = cam();
+
+  // 网格（按 cell 画）
+  ctx.strokeStyle = "#1b2632";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  const startX = Math.floor(c.x / world.cell) * world.cell;
+  const startY = Math.floor(c.y / world.cell) * world.cell;
+  for (let x = startX; x < c.x + w + world.cell; x += world.cell) {
+    const sx = Math.floor(x - c.x) + 0.5;
+    ctx.moveTo(sx, 0); ctx.lineTo(sx, h);
+  }
+  for (let y = startY; y < c.y + h + world.cell; y += world.cell) {
+    const sy = Math.floor(y - c.y) + 0.5;
+    ctx.moveTo(0, sy); ctx.lineTo(w, sy);
+  }
+  ctx.stroke();
+
+  // 地图边界
+  ctx.strokeStyle = "#2f4358";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(-c.x, -c.y, world.mapW, world.mapH);
+
+  // 自己的 3×3 视野框：让"为什么看不到对方"变得可见
+  const cellX = Math.floor(self.x / world.cell);
+  const cellY = Math.floor(self.y / world.cell);
+  ctx.strokeStyle = "rgba(216,169,74,.28)";
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([6, 6]);
+  ctx.strokeRect(
+    (cellX - 1) * world.cell - c.x,
+    (cellY - 1) * world.cell - c.y,
+    world.cell * 3,
+    world.cell * 3
+  );
+  ctx.setLineDash([]);
+
+  // 其他玩家
+  let visible = 0;
+  ents.forEach((e, pid) => {
+    if (pid === myPid) return;
+    visible++;
+    const sx = e.x - c.x, sy = e.y - c.y;
+    ctx.beginPath();
+    ctx.fillStyle = "#4a9ed8";
+    ctx.arc(sx, sy, 9, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#9fc7e8";
+    ctx.font = "12px system-ui";
+    ctx.textAlign = "center";
+    ctx.fillText(e.name, sx, sy - 16);
+  });
+
+  // 自己
+  const msx = self.x - c.x, msy = self.y - c.y;
+  ctx.beginPath();
+  ctx.fillStyle = "#d8a94a";
+  ctx.arc(msx, msy, 11, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#1b2430";
+  ctx.font = "bold 12px system-ui";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("我", msx, msy);
+  ctx.textBaseline = "alphabetic";
+
+  $("pos").textContent = Math.round(self.x) + ", " + Math.round(self.y);
+  $("vis").textContent = visible;
+
+  // 边界提示：服务端会把坐标 clamp 在 [0, mapW]，但客户端不提示的话，
+  // 玩家只会觉得"按了方向键但不动"
+  const pad = 20;
+  let edge = "";
+  if (self.x <= pad) edge += "← 西 ";
+  if (self.x >= world.mapW - pad) edge += "东 → ";
+  if (self.y <= pad) edge += "↑ 北 ";
+  if (self.y >= world.mapH - pad) edge += "南 ↓ ";
+  $("edge").textContent = edge === "" ? "界内" : ("到达边界 " + edge);
+}
+
+// ---------------- 主循环（插值） ----------------
+let lastT = performance.now();
+let fpsAcc = 0, fpsCnt = 0, fpsShow = 0;
+
+function loop(now) {
+  const dt = now - lastT;
+  lastT = now;
+
+  // 位置插值：服务端 20fps，浏览器 60fps。
+  // 直接画服务端位置会一跳一跳（每 50ms 跳 6 个单位）；按 0.22 的系数逼近，
+  // 大约 200ms 收敛到目标，视觉上是连续的。
+  const k = 1 - Math.pow(0.78, dt / 16.7);
+  ents.forEach((e) => {
+    e.x += (e.tx - e.x) * k;
+    e.y += (e.ty - e.y) * k;
+  });
+  const me = ents.get(myPid);
+  if (me) { self.x = me.x; self.y = me.y; }
+
+  draw();
+
+  fpsAcc += dt;
+  fpsCnt++;
+  if (fpsAcc >= 500) {
+    fpsShow = Math.round(1000 / (fpsAcc / fpsCnt));
+    $("fps").textContent = fpsShow;
+    fpsAcc = 0; fpsCnt = 0;
+  }
+  requestAnimationFrame(loop);
+}
+
+// ---------------- 连接 ----------------
+function connect() {
+  const token = $("token").value.trim();
+  const addr = $("addr").value.trim();
+  ws = new WebSocket(addr);
+  ws.binaryType = "arraybuffer";
+
+  ws.onopen = () => {
+    sendRaw(LOGIN, token);
+    setInterval(() => sendRaw(PING, ""), 20000);
+    requestAnimationFrame(loop);
+  };
+  ws.onmessage = (ev) => feed(ev.data, onFrame);
+  ws.onclose = () => { $("join").style.display = "flex"; };
+  ws.onerror = () => { $("join").style.display = "flex"; };
+}
+
+(function boot() {
+  const q = new URLSearchParams(location.search);
+  if (q.get("token")) $("token").value = q.get("token");
+  if (q.get("name")) $("name").value = q.get("name");
+  if (q.get("addr")) $("addr").value = q.get("addr");
+  $("go").onclick = connect;
+  if (q.get("auto") === "1") connect();
+})();
+</script>
+</body>
+</html>

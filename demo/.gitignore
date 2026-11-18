@@ -1,0 +1,28 @@
+# 编译产物与运行产物不入库。
+# demo 之前没有这个文件，导致 duel（4.4MB 二进制）和 var/log 都被 git add 收了进去。
+/duel/duel
+/demo-echo*/demo_echo*
+/demo-echo/demo_echo
+/demo-echo-nts/demo_echo_nts
+/doudizhu/doudizhu
+/doudizhu/project.yml
+/mmo-mini/mmo_mini
+/mmo-mini/project.yml
+/sharded-world/sharded_world
+/sharded-world/project.yml
+/sharded-world/var/
+/mmo-mini/var/
+/doudizhu/var/
+/duel/var/
+/demo-echo/var/
+/demo-echo-nts/var/
+
+# project.yml 是 tsf build 的产物（sources 写的是绝对路径，换机器必失效）。
+# 三个示例现在都有 project.json，yml 全部是 tsf build 的生成物。
+/duel/project.yml
+/demo-echo/project.yml
+/demo-echo-nts/project.yml
+
+*.wasm
+*.cwasm
+*.manifest.json

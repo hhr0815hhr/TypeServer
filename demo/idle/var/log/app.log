@@ -1,0 +1,62 @@
+{"ts":"2026-11-17T17:30:44+08:00","lvl":"info","ch":"app","pid":13408,"msg":"boot","ctx":{"env":"prod","dir":"/data/TypeServer/demo/idle","php":"8.5.12","pid":13408}}
+{"ts":"2026-11-17T17:30:44+08:00","lvl":"info","ch":"app","pid":13408,"msg":"protocol","ctx":{"frame":"header/native","payload":"raw"}}
+{"ts":"2026-11-17T17:30:44+08:00","lvl":"info","ch":"app","pid":13408,"msg":"idle ready","ctx":{"host":"0.0.0.0","port":9001,"payload":"raw","idle_addr":1}}
+{"ts":"2026-11-17T17:30:44+08:00","lvl":"warn","ch":"app","pid":13408,"msg":"memory_limit 不足，已按 max_conn 自动抬高","ctx":{"from":"512M","to":"1194M","max_conn":10000}}
+{"ts":"2026-11-17T17:30:44+08:00","lvl":"info","ch":"app","pid":13408,"msg":"server listen","ctx":{"proto":"tcp","host":"0.0.0.0","port":9001}}
+{"ts":"2026-11-17T17:30:44+08:00","lvl":"info","ch":"app","pid":13408,"msg":"worker start","ctx":{"worker":0}}
+{"ts":"2026-11-17T17:30:44+08:00","lvl":"info","ch":"app","pid":13408,"msg":"gateway ready","ctx":{"worker":0,"heartbeat_sec":30}}
+{"ts":"2026-11-17T17:30:57+08:00","lvl":"info","ch":"app","pid":13435,"msg":"boot","ctx":{"env":"prod","dir":"/data/TypeServer/demo/idle","php":"8.5.12","pid":13435}}
+{"ts":"2026-11-17T17:30:57+08:00","lvl":"info","ch":"app","pid":13435,"msg":"protocol","ctx":{"frame":"header/native","payload":"raw"}}
+{"ts":"2026-11-17T17:30:57+08:00","lvl":"info","ch":"app","pid":13435,"msg":"idle ready","ctx":{"host":"0.0.0.0","port":9001,"payload":"raw","idle_addr":1}}
+{"ts":"2026-11-17T17:30:57+08:00","lvl":"warn","ch":"app","pid":13435,"msg":"memory_limit 不足，已按 max_conn 自动抬高","ctx":{"from":"512M","to":"1194M","max_conn":10000}}
+{"ts":"2026-11-17T17:31:36+08:00","lvl":"info","ch":"app","pid":13877,"msg":"boot","ctx":{"env":"prod","dir":"/data/TypeServer/demo/idle","php":"8.5.12","pid":13877}}
+{"ts":"2026-11-17T17:31:36+08:00","lvl":"info","ch":"app","pid":13877,"msg":"protocol","ctx":{"frame":"header/native","payload":"protobuf"}}
+{"ts":"2026-11-17T17:31:36+08:00","lvl":"info","ch":"app","pid":13877,"msg":"idle ready","ctx":{"host":"0.0.0.0","port":9501,"payload":"protobuf","idle_addr":1}}
+{"ts":"2026-11-17T17:31:36+08:00","lvl":"warn","ch":"app","pid":13877,"msg":"memory_limit 不足，已按 max_conn 自动抬高","ctx":{"from":"512M","to":"1194M","max_conn":10000}}
+{"ts":"2026-11-17T17:31:36+08:00","lvl":"info","ch":"app","pid":13877,"msg":"server listen","ctx":{"proto":"tcp","host":"0.0.0.0","port":9501}}
+{"ts":"2026-11-17T17:31:36+08:00","lvl":"info","ch":"app","pid":13877,"msg":"worker start","ctx":{"worker":0}}
+{"ts":"2026-11-17T17:31:36+08:00","lvl":"info","ch":"app","pid":13877,"msg":"gateway ready","ctx":{"worker":0,"heartbeat_sec":30}}
+{"ts":"2026-11-17T17:31:39+08:00","lvl":"error","ch":"app","pid":13877,"msg":"service error, killing","ctx":{"svc":"local:1","msgId":3001,"err":"Class \"Idle\\IdlePlayer\" does not exist"}}
+{"ts":"2026-11-17T17:33:34+08:00","lvl":"info","ch":"app","pid":15851,"msg":"boot","ctx":{"env":"prod","dir":"/data/TypeServer/demo/idle","php":"8.5.12","pid":15851}}
+{"ts":"2026-11-17T17:33:34+08:00","lvl":"info","ch":"app","pid":15851,"msg":"protocol","ctx":{"frame":"header/native","payload":"protobuf"}}
+{"ts":"2026-11-17T17:33:34+08:00","lvl":"info","ch":"app","pid":15851,"msg":"idle ready","ctx":{"host":"0.0.0.0","port":9501,"payload":"protobuf","idle_addr":1}}
+{"ts":"2026-11-17T17:33:34+08:00","lvl":"warn","ch":"app","pid":15851,"msg":"memory_limit 不足，已按 max_conn 自动抬高","ctx":{"from":"512M","to":"1194M","max_conn":10000}}
+{"ts":"2026-11-17T17:33:34+08:00","lvl":"info","ch":"app","pid":15851,"msg":"server listen","ctx":{"proto":"tcp","host":"0.0.0.0","port":9501}}
+{"ts":"2026-11-17T17:33:34+08:00","lvl":"info","ch":"app","pid":15851,"msg":"worker start","ctx":{"worker":0}}
+{"ts":"2026-11-17T17:33:34+08:00","lvl":"info","ch":"app","pid":15851,"msg":"gateway ready","ctx":{"worker":0,"heartbeat_sec":30}}
+{"ts":"2026-11-17T17:34:32+08:00","lvl":"info","ch":"app","pid":17123,"msg":"boot","ctx":{"env":"prod","dir":"/data/TypeServer/demo/idle","php":"8.5.12","pid":17123}}
+{"ts":"2026-11-17T17:34:32+08:00","lvl":"info","ch":"app","pid":17123,"msg":"protocol","ctx":{"frame":"header/native","payload":"protobuf"}}
+{"ts":"2026-11-17T17:34:32+08:00","lvl":"info","ch":"app","pid":17123,"msg":"idle ready","ctx":{"host":"0.0.0.0","port":9501,"payload":"protobuf","idle_addr":1}}
+{"ts":"2026-11-17T17:34:32+08:00","lvl":"warn","ch":"app","pid":17123,"msg":"memory_limit 不足，已按 max_conn 自动抬高","ctx":{"from":"512M","to":"1194M","max_conn":10000}}
+{"ts":"2026-11-17T17:34:32+08:00","lvl":"info","ch":"app","pid":17123,"msg":"server listen","ctx":{"proto":"tcp","host":"0.0.0.0","port":9501}}
+{"ts":"2026-11-17T17:34:32+08:00","lvl":"info","ch":"app","pid":17123,"msg":"worker start","ctx":{"worker":0}}
+{"ts":"2026-11-17T17:34:32+08:00","lvl":"info","ch":"app","pid":17123,"msg":"gateway ready","ctx":{"worker":0,"heartbeat_sec":30}}
+{"ts":"2026-11-17T17:35:26+08:00","lvl":"info","ch":"app","pid":18158,"msg":"boot","ctx":{"env":"prod","dir":"/data/TypeServer/demo/idle","php":"8.5.12","pid":18158}}
+{"ts":"2026-11-17T17:35:26+08:00","lvl":"info","ch":"app","pid":18158,"msg":"protocol","ctx":{"frame":"header/native","payload":"protobuf"}}
+{"ts":"2026-11-17T17:35:26+08:00","lvl":"info","ch":"app","pid":18158,"msg":"idle ready","ctx":{"host":"0.0.0.0","port":9501,"payload":"protobuf","idle_addr":1}}
+{"ts":"2026-11-17T17:35:26+08:00","lvl":"warn","ch":"app","pid":18158,"msg":"memory_limit 不足，已按 max_conn 自动抬高","ctx":{"from":"512M","to":"1194M","max_conn":10000}}
+{"ts":"2026-11-17T17:35:26+08:00","lvl":"info","ch":"app","pid":18158,"msg":"server listen","ctx":{"proto":"tcp","host":"0.0.0.0","port":9501}}
+{"ts":"2026-11-17T17:35:26+08:00","lvl":"info","ch":"app","pid":18158,"msg":"worker start","ctx":{"worker":0}}
+{"ts":"2026-11-17T17:35:26+08:00","lvl":"info","ch":"app","pid":18158,"msg":"gateway ready","ctx":{"worker":0,"heartbeat_sec":30}}
+{"ts":"2026-11-17T17:36:07+08:00","lvl":"info","ch":"app","pid":19547,"msg":"boot","ctx":{"env":"prod","dir":"/data/TypeServer/demo/idle","php":"8.5.12","pid":19547}}
+{"ts":"2026-11-17T17:36:07+08:00","lvl":"info","ch":"app","pid":19547,"msg":"protocol","ctx":{"frame":"header/native","payload":"protobuf"}}
+{"ts":"2026-11-17T17:36:07+08:00","lvl":"info","ch":"app","pid":19547,"msg":"idle ready","ctx":{"host":"0.0.0.0","port":9501,"payload":"protobuf","idle_addr":1}}
+{"ts":"2026-11-17T17:36:07+08:00","lvl":"warn","ch":"app","pid":19547,"msg":"memory_limit 不足，已按 max_conn 自动抬高","ctx":{"from":"512M","to":"1194M","max_conn":10000}}
+{"ts":"2026-11-17T17:36:07+08:00","lvl":"info","ch":"app","pid":19547,"msg":"server listen","ctx":{"proto":"tcp","host":"0.0.0.0","port":9501}}
+{"ts":"2026-11-17T17:36:07+08:00","lvl":"info","ch":"app","pid":19547,"msg":"worker start","ctx":{"worker":0}}
+{"ts":"2026-11-17T17:36:07+08:00","lvl":"info","ch":"app","pid":19547,"msg":"gateway ready","ctx":{"worker":0,"heartbeat_sec":30}}
+{"ts":"2026-11-17T17:37:21+08:00","lvl":"info","ch":"app","pid":22968,"msg":"boot","ctx":{"env":"prod","dir":"/data/TypeServer/demo/idle","php":"8.5.12","pid":22968}}
+{"ts":"2026-11-17T17:37:21+08:00","lvl":"info","ch":"app","pid":22968,"msg":"protocol","ctx":{"frame":"header/native","payload":"protobuf"}}
+{"ts":"2026-11-17T17:37:21+08:00","lvl":"info","ch":"app","pid":22968,"msg":"idle ready","ctx":{"host":"0.0.0.0","port":9501,"payload":"protobuf","idle_addr":1}}
+{"ts":"2026-11-17T17:37:21+08:00","lvl":"warn","ch":"app","pid":22968,"msg":"memory_limit 不足，已按 max_conn 自动抬高","ctx":{"from":"512M","to":"1194M","max_conn":10000}}
+{"ts":"2026-11-17T17:37:21+08:00","lvl":"info","ch":"app","pid":22968,"msg":"server listen","ctx":{"proto":"tcp","host":"0.0.0.0","port":9501}}
+{"ts":"2026-11-17T17:37:21+08:00","lvl":"info","ch":"app","pid":22968,"msg":"worker start","ctx":{"worker":0}}
+{"ts":"2026-11-17T17:37:21+08:00","lvl":"info","ch":"app","pid":22968,"msg":"gateway ready","ctx":{"worker":0,"heartbeat_sec":30}}
+{"ts":"2026-11-17T17:37:25+08:00","lvl":"error","ch":"app","pid":22968,"msg":"service error, killing","ctx":{"svc":"local:1","msgId":3007,"err":"Invalid callback TSF\\Mail\\Mail::has_items, class TSF\\Mail\\Mail does not have a method \"has_items\""}}
+{"ts":"2026-11-17T17:38:07+08:00","lvl":"info","ch":"app","pid":24236,"msg":"boot","ctx":{"env":"prod","dir":"/data/TypeServer/demo/idle","php":"8.5.12","pid":24236}}
+{"ts":"2026-11-17T17:38:07+08:00","lvl":"info","ch":"app","pid":24236,"msg":"protocol","ctx":{"frame":"header/native","payload":"protobuf"}}
+{"ts":"2026-11-17T17:38:07+08:00","lvl":"info","ch":"app","pid":24236,"msg":"idle ready","ctx":{"host":"0.0.0.0","port":9501,"payload":"protobuf","idle_addr":1}}
+{"ts":"2026-11-17T17:38:07+08:00","lvl":"warn","ch":"app","pid":24236,"msg":"memory_limit 不足，已按 max_conn 自动抬高","ctx":{"from":"512M","to":"1194M","max_conn":10000}}
+{"ts":"2026-11-17T17:38:07+08:00","lvl":"info","ch":"app","pid":24236,"msg":"server listen","ctx":{"proto":"tcp","host":"0.0.0.0","port":9501}}
+{"ts":"2026-11-17T17:38:07+08:00","lvl":"info","ch":"app","pid":24236,"msg":"worker start","ctx":{"worker":0}}
+{"ts":"2026-11-17T17:38:07+08:00","lvl":"info","ch":"app","pid":24236,"msg":"gateway ready","ctx":{"worker":0,"heartbeat_sec":30}}

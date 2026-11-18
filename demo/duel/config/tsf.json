@@ -1,0 +1,40 @@
+{
+    "app": {
+        "name": "duel"
+    },
+    "log": {
+        "level": "info",
+        "file": "${base}/var/log/app.log"
+    },
+    "protocol": {
+        "frame": "native",
+        "payload": "raw"
+    },
+    "db": {
+        "dsn": "sqlite:${base}/var/duel.db"
+    },
+    "snapshot": {
+        "dir": "${base}/var/snap"
+    },
+    "server": {
+        "host": "0.0.0.0",
+        "port": 9101,
+        "transport": "tcp",
+        "worker_num": 1,
+        "max_conn": 200,
+        "nodelay": true,
+        "heartbeat_sec": 30,
+        "rate_per_sec": 100,
+        "rate_burst": 200,
+        "auth": {
+            "require": true,
+            "secret": "dev-secret-change-me",
+            "tokens": {
+                "tok-1001": 1001,
+                "tok-1002": 1002,
+                "tok-2001": 2001,
+                "tok-2002": 2002
+            }
+        }
+    }
+}
