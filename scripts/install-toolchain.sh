@@ -62,6 +62,9 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 echo "== 下载 =="
+# 通过 `curl ... | bash` 调用时 stdout 不是 tty，curl 不会显示进度条 ——
+# 用户会以为卡住了。所以先报一句体量，让等待有预期。
+echo "  包大小约 42MB（解压 168MB），正常网速 1-2 分钟"
 case "$URL" in
     file://*)
         # 本地文件：直接 cp，顺便验证路径存在

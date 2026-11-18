@@ -17,16 +17,42 @@
 > 装完先跑 `tsf doctor` —— 它逐项检查 PHP/ZTS、swoole、phpx、tpc、php-config 版本一致性、clang，
 > 缺什么直接给修复命令。
 
-```bash
-# 1) 框架 + tsf 命令（约 28MB）
-composer require typephp/tsf:dev-main
+**第 1 步：框架 + `tsf` 命令（约 28MB）**
 
-# 2) 工具链：typephp 编译器（约 42MB，解压 168MB）
+包还没发到 Packagist，所以要先在 `composer.json` 里声明来源：
+
+```json
+{
+    "repositories": [
+        { "type": "vcs", "url": "https://github.com/hhr0815hhr/TypeServer" }
+    ],
+    "require": { "typephp/tsf": "dev-main" },
+    "minimum-stability": "dev"
+}
+```
+
+```bash
+composer install
+```
+
+装完得到 `vendor/bin/tsf`。
+
+> **漏了 `repositories` 会报这个错**：`typephp/tsf ... could not be found in any version` ——
+> Composer 默认只查 Packagist，而 Packagist 上没有这个包。
+>
+> 另外 `dev-main` 需要 `minimum-stability: dev`，否则报稳定性不满足。
+
+**第 2 步：工具链（约 42MB，解压 168MB）**
+
+```bash
 curl -fsSL https://raw.githubusercontent.com/hhr0815hhr/TypeServer/main/scripts/install-toolchain.sh | bash
 export TPC=~/.tsf/toolchain/typephp/bin/tpc.php
 export TSF_PHP=php85
+```
 
-# 3) 自检
+**第 3 步：自检**
+
+```bash
 ./vendor/bin/tsf doctor
 ```
 
