@@ -166,6 +166,8 @@ PHP_FUNCTION(interp_invoke)
     zval *obj;
     zval  retval;
     zval  args[1];
+    int   rc = FAILURE;
+    int   bailed_out = 0;
 
     ZEND_PARSE_PARAMETERS_START(2, 2)
         Z_PARAM_ZVAL(fn)
@@ -179,13 +181,55 @@ PHP_FUNCTION(interp_invoke)
 
     ZVAL_COPY(&args[0], obj);
 
-    /* 第一个参数传 NULL：从 $fn 本身取调用目标（闭包 / 类方法 / 函数名都行） */
-    if (call_user_function(NULL, NULL, fn, &retval, 1, args) != SUCCESS) {
-        zval_ptr_dtor(&args[0]);
+    /* zend_try 捕获的是 bailout（Fatal error / 内存耗尽 / 超时），不是 PHP 异常。
+     * PHP 的 throw 走 EG(exception)，要看 rc 和 EG(exception)。两者都要处理：
+     *   - throw  -> 可恢复，清掉异常继续跑
+     *   - bailout -> 不可恢复，记录后让调用方知道"这一局坏了"
+     */
+    zend_try {
+        rc = call_user_function(NULL, NULL, fn, &retval, 1, args);
+    } zend_catch {
+        bailed_out = 1;
+    } zend_end_try();
+
+    zval_ptr_dtor(&args[0]);
+
+    if (bailed_out) {
+        /* Fatal 级别的错误：进程状态可能已经不可信。
+         * 不假装成功，也不主动 exit —— 交给上层的监督者决定。
+         */
+        if (EG(exception)) {
+            zend_clear_exception();
+        }
+        array_init(return_value);
+        add_assoc_bool(return_value, "ok", 0);
+        add_assoc_string(return_value, "fatal", "script caused a bailout (fatal error / timeout / oom)");
+        return;
+    }
+
+    if (EG(exception)) {
+        /* 可捕获的 PHP 异常：取类名和 message，清掉，返回结构化错误 */
+        zend_object *ex = EG(exception);
+        zend_string *cls = ex->ce->name;
+        zval rv;
+        zval *msg_zv = zend_read_property(ex->ce, ex, "message", sizeof("message") - 1, 1, &rv);
+        zend_string *msg = (msg_zv && Z_TYPE_P(msg_zv) == IS_STRING)
+            ? Z_STR_P(msg_zv)
+            : ZSTR_EMPTY_ALLOC();
+
+        array_init(return_value);
+        add_assoc_bool(return_value, "ok", 0);
+        add_assoc_str(return_value, "class", zend_string_copy(cls));
+        add_assoc_str(return_value, "message", zend_string_copy(msg));
+
+        zend_clear_exception();
+        return;
+    }
+
+    if (rc == FAILURE) {
         zend_error(E_WARNING, "interp_invoke: call failed");
         RETURN_FALSE;
     }
-    zval_ptr_dtor(&args[0]);
 
     if (Z_TYPE(retval) == IS_UNDEF) {
         RETURN_TRUE;

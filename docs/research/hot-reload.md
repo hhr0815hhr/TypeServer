@@ -174,6 +174,47 @@ zend_stream_init_filename(&fh, path);
 | **2** | 对象传递 | **本来就通**。`Z_PARAM_ZVAL` 拿到引用，`call_user_function` 传进去，脚本改的就是原对象。唯一要修的是 `call_user_function` 的第三个参数必须是 `zval*`（函数名），传 `zend_string*` 会栈破坏 |
 | **3** | 热更 | **本来就通**。改文件后重新 `zend_compile_file` 就拿到新代码，AOT 环境下没有 opcache 干扰 |
 
+### 实验 6：脚本异常隔离 —— ✅ **成功**
+
+脚本抛 `RuntimeException`：
+
+```
+return: array (
+  'ok' => false,
+  'class' => 'RuntimeException',
+  'message' => '脚本故意抛异常，服务不能崩',
+)
+after  gold=600
+退出码: 0
+```
+
+脚本触发 `E_USER_ERROR`（Fatal）：
+
+```
+PHP Fatal error: 故意触发 E_USER_ERROR
+return: array (
+  'ok' => false,
+  'fatal' => 'script caused a bailout (fatal error / timeout / oom)',
+)
+退出码: 0
+```
+
+**两类错误都隔离了，进程都活着。**
+
+实现要点：`interp_invoke` 里用 `zend_try { ... } zend_catch { ... } zend_end_try();`
+包住 `call_user_function`。要区分两种错误：
+
+| 错误类型 | 机制 | 可恢复性 | 返回 |
+|:--|:--|:--|:--|
+| `throw` | `EG(exception)` 非空 | **可恢复** | `{ok:false, class, message}` |
+| Fatal / 超时 / OOM | `zend_bailout` → 被 `zend_catch` 抓到 | **不可恢复**（状态可能已坏） | `{ok:false, fatal}` |
+
+**bailout 之后进程状态不可信** —— 所以返回 fatal 而不是假装成功，让上层的监督者决定
+（重启 / 摘流量 / 告警）。这也说明了「监督树」为什么是 P1 的第二项：光捕获不够，
+还要有人决定捕获之后怎么办。
+
+---
+
 ## 六、结论
 
 **核心命题成立**：
