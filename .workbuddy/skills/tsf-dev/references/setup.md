@@ -98,11 +98,23 @@ tpc --version                 # TypePHP Compiler (AOT) v0.9.6
 ## 四、初始化之后
 
 ```bash
-# 生成一个工程试试
+# 方式一：在子目录里建（每个工程独立）
 ./vendor/bin/tsf new hello
-cd hello
-../vendor/bin/tsf serve .        # 或者把 vendor/bin 加进 PATH
+cd hello && ../vendor/bin/tsf serve .
+
+# 方式二：就在当前目录建（不想多一层目录时）
+./vendor/bin/tsf new .
+./vendor/bin/tsf serve .
+
+# 登录服同理
+./vendor/bin/tsf new . --login
 ```
+
+**方式二的前提**：当前目录里没有 `main.php` / `project.json`（不是已经建过工程）。
+`composer.json` / `vendor/` / `composer.lock` 这些**不影响**——`tsf new .` 只拦真正的重复生成。
+
+> 这条曾经是个 bug：早期版本用 `is_dir()` 判断目录是否存在，`.` 永远命不中，
+> 于是"先 composer require 再 tsf new ."必然报「目录已存在」。**已修**（0.7.0 之后）。
 
 **能连上、能 echo，就说明环境真的好了。**
 
