@@ -59,7 +59,6 @@ tsf new mylogin --login
 | 传输 | TCP / WS | **HTTP**（Swoole 原生 HttpServer） |
 | 协议 | 分帧 + 消息体 | 普通 HTTP 请求-响应 |
 | `client.php` | 有（测试客户端） | **无**（curl 就是客户端） |
-| `modules/` | 有（wasm 热更） | **无**（登录不需要热更） |
 | config | `protocol` / `server` / `auth` | `login`（host / port / secret / ttl / gateway） |
 | 默认端口 | 9001 | **9101** |
 

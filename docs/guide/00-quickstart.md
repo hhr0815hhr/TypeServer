@@ -47,7 +47,6 @@ TSF 环境自检   tsf 0.7.0
 
 可选项
   ! wit-bindgen                缺 —— 生成接口绑定
-  ! tp-precompile              缺 —— 预编译成 .cwasm
 
 必要项全部通过（PHP 8.5.12 ZTS），可以 tsf new / tsf build
 ```
@@ -55,7 +54,7 @@ TSF 环境自检   tsf 0.7.0
 哪一项不是 `✓`，按它的提示补齐 —— **不要在环境不全的情况下往下走**，
 否则后面每个报错都可能是环境问题伪装成的代码问题。
 
-> CI 里用 `bash scripts/ci-preflight.sh`：检查更严格（含 wasm 工具链和 `tpc-patches/` 的补丁状态）。
+> CI 里用 `bash scripts/ci-preflight.sh`：检查更严格（含 `tpc-patches/` 的补丁状态）。
 
 ## 1. 生成工程
 
@@ -175,6 +174,6 @@ tsf lint
 这个框架是 **AOT** 的：代码在编译期就变成了机器码，所以「改完立刻生效」这件事
 不存在——必须重编。`tsf watch` 把重编做到 2 秒内是它的上限，也是这套方案的代价。
 
-如果你需要「线上不停服改一行逻辑」，那是另一条轨道（wasm 模块热更），
+如果你需要「线上不停服改一行逻辑」，那是另一条轨道（`pkg/script` 热更），
 见 [06-hotreload.md](06-hotreload.md)。**不要在开发期就为它设计**，
 先用 `tsf watch` 把业务写完。

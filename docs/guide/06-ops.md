@@ -72,7 +72,7 @@ Metrics::done("settle.us", $t0, "room=1001");
 | 内部逻辑、数值、算法 | 接口包的 `package`/`world` 名（宿主按名匹配） |
 | — | 宿主里的状态结构（换实现不迁移内存） |
 
-实测耗时（`tsf verify wasm`，6 项断言）：
+实测耗时（`tsf verify all`）：
 
 ```
 swap v2      5669 us
@@ -90,7 +90,7 @@ rollback v1  4316 us
 | 开发 | `new` `build` `watch` `serve` `lint` | 建工程、编译、热重编、跑起来、结构检查 |
 | 验证 | `verify` `verify --list` `verify <id>` | 9 个套件 197 项断言 |
 | 数据 | `migrate` `migrate-status` | 部署期迁移 |
-| 资源 | `config` `proto` `module` `list` `add` `remove` | 配置导出、协议生成、wasm 模块、包管理 |
+| 资源 | `config` `proto` `list` `add` `remove` | 配置导出、协议生成、包管理 |
 
 ## 公开 API
 
@@ -115,15 +115,6 @@ rollback v1  4316 us
 | `onStart() / onMessage() / onStop()` | 它是 `Service` |
 | `port() / stats()` | 查询 |
 
-### wasm\Module
-
-| 方法 | 用途 |
-|:--|:--|
-| `load(string $name, string $path): ?self` | 加载模块 |
-| `canary(string $path, int $permille): bool` | 灰度，千分比 |
-| `setRatio(int $permille): int` | 调整灰度比例 |
-| `swap(string $path): int` | 全量切换（返回耗时 µs） |
-| `stats(): string` / `bridgeVersion()` | 状态 |
 
 ## 边界与坑
 
@@ -138,11 +129,6 @@ rollback v1  4316 us
    记次数，耗时用采样。
 
 3. **GM 卡住 = 全 worker 卡住**。它和业务共享事件循环，批量操作要分批、要 sleep。
-
-4. **wasm 只能换实现**。改了导出签名、或换了 `package`/`world` 名，宿主匹配不上会拒绝加载。
-   状态不迁移——新实现看到的是旧实现留下的内存，结构对不上就是脏读。
-
-5. **灰度比例是千分比**。`canary($path, 100)` 是 10%，不是 100%。
 
 6. **`migrate-status` 有待执行时返回非零**，可以直接用在部署脚本的 gate 里。
 
