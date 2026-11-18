@@ -65,28 +65,87 @@ PHP_FUNCTION(interp_require_file)
         Z_PARAM_PATH(path, path_len)
     ZEND_PARSE_PARAMETERS_END();
 
-    /* 8.5 里 zend_stream_init_filename 返回 void，打开失败由 zend_compile_file 报错 */
+    /* 8.5 里 zend_stream_init_filename 返回 void，打开失败由编译阶段报错 */
     zend_stream_init_filename(&fh, path);
 
-    zend_op_array *op = zend_compile_file(&fh, ZEND_REQUIRE);
+    /* 用 zend_execute_scripts 而不是自己 compile+execute+destroy：
+     * 前者走完整的 require 流程，脚本里定义的函数/类会被正确注册到符号表；
+     * 后者 destroy_op_array 会把函数表一起销毁（实测 function_exists 返回 false）。
+     */
+    ZVAL_UNDEF(&retval);
+    int rc = zend_execute_scripts(ZEND_REQUIRE, &retval, 1, &fh);
     zend_destroy_file_handle(&fh);
 
-    if (op == NULL) {
-        zend_error(E_WARNING, "interp_require_file: compile failed");
+    if (rc == FAILURE) {
+        zend_error(E_WARNING, "interp_require_file: execute failed");
         RETURN_FALSE;
     }
-
-    ZVAL_UNDEF(&retval);
-    zend_execute(op, &retval);
-
-    destroy_op_array(op);
-    efree(op);
 
     if (Z_TYPE(retval) == IS_UNDEF) {
         RETURN_TRUE;
     }
     if (Z_TYPE(retval) == IS_STRING) {
         RETVAL_STR(Z_STR(retval));
+        return;
+    }
+    zval_ptr_dtor(&retval);
+    RETURN_TRUE;
+}
+/* }}} */
+
+/* {{{ interp_call_obj(string $fn, object $obj): mixed
+ *
+ * 调用脚本里定义的函数，把宿主侧的对象作为参数传进去。
+ *
+ * 这是「脚本操作宿主数据」的核心动作：
+ *   脚本里 $obj->gold += 100，宿主侧的同一个对象应该跟着变。
+ *
+ * 前提：脚本已经 interp_require_file 过（函数已注册到符号表）。
+ */
+PHP_FUNCTION(interp_call_obj)
+{
+    zend_string *fn;
+    zval        *obj;
+    zval         retval;
+    zval         args[1];
+
+    ZEND_PARSE_PARAMETERS_START(2, 2)
+        Z_PARAM_STR(fn)
+        Z_PARAM_ZVAL(obj)
+    ZEND_PARSE_PARAMETERS_END();
+
+    if (Z_TYPE_P(obj) != IS_OBJECT) {
+        zend_error(E_WARNING, "interp_call_obj: argument 2 must be object, got type %d", Z_TYPE_P(obj));
+        RETURN_FALSE;
+    }
+
+    ZVAL_COPY(&args[0], obj);   /* 引用传递：脚本里改的就是同一个对象 */
+
+    /* call_user_function 的第三个参数是 zval*（函数名），不是 zend_string*。
+     * 直接传 zend_string* 会造成栈破坏（实测 stack smashing detected）。
+     */
+    zval fname_zv;
+    ZVAL_STR_COPY(&fname_zv, fn);
+
+    if (call_user_function(EG(function_table), NULL, &fname_zv, &retval, 1, args) != SUCCESS) {
+        zval_ptr_dtor(&fname_zv);
+        zval_ptr_dtor(&args[0]);
+        zend_error(E_WARNING, "interp_call_obj: function %s not found or failed", ZSTR_VAL(fn));
+        RETURN_FALSE;
+    }
+    zval_ptr_dtor(&fname_zv);
+    zval_ptr_dtor(&args[0]);
+
+    if (Z_TYPE(retval) == IS_LONG) {
+        RETVAL_LONG(Z_LVAL(retval));
+        return;
+    }
+    if (Z_TYPE(retval) == IS_STRING) {
+        RETVAL_STR(Z_STR(retval));
+        return;
+    }
+    if (Z_TYPE(retval) == IS_DOUBLE) {
+        RETVAL_DOUBLE(Z_DVAL(retval));
         return;
     }
     zval_ptr_dtor(&retval);
@@ -118,6 +177,7 @@ ZEND_END_ARG_INFO()
 static const zend_function_entry interp_functions[] = {
     PHP_FE(interp_eval_string,  arginfo_interp_eval_string)
     PHP_FE(interp_require_file, arginfo_interp_eval_string)
+    PHP_FE(interp_call_obj,     arginfo_interp_eval_string)
     PHP_FE(interp_probe,        arginfo_interp_probe)
     PHP_FE_END
 };

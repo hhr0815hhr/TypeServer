@@ -1,6 +1,6 @@
 # ext/interp —— PHP 脚本热更探针（SPIKE）
 
-> **状态：研究性代码**，核心链路已验证，未生产化。
+> **状态：可行性已验证**（五项能力全通），未生产化。
 > 完整记录见 `docs/research/hot-reload.md`。
 
 ## 它解决什么
@@ -19,8 +19,9 @@ AOT 二进制（C++ 对象、帧循环）
 
 | 函数 | 状态 | 说明 |
 |:--|:--:|:--|
-| `interp_require_file(string $path)` | ✅ **能用** | `zend_compile_file` + `zend_execute` |
-| `interp_eval_string(string $code)` | ❌ **不能用** | `zend_eval_stringl` 在 ZTS 下 `CG()` 上下文错乱，报 `expecting ";"` |
+| `interp_require_file(string $path)` | ✅ | `zend_execute_scripts`，脚本里的函数会被正确注册 |
+| `interp_call_obj(string $fn, object $obj)` | ✅ | 调脚本函数并传对象，**脚本改的就是宿主那个对象** |
+| `interp_eval_string(string $code)` | ❌ | `zend_eval_stringl` 在 ZTS 下 `CG()` 上下文错乱，报 `expecting ";"` |
 | `interp_probe()` | ✅ | 诊断：编译器指针是否就绪、sapi 名、EG 是否初始化 |
 
 ## 编译
@@ -58,13 +59,31 @@ hello from dynamic file      ← 脚本真的执行了
 return: true
 ```
 
+## 验证过的完整链路
+
+```
+$ PHP_INI_SCAN_DIR=... ./extprobe
+interp: yes
+
+=== 1. 加载脚本 ===
+require: true
+onQuest exists: yes
+
+=== 2. 传对象给脚本 ===
+before  gold=500  name=alice
+return  700
+after   gold=700  name=alice          ← 脚本改了宿主对象
+
+结论：对象共享，脚本改的就是 AOT 的同一个对象
+```
+
+**热更**：把脚本的 `+100` 改成 `+200`，同一个二进制重跑，`after` 从 600 变 700。
+
 ## 已知限制
 
-1. **脚本里不能用 `$GLOBALS`** —— AOT 在编译阶段就会拒绝（`'GLOBALS' was not declared`）
-2. **函数定义注册有问题** —— `echo` 能执行，但 `function_exists("xxx")` 返回 false
-   （猜测是 `destroy_op_array` 把函数表跟着销毁了，要改用 `zend_execute_scripts`）
-3. **对象传递未验证** —— 传 AOT 的 `Player` 给脚本能否读写，是最大的不确定性
-4. **热更未验证** —— 改文件后重新编译，但 opcache 可能还在用旧版本
+1. **脚本里不能用 `$GLOBALS`** —— AOT 编译阶段就拒绝（`'GLOBALS' was not declared`）
+2. **脚本和宿主同权限** —— 脚本能改任何对象，写错就崩。这是共享内存的固有代价
+3. **崩溃不隔离** —— 脚本抛未捕获异常会带崩进程（要和 wasm 搭配使用）
 
 ## 别做的事
 
