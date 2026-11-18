@@ -52,7 +52,7 @@ final class SlowService extends Service
             if (!$ok) {
                 return null;
             }
-            $r->auth("CHANGE_ME");
+            $r->auth("");
         } catch (\Throwable $e) {
             return null;
         }

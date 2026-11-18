@@ -43,7 +43,7 @@ function main(): void
         try {
             $ok = $r->connect("127.0.0.1", 22379, 3.0);
             if ($ok) {
-                $r->auth("CHANGE_ME");
+                $r->auth("");
             }
         } catch (\Throwable $e) {
             $ok = false;
