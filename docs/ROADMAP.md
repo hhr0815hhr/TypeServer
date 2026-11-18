@@ -15,10 +15,12 @@
       Fatal 返回 `{ok:false,fatal}`，进程退出码 0。两种都实测过。
       **但 bailout 之后状态不可信** —— 所以监督树（下一项）仍然是必须的。
 
-- [ ] **监督树（Service 崩溃隔离）**
-      一个 `Service` 抛异常整个进程挂。参考 OTP：
-      `one_for_one` / `one_for_all` / `rest_for_one`，加 `max_restarts` / `within`。
-      估算 3-5 天。
+- [x] **监督树** —— 已完成（Scheduler::supervise，2026-11-18）
+      已有的：tick 里 try/catch + kill，异常不拖垮进程。
+      这次补的：`supervise(name, factory, maxRestarts, withinMs)` —— 崩了按阈值重启，
+      超限放弃（记 error 日志）。单实例语义（世界 / 邮件 / 排行榜）。
+      实测：maxRestarts=3 时前 3 次重启、第 4 次放弃，addr 归 0。
+      **没做**：`one_for_all` / `rest_for_one`（多实例联动重启），当前场景不需要。
 
 - [ ] **`pkg/http` / `pkg/script` 进 `verify-all.sh`**
       现在的 197 项断言没覆盖这两个新包。
