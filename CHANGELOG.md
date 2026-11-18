@@ -2,6 +2,70 @@
 
 ---
 
+## v0.8.0（2026-11-18）
+
+### 新增
+
+**`pkg/http`（约 700 行）**：登录服 / Web API 的基础设施。
+
+- `Router`：路径参数 `/player/:uid`，严格按段数匹配（不做正则路由——热路径上正则回溯是白给的开销）
+- `Response::ok / fail / text`：统一响应，HTTP 状态码与业务码分开
+- 三个中间件：`CorsMiddleware`（预检 204 + 正常响应补头）、`RateLimitMiddleware`（按 IP 令牌桶，429 + Retry-After）、`AuthMiddleware`（Bearer token → `Request::$uid`，白名单放行）
+- `Middleware` 接口而非闭包：AOT 严检参数类型，`use(\Closure $mw)` 传 `__invoke` 对象会编译失败
+- `App::after()`：后置装饰器，给所有响应补 CORS 头
+
+**`pkg/script`（约 400 行）**：PHP 脚本热更。
+
+- `Script`：`load / reload / call / callWithContext / changed / reloadIfChanged`
+- `Manager`：多脚本注册、批量加载、批量检测变更
+- `Context`：脚本的受限视图。白名单声明可读/可写字段，越权抛 `RuntimeException`
+- 脚本形态是 `return function ($ctx) {...}`，不能 `function xxx()` —— PHP 不允许重复定义
+
+**`ext/interp` 扩展（约 200 行 C）**：让 AOT 产物执行外部 PHP 脚本。
+
+- `interp_require_file`：编译并执行脚本文件，返回值原样透传
+- `interp_invoke`：调运行期拿到的闭包（AOT 编译期无法确定签名，必须走 C 层）
+- `interp_call_obj`：按函数名调
+- `interp_probe`：诊断编译器指针、sapi 名、EG 状态
+
+**`tsf new --login`**：生成 HTTP 登录服脚手架（默认 9101，内含中间件链）。
+
+**`TokenAuth::sign($uid, $ttl)`**：从永久 token 改成支持过期，签名覆盖 `uid.exp`。
+
+### 移除
+
+**wasm 全部**（详细原因见下方「wasm 路线已移除」）：
+
+- `pkg/wasm`、`tests/wasm-link`、`implementation-kit`
+- `tsf module` 子命令、`moduleBuild()`、doctor 的 wasm 可选项
+- `docs/DESIGN-WASM-HOTRELOAD.md`、`docs/guide/09-wasm-or-typephp.md`
+
+**BREAKING**：`tsf module` 命令不存在了；`tsf new` 不再生成 `modules/` 目录。
+
+### 修复
+
+- **`tsf new .`**：先 `composer require` 再 `tsf new .` 必报「目录已存在」（`is_dir(".")` 恒真）。改成检查 `main.php` / `project.json` 是否存在
+- **`tsf new --login`**：flag 被当成工程名，生成名为 `--login` 的目录。改成取第一个非 `--` 开头的参数
+- **`pkg/http` 里的 `mixed`**：违反框架自己的 lint 规则（`tsf lint` 抓到的），改成 `array|string|null`
+
+### 文档
+
+- 教程 11 篇（原 12 篇，删掉 wasm 那篇后重排）
+- `docs/research/hot-reload.md`：脚本热更的完整验证记录
+- 新增 `tsf-dev` skill（项目级，`.workbuddy/skills/`）
+
+### 实测数据
+
+| 项目 | 结果 |
+|:--|:--|
+| `pkg/http` 中间件链路 | 8 项全过（白名单/401/429/预检/CORS 头） |
+| 脚本对象传递 | `gold` 500 → 850，脚本改的就是宿主对象 |
+| 脚本热更 | 改脚本 `+350` → `+999`，同一二进制重跑得 1499 |
+| 安全边界 | `gold` 可写成功，`level` 越权被拦 |
+| 10 万玩家快照 | json 存 40ms / 读 122ms，11.2 MB |
+
+---
+
 ## wasm 路线已移除（2026-11-18）
 
 **移除内容**：`pkg/wasm`、`tests/wasm-link`、`implementation-kit`、`docs/DESIGN-WASM-HOTRELOAD.md`、`docs/guide/09-wasm-or-typephp.md`。
