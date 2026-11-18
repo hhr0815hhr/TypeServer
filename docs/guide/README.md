@@ -87,6 +87,7 @@ flowchart TD
 | 08 | [AOT 下的类型契约](08-aot-types.md) | 为什么 PHP 的合法写法在 AOT 下会炸（五类坑 + 排查方法 + 检查清单） | ✅ 全是真实案例 |
 | 09 | [编译成 native 还是 wasm](09-wasm-or-typephp.md) | 同一个 tpc 的两种输出目标；什么时候该热更（判断流程 + 真实例子） | ✅ 基于工具链源码 |
 | 10 | [总装](10-assembly.md) | 把零件拼成一个能跑的业务（五个「缝」的坑 + 上线验证清单） | ✅ 基于 idle demo |
+| 11 | [登录服](11-login-service.md) | HTTP 和 TCP 怎么分工；token 签/验共用一份代码；两个工程怎么串 | ✅ 端到端实测 |
 
 ## 每篇的固定结构
 
