@@ -76,7 +76,7 @@ export TSF_PHP=php85
 顺便记下两个版本：
 
 ```bash
-./vendor/bin/tsf --version    # TSF 0.7.0
+./vendor/bin/tsf --version    # TSF 0.8.0
 tpc --version                 # TypePHP Compiler (AOT) v0.9.6
 ```
 
@@ -131,7 +131,7 @@ cd TypeServer
 ./tsf/bin/tsf doctor
 
 # 跑测试
-bash scripts/verify-all.sh
+tsf verify
 ```
 
 **区别**：

@@ -13,7 +13,8 @@ description: |
 
   触发词：tsf、TypePHP 游戏服、tsf new、tsf build、tsf serve、tsf doctor、tsf lint、
   pkg/http、登录服、中间件、TokenAuth、AOT 编译错误、php::Variant、cannot convert、
-  mixed、TypeServer 仓库、submodule、性能基线、吞吐、bench、tsf-dev。
+  mixed、TypeServer 仓库、submodule、性能基线、吞吐、bench、
+  pkg/script、脚本热更、替 Lua、ext/interp、supervise、监督树、tsf mem、tsf-dev。
 
   不适用：只问 TypePHP 语言本身（原生类型、tpc 构建链）—— 那用 typephp-refactor。
 ---
@@ -22,8 +23,8 @@ description: |
 
 > **仓库**：`D:\hhr\TypeServer`（主仓库）+ `D:\hhr\TypeServer\tsf`（submodule → `hhr0815hhr/tsf`）
 >
-> **文档在哪**：教程在 `docs/guide/`（12 篇，3065 行）；框架详细说明在 `tsf/README.md`
-> （3663 行，§5 是 AOT 约束，§9~§25 是各组件）。**别重复读，按下面导航过去。**
+> **文档在哪**：教程在 `docs/guide/`（12 篇，3094 行）；框架详细说明在 `tsf/README.md`
+> （3689 行，§5 是 AOT 约束，§9~§25 是各组件）。**别重复读，按下面导航过去。**
 
 ## 这个 skill 里有什么
 
@@ -96,11 +97,11 @@ tpc --version                  # TypePHP Compiler (AOT) v0.9.6
 | 登录服怎么和网关对接（token） | `docs/guide/10-login-service.md` |
 | 加玩法（房间 / 帧循环 / 状态机 / AOI） | `docs/guide/03-gameplay.md` |
 | 用 db / redis / mail / schedule | `docs/guide/04-data.md` + `tsf/pkg/<name>/pkg.json` |
-| **脚本热更（替 Lua）** | `docs/research/hot-reload.md` + `tsf/pkg/script/` + `ext/interp/README.md` |
+| **脚本热更（替 Lua）** | `docs/guide/12-hot-reload.md`（先看这篇）+ `docs/research/hot-reload.md`（完整记录）+ `tsf/pkg/script/` |
 | 分布式（RPC / 服务发现 / 分片 / 跨服 / 熔断） | `docs/guide/05-distributed.md` |
-
 | **编译报错 / 运行期异常 / 静默失败** | **`references/error-codes.md`** |
 | 类型契约（什么类型能编过） | `docs/guide/08-aot-types.md` + `typephp-refactor` skill |
+| 看进程内存（谁吃了 RSS） | `tsf mem [关键字]` |
 
 ## 2. AOT 硬约束（违反必踩，全是实测过的）
 
@@ -122,8 +123,13 @@ tsf build .       # 编译（约 1.9s）
 框架层改动（`tsf/` 下）还要跑：
 
 ```bash
-bash scripts/verify-all.sh      # 197 项断言
+tsf verify                 # 全量回归（所有套件）
+tsf verify --only script   # 只跑某个套件（script / http / semantics / settle ...）
+tsf verify --list          # 列出有哪些套件
 ```
+
+**注意**：没有 `scripts/verify-all.sh` 这个文件（早期文档里出现过，已废弃）。
+入口就是 `tsf verify`，套件清单硬编码在 `tsf/bin/tsf` 的 `verifySuites()` 里。
 
 ## 4. 明确不要做的事
 

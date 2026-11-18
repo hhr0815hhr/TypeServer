@@ -217,7 +217,7 @@ tsf build .       # 编译
 **框架层改动**（`tsf/` 下）额外跑：
 
 ```bash
-bash scripts/verify-all.sh
+tsf verify
 ```
 
 **提交前**：如果改了 `tsf/`，记得 **submodule 两步**：

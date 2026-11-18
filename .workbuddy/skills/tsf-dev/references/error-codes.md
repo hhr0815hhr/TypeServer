@@ -8,7 +8,7 @@
 ## 先记下你的版本
 
 ```bash
-tsf --version     # TSF 0.7.0
+tsf --version     # TSF 0.8.0
 tpc --version     # TypePHP Compiler (AOT) v0.9.6
 ```
 
