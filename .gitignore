@@ -42,6 +42,10 @@ tsf/vendor/**
 
 # ---- 会话数据（WorkBuddy 的工作记忆，属于本机状态）----
 .workbuddy/**
+# 例外：项目级 skill 要跟仓库走，团队成员 clone 下来就能用
+# （memory / 会话缓存这些仍然忽略）
+!.workbuddy/skills/
+!.workbuddy/skills/**
 
 # ---- 一次性技术验证：只留结论文档 ----
 # spike/s1 的 Rust target 和 .wasm/.cwasm、spike/s2 的静态链接产物加起来 3.6G。

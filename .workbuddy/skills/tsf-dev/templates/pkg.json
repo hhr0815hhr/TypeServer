@@ -1,0 +1,7 @@
+{
+  "name": "myfeature",
+  "ns": "TSF\\MyFeature",
+  "desc": "一句话说清它解决什么问题",
+  "requires": [],
+  "hint": "什么场景该用（具体到需求），什么场景不该用（省得别人滥用）"
+}
