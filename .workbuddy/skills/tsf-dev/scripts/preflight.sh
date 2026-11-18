@@ -49,6 +49,7 @@ if [ -n "$TSF_BIN" ]; then
     fi
 else
     say "tsf 命令"; bad "找不到（PATH / 同级 tsf/bin / vendor/bin 都没有）"
+    echo "      → 环境还没初始化。按 references/setup.md 三步装好（composer → 工具链 → doctor）再回来"
 fi
 
 echo

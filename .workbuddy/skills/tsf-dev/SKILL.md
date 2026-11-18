@@ -29,6 +29,7 @@ description: |
 
 | 文件 | 用途 |
 |:--|:--|
+| `references/setup.md` | **初始化**：composer → 工具链 → doctor，含 7 个常见卡点（新环境必看） |
 | `references/error-codes.md` | **编译 / 链接 / 运行期 / 环境的错误对照表**，按报错关键词搜（最常用） |
 | `references/add-feature.md` | 加接口 / 加玩法 / 加 pkg / 加定时任务 —— 四类场景的三步流程 + 验证命令 |
 | `references/perf-baseline.md` | 性能基线 + "假性能问题"清单 + 怎么测才可信 |
@@ -46,16 +47,35 @@ bash scripts/preflight.sh tests/db-mysql-test
 TSF_BIN=./vendor/bin/tsf bash scripts/preflight.sh .
 ```
 
-## 0. 开工先确认三件事
+## 0. 开工先确认（按顺序，别跳）
 
-1. **`tsf doctor` 全绿吗？** 环境类问题 90% 在这一步暴露。不是全绿就不要往下走，
-   否则后面每个报错都可能是环境问题伪装成的代码问题。
-2. **是哪个工程？** 游戏服（`tsf new`，TCP/WS，端口 9001）还是登录服
-   （`tsf new --login`，HTTP，端口 9101）。
-3. **改的是框架还是业务？**
-   - 业务工程：直接改，`tsf build` 验
-   - `tsf/` 下的框架代码：要先进 submodule 提交（`cd tsf && git commit && git push`），
-     再回主仓库更新指针（`git add tsf && git commit`）—— **两步，漏一步别人拉不到**
+### 0.1 环境能不能跑？
+
+```bash
+./vendor/bin/tsf doctor      # 业务工程（composer 装的）
+./tsf/bin/tsf doctor         # 本仓库内（submodule 里的）
+```
+
+**三种情况都要停下来先解决**：
+
+| 现象 | 去看 |
+|:--|:--|
+| `tsf: command not found` | **`references/setup.md`** —— 还没装框架 |
+| doctor 报「tpc 编译器 缺」 | **`references/setup.md`** —— 工具链没装 |
+| doctor 报 NTS / php-config 不一致 | **`references/setup.md`** 的「常见卡点」 |
+
+**新 clone 的仓库、新机器、换了 PHP 版本 —— 都必须先过这一关。**
+环境不齐的时候，后面每个报错都可能是环境问题伪装成的代码问题，排查会跑偏。
+
+### 0.2 是哪个工程？
+
+游戏服（`tsf new`，TCP/WS，端口 9001）还是登录服（`tsf new --login`，HTTP，端口 9101）。
+
+### 0.3 改的是框架还是业务？
+
+- 业务工程：直接改，`tsf build` 验
+- `tsf/` 下的框架代码：要先进 submodule 提交（`cd tsf && git commit && git push`），
+  再回主仓库更新指针（`git add tsf && git commit`）—— **两步，漏一步别人拉不到**
 
 ## 1. 任务 → 去哪看
 
