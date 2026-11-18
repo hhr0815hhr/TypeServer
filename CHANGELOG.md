@@ -2,6 +2,31 @@
 
 ---
 
+## v0.8.1（2026-11-18）
+
+**修 0.8.0 的一个发布事故**：`pkg/script/src/Script.php` 用了 `mixed` 类型声明，
+违反框架自己的 lint 规则。**所有用 0.8.0 的工程跑 `tsf lint` 都会报 2 处错误。**
+
+**原因**：`mixed` 是在 0.8.0 打包前最后一批改动里写的。我跑 `tsf lint` 时在业务工程目录，
+而它扫的是 `tsf/` 目录 —— 路径不对，从来没扫到 `pkg/script`。
+
+**这个问题是一个实际工程（`/data/tserver`，composer 装的 0.8.0）跑 lint 报出来的。**
+自己仓库里跑不出来，因为本地那份早就修了。
+
+### 修复
+
+- `Script::call` / `callWithContext` 返回类型：`mixed` → `array|object|string|int|float|bool|null`
+
+### 一并发布（0.8.0 之后合的）
+
+- `Scheduler::supervise()` —— 受监督服务崩溃后自动重启（maxRestarts / withinMs）
+- `tests/script-test`（16 项）+ `tests/http-test`（8 项），都接进 `tsf verify`
+- `tsf mem` —— 看 tsf 进程的 RSS / 线程 / 运行时长
+- `verifySuites` 删掉指向已删除 `tests/wasm-link/run.sh` 的那行（会让全量验证直接失败）
+- 教程第 12 篇「热更：为什么不用 wasm」
+
+---
+
 ## v0.8.0（2026-11-18）
 
 ### 新增
