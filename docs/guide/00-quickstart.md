@@ -5,31 +5,59 @@
 
 ## 0. 前置条件
 
+**需要 PHP 8.5 ZTS（线程安全版）。** NTS 版能装上，但会在**链接期**报一堆和版本无关的错误
+（phpx 依赖 ZTS 的线程模型）。
+
 | 依赖 | 版本 | 说明 |
 |:--|:--|:--|
-| PHP | **8.5 ZTS** | 必须是 ZTS。NTS 会在链接期报一堆无关错误 |
-| libphpx | 随 typephp | `~/typephp-src/vendor/swoole/phpx` |
-| typephp | 0.9.6 | AOT 编译器，另需两个本地补丁（见 `tpc-patches/`） |
+| PHP | **8.5 ZTS** | 必须是线程安全版 |
+| swoole | 6.2+ | 产物运行时的基础 |
+| typephp（tpc） | 0.9.6 | AOT 编译器，随工具链包分发 |
+| C++ 编译器 | clang 或 g++ | tpc 的后端 |
 | 操作系统 | WSL / Linux | 目前只在 WSL 上验证过 |
+
+**两步装好**（详见仓库根 README）：
+
+```bash
+composer require hhr0815hhr/tsf        # 框架 + tsf 命令
+
+curl -fsSL https://raw.githubusercontent.com/hhr0815hhr/TypeServer/main/scripts/install-toolchain.sh | bash
+export TPC=~/.tsf/toolchain/typephp/bin/tpc.php
+export TSF_PHP=php85
+```
 
 不确定环境齐不齐，先跑自检：
 
 ```bash
-cd /path/to/TypeServer
-bash scripts/ci-preflight.sh
+tsf doctor
 ```
 
 ```
-[ OK ]  php85          8.5.12 (ZTS)
-[ OK ]  tpc            /home/hhr/typephp-src/bin/tpc.php
-[ OK ]  swoole         6.2.5
-[ OK ]  wasm 工具链    clang/wasmtime/wit-bindgen 就绪
-[ OK ]  tp-precompile  libtp_host 构建产物就位
-前置条件齐备
+TSF 环境自检   tsf 0.7.0
+--------------------------------------------------------------
+
+必要项（缺一个 tsf build 就跑不起来）
+  ✓ PHP 8.5.12 (ZTS)           >= 8.5 且线程安全
+  ✓ swoole                     6.2.5
+  ✓ phpx 运行时                ~/.tsf/toolchain/typephp/vendor/swoole/phpx/lib/libphpx.so
+  ✓ tpc 编译器                 ~/.tsf/toolchain/typephp/bin/tpc.php
+  ✓ 编译用 PHP                 php85 → /usr/local/bin/php85
+  ✓ php-config                 8.5.12  /usr/local/php-8.5-zts/bin/php-config
+  ✓ C++ 编译器                 /usr/bin/g++
+
+可选项（只有写 wasm 热更模块才需要，见 09-wasm-or-typephp.md）
+  ✓ wasm32-wasip2-clang        ~/.local/bin/wasm32-wasip2-clang
+  ✓ wasmtime                   ~/.local/bin/wasmtime
+  ! wit-bindgen                缺 —— 生成接口绑定
+  ! tp-precompile              缺 —— 预编译成 .cwasm
+
+必要项全部通过（PHP 8.5.12 ZTS），可以 tsf new / tsf build
 ```
 
-哪一行不是 `[ OK ]`，先按它的提示补齐——**不要在环境不全的情况下往下走**，
+哪一项不是 `✓`，按它的提示补齐 —— **不要在环境不全的情况下往下走**，
 否则后面每个报错都可能是环境问题伪装成的代码问题。
+
+> CI 里用 `bash scripts/ci-preflight.sh`：检查更严格（含 wasm 工具链和 `tpc-patches/` 的补丁状态）。
 
 ## 1. 生成工程
 
