@@ -67,6 +67,16 @@ TSF_BIN=./vendor/bin/tsf bash scripts/preflight.sh .
 **新 clone 的仓库、新机器、换了 PHP 版本 —— 都必须先过这一关。**
 环境不齐的时候，后面每个报错都可能是环境问题伪装成的代码问题，排查会跑偏。
 
+**顺手记下版本号。** 报错时带上这两个：
+
+```bash
+./vendor/bin/tsf --version     # TSF 0.7.0
+tpc --version                  # TypePHP Compiler (AOT) v0.9.6
+```
+
+`references/error-codes.md` 里每条都标了「实测（tpc x.y.z）」——**版本不同结论可能不一样**。
+例如 `Cannot re-assign` 在 0.9.6 已经不报了，更早的版本会报。
+
 ### 0.2 是哪个工程？
 
 游戏服（`tsf new`，TCP/WS，端口 9001）还是登录服（`tsf new --login`，HTTP，端口 9101）。

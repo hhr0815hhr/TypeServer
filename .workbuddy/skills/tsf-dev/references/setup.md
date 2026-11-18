@@ -73,6 +73,16 @@ export TSF_PHP=php85
 
 **不是全绿就别往下走** —— 后面每个报错都可能是环境问题伪装成的代码问题。
 
+顺便记下两个版本：
+
+```bash
+./vendor/bin/tsf --version    # TSF 0.7.0
+tpc --version                 # TypePHP Compiler (AOT) v0.9.6
+```
+
+出问题把这两个带上。`error-codes.md` 里的每条结论都标了在哪个版本实测 ——
+版本不同可能不适用。
+
 ## 三、常见卡点
 
 | 现象 | 原因 | 修法 |
