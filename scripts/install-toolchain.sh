@@ -36,7 +36,7 @@ case "$ARCH" in
 esac
 
 DIR="${TSF_TOOLCHAIN_DIR:-$HOME/.tsf/toolchain}"
-VER="${TSF_TOOLCHAIN_VERSION:-dev}"
+VER="${TSF_TOOLCHAIN_VERSION:-v0.7.0}"
 
 if [ -n "${TSF_TOOLCHAIN_URL:-}" ]; then
     URL="$TSF_TOOLCHAIN_URL"
