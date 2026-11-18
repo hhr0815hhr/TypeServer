@@ -1,6 +1,6 @@
 # ext/interp —— PHP 脚本热更探针（SPIKE）
 
-> **状态：可行性已验证**（五项能力全通），未生产化。
+> **状态：可行性已验证 + 异常隔离已做**，未做热更编排和脚本沙箱。
 > 完整记录见 `docs/research/hot-reload.md`。
 
 ## 它解决什么
@@ -20,7 +20,8 @@ AOT 二进制（C++ 对象、帧循环）
 | 函数 | 状态 | 说明 |
 |:--|:--:|:--|
 | `interp_require_file(string $path)` | ✅ | `zend_execute_scripts`，脚本里的函数会被正确注册 |
-| `interp_call_obj(string $fn, object $obj)` | ✅ | 调脚本函数并传对象，**脚本改的就是宿主那个对象** |
+| `interp_call_obj(string $fn, object $obj)` | ✅ | 按函数名调，传对象（脚本用 `function` 定义时） |
+| `interp_invoke($fn, object $obj)` | ✅ | 调运行期拿到的闭包。**异常隔离**：throw 返回 `{ok:false,class,message}`，Fatal 返回 `{ok:false,fatal}` |
 | `interp_eval_string(string $code)` | ❌ | `zend_eval_stringl` 在 ZTS 下 `CG()` 上下文错乱，报 `expecting ";"` |
 | `interp_probe()` | ✅ | 诊断：编译器指针是否就绪、sapi 名、EG 是否初始化 |
 
@@ -78,6 +79,32 @@ after   gold=700  name=alice          ← 脚本改了宿主对象
 ```
 
 **热更**：把脚本的 `+100` 改成 `+200`，同一个二进制重跑，`after` 从 600 变 700。
+
+## 异常隔离（0.5.0）
+
+脚本抛异常或触发 Fatal，进程都不会死：
+
+```
+$ 脚本 throw new RuntimeException("...")
+return: array ('ok' => false, 'class' => 'RuntimeException', 'message' => '...')
+退出码: 0
+
+$ 脚本 trigger_error('...', E_USER_ERROR)
+PHP Fatal error: ...
+return: array ('ok' => false, 'fatal' => 'script caused a bailout (fatal error / timeout / oom)')
+退出码: 0
+```
+
+实现是 `interp_invoke` 里用 `zend_try { ... } zend_catch { ... } zend_end_try();`
+包住 `call_user_function`，区分两种错误：
+
+| 类型 | 机制 | 可恢复 | 返回 |
+|:--|:--|:--:|:--|
+| `throw` | `EG(exception)` | ✅ | `{ok:false, class, message}` |
+| Fatal / 超时 / OOM | `zend_bailout` → `zend_catch` | ❌ | `{ok:false, fatal}` |
+
+**bailout 之后进程状态不可信**，返回 `fatal` 是让上层决定（重启/摘流量/告警），
+不代表还能继续安全运行。
 
 ## 已知限制
 

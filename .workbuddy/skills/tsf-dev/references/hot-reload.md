@@ -53,6 +53,22 @@ return [
 | 5 | `call_user_function` 第三个参数要 `zval*` | 传 `zend_string*` 会 `*** stack smashing detected ***` 直接崩 |
 | 6 | `Context` 的可写必须是可读子集 | 否则能写但读不回来，逻辑很怪。构造时校验 |
 
+## 脚本出错不会崩
+
+`interp_invoke` 已做异常隔离（ext/interp 0.5.0）：
+
+```php
+$r = $s->callWithContext("main", $ctx);
+
+if (is_array($r) && isset($r["ok"]) && $r["ok"] === false) {
+    // throw  -> $r["class"] / $r["message"]
+    // Fatal  -> $r["fatal"]（进程状态可能已不可信，要当成"这一局坏了"）
+}
+```
+
+**Fatal 之后不要当普通业务错误继续跑** —— 拿 `fatal` 就要重启或摘流量，
+这正是监督树要解决的问题。
+
 ## 扩展怎么装
 
 **不用**装到系统目录（会要 sudo）：

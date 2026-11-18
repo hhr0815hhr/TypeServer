@@ -10,9 +10,10 @@
 
 ## P1 可用性（上线前必须）
 
-- [ ] **脚本异常不带崩服务**
-      现在脚本抛未捕获异常 = 进程死。`pkg/script` 要捕获并转成业务错误。
-      估算 2 天。
+- [x] **脚本异常不带崩服务** —— 已完成（ext/interp 0.5.0）
+      `interp_invoke` 用 `zend_try` 包住调用：throw 返回 `{ok:false,class,message}`，
+      Fatal 返回 `{ok:false,fatal}`，进程退出码 0。两种都实测过。
+      **但 bailout 之后状态不可信** —— 所以监督树（下一项）仍然是必须的。
 
 - [ ] **监督树（Service 崩溃隔离）**
       一个 `Service` 抛异常整个进程挂。参考 OTP：
