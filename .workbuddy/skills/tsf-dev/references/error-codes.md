@@ -320,6 +320,44 @@ PHP Fatal error: Allowed memory size of 536870912 bytes exhausted
 
 ---
 
+## 四·五、脚本热更（ext/interp）特有的坑
+
+### `*** stack smashing detected ***` 直接崩进程
+
+**症状**：调 `interp_call_obj` 时进程直接终止，没有任何 PHP 层报错。
+
+**原因**：`call_user_function` 的第三个参数（函数名）必须是 `zval*`，
+传 `zend_string*` 会因为类型不匹配破坏栈。
+
+**修法**：`ZVAL_STR_COPY(&fname_zv, fn)` 包一层。
+
+### `syntax error, unexpected token "return", expecting ";"`（在扩展里）
+
+**症状**：`zend_eval_stringl("return 6*7;")` 报这个，但原生 `eval("return 6*7;")` 是 `int(42)`。
+
+**原因**：ZTS 下 `CG()` 走 TSRM 的 TLS 槽，扩展里读到的线程上下文和 `libphp.so`
+内部用的不是同一个，`compiler_options` 读到错误值。
+
+**修法**：**放弃 `zend_eval_stringl`**，改用 `zend_compile_file` + `zend_execute_scripts`。
+
+### `'GLOBALS' was not declared in this scope`
+
+**症状**：热更脚本里有 `$GLOBALS['x'] = 1;`，AOT 编译阶段报这个。
+
+**原因**：AOT 没有运行时的全局符号表。
+
+**修法**：脚本里别用 `$GLOBALS`，需要跨调用共享就用闭包捕获或者返回值。
+
+### `Cannot redeclare function`
+
+**症状**：热更时第二次加载脚本报这个。
+
+**原因**：PHP 不允许重复定义同名函数，AOT 的 `zend_execute_scripts` 也一样。
+
+**修法**：脚本改成 `return function () {...};`，每次 require 得到新闭包。
+
+---
+
 ## 五、看起来像代码问题、其实不是
 
 | 现象 | 真实原因 |

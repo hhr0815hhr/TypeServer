@@ -33,6 +33,7 @@ description: |
 | `references/error-codes.md` | **编译 / 链接 / 运行期 / 环境的错误对照表**，按报错关键词搜（最常用） |
 | `references/add-feature.md` | 加接口 / 加玩法 / 加 pkg / 加定时任务 —— 四类场景的三步流程 + 验证命令 |
 | `references/perf-baseline.md` | 性能基线 + "假性能问题"清单 + 怎么测才可信 |
+| `references/hot-reload.md` | 脚本热更的用法与坑（`pkg/script` + `ext/interp`） |
 | `templates/handler.php` | HTTP handler 模板（参数校验 + 业务码约定） |
 | `templates/pkg.json` | 新建 pkg 的清单模板 |
 | `scripts/preflight.sh` | 一键自检：doctor + lint + 常见错误扫描 + build |
@@ -70,7 +71,7 @@ TSF_BIN=./vendor/bin/tsf bash scripts/preflight.sh .
 **顺手记下版本号。** 报错时带上这两个：
 
 ```bash
-./vendor/bin/tsf --version     # TSF 0.7.0
+./vendor/bin/tsf --version     # TSF 0.8.0
 tpc --version                  # TypePHP Compiler (AOT) v0.9.6
 ```
 
@@ -91,10 +92,11 @@ tpc --version                  # TypePHP Compiler (AOT) v0.9.6
 
 | 任务 | 主要参考 |
 |:--|:--|
-| 加 HTTP 接口、路由、中间件 | `docs/guide/12-http-api.md` |
-| 登录服怎么和网关对接（token） | `docs/guide/11-login-service.md` |
+| 加 HTTP 接口、路由、中间件 | `docs/guide/11-http-api.md` |
+| 登录服怎么和网关对接（token） | `docs/guide/10-login-service.md` |
 | 加玩法（房间 / 帧循环 / 状态机 / AOI） | `docs/guide/03-gameplay.md` |
 | 用 db / redis / mail / schedule | `docs/guide/04-data.md` + `tsf/pkg/<name>/pkg.json` |
+| **脚本热更（替 Lua）** | `docs/research/hot-reload.md` + `tsf/pkg/script/` + `ext/interp/README.md` |
 | 分布式（RPC / 服务发现 / 分片 / 跨服 / 熔断） | `docs/guide/05-distributed.md` |
 
 | **编译报错 / 运行期异常 / 静默失败** | **`references/error-codes.md`** |
