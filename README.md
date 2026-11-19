@@ -70,27 +70,34 @@ php85 client.php 9001          # 3) 另开终端验证
 
 ---
 
-## 验证：一条命令跑完 197 项断言
+## 验证：一条命令跑完 315 项断言
 
 ```bash
 bash scripts/ci-preflight.sh   # 先看环境（缺什么、缺在哪、怎么补）
-tsf verify                     # 9 个套件
+tsf verify                     # 11 个套件
 ```
 
 ```
 结果    套件             内容                                耗时
-PASS  semantics      AOT 语言语义差分（45 用例）                  16.5s
-PASS  swoole         Swoole 契约（6 项）
-PASS  settle         金币账本（91 项）
-PASS  settle-crash   账本崩溃重放（14 项）
-PASS  fd             fd/内存守卫（10 项）
-PASS  cluster        集群/房间归属（11 项）
-PASS  drain          进程 drain（8 项）
-PASS  rejoin         断线重连（6 项）
+PASS  semantics      AOT 语言语义差分（45 用例）                  18.2s
+PASS  swoole         Swoole 契约（6 项）                       9.3s
+PASS  settle         金币账本（91 项）                          18.3s
+PASS  settle-crash   账本崩溃重放（14 项）                       48.9s
+PASS  fd             fd/内存守卫（10 项）                       0.0s
+PASS  room           房间/成员/共享宿主（100 项）                  17.1s
+PASS  cluster        集群/房间归属（11 项）                      14.5s
+PASS  drain          进程 drain（8 项）                        13.2s
+PASS  rejoin         断线重连（6 项）                            8.7s
+PASS  script         脚本热更（16 项）                          14.8s
+PASS  http           HTTP 接口（8 项）                         16.4s
 ```
 
 `tsf verify --list` 看清单，`tsf verify <id>` 只跑一个。缺工具链的套件会标 `SKIP`
 而不是 FAIL——环境问题不该把整套判成失败。
+
+> `room` 是 2026-11-19 补进门的：它的 `project.yml` 指向一个不存在的源码路径
+> （`bench/room-test/main.php`），既跑不起来也没进 verify，于是 `Room` 重构后
+> 它烂了半年没人发现。现在有 `run.sh`、也进了 verify。
 
 ---
 

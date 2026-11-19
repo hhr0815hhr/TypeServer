@@ -4,6 +4,7 @@ namespace Duel;
 
 use TSF\Entity\EntitySet;
 use TSF\Room\Room;
+use TSF\Room\ThreeStage;
 
 /**
  * 1v1 对战规则，架在通用 `Room` 之上。
@@ -68,7 +69,10 @@ final class DuelRoom
     {
         // 允许外部传入已恢复的 Room：崩溃恢复时不能"新建一个空房间再灌数据"，
         // 那会丢掉 Room 内部的成员顺序（哈希就不稳定了）
-        $this->room = $room !== null ? $room : new Room($roomId, 2);
+        //
+        // 新建时必须注入状态机：`Room` 自 v0.7 起不认识任何状态，
+        // 不注入的话 `state()` 恒为 0、`ready()` 永远开不了局。
+        $this->room = $room !== null ? $room : ThreeStage::room($roomId, 2);
         $this->ents = new EntitySet();
     }
 
@@ -98,7 +102,23 @@ final class DuelRoom
         if ($this->room->playerCount() !== 2) {
             return false;
         }
-        return $this->room->start();
+        return $this->fireRoom("start");
+    }
+
+    /**
+     * 触发房间状态机的约定事件。
+     *
+     * 状态机由 `Room` 注入（新建时是 `ThreeStage`，恢复时从快照带过来），
+     * 但 `Room` 允许它为 null——那时房间只有一颗裸状态值，没有可触发的事件。
+     * 所以这里不假定它一定在，返回 false 让调用方按"没转移"处理。
+     */
+    private function fireRoom(string $event): bool
+    {
+        $fsm = $this->room->fsm();
+        if ($fsm === null) {
+            return false;
+        }
+        return $fsm->fire($event);
     }
 
     public function isSettled(): bool
@@ -197,7 +217,7 @@ final class DuelRoom
 
         if ($hp <= 0) {
             $this->winner = $uid;
-            $this->room->finish();
+            $this->fireRoom("finish");
         }
         return true;
     }
@@ -235,7 +255,7 @@ final class DuelRoom
         }
         $foe = $this->foeOf($uid);
         $this->winner = $foe > 0 ? $foe : -1;
-        $this->room->finish();
+        $this->fireRoom("finish");
         return true;
     }
 
@@ -255,7 +275,7 @@ final class DuelRoom
             }
         }
         $this->winner = $tie ? -1 : $bestUid;
-        $this->room->finish();
+        $this->fireRoom("finish");
     }
 
     /**
@@ -324,7 +344,7 @@ final class DuelRoom
     public static function fromArray(array $d): ?DuelRoom
     {
         $roomData = isset($d["room"]) && is_array($d["room"]) ? $d["room"] : [];
-        $room = Room::fromArray($roomData);
+        $room = Room::fromArray($roomData, ThreeStage::fsm());
         if ($room === null) {
             return null;
         }

@@ -6,7 +6,24 @@ use TSF\Room\Room;
 use TSF\Room\RoomHost;
 use TSF\Room\RoomManager;
 use TSF\Room\RoomService;
+use TSF\Room\ThreeStage;
 use TSF\Service\Scheduler;
+
+/**
+ * pkg/room 回归。
+ *
+ * ## 与 v0.7 之前版本的差异（写在这里，免得下次又照旧 API 写一遍）
+ *
+ * `Room` 自 `b0f6b5f` 起**不认识任何状态语义**：状态机由业务注入（`Machine`），
+ * `Room` 只保存一颗不解释含义的状态值。因此：
+ *
+ *   - `WAITING/PLAYING/SETTLED/CLOSED` 四个常量搬到 `ThreeStage`，不在 `Room` 上；
+ *   - `Room::start()/finish()` 没有替代品，业务自己 `fsm()->fire("start")`；
+ *   - `Room::close()` 只置标志 + 触发 `close` 边，**不清成员**；
+ *   - "结算后拒收" 不再是 `Room` 的行为——它不判断状态，业务要自己看 `state()`。
+ *
+ * 这份用例就是按上面四条写的；旧断言里凡是被改掉的，都在原处标了原因。
+ */
 
 final class T
 {
@@ -38,6 +55,21 @@ function sendTo(Scheduler $s, int $addr, int $msgId, string $data = ""): void
     $s->tick();
 }
 
+/**
+ * 触发房间状态机的约定事件。
+ *
+ * 测试里刻意保留这层小包装：`Room` 没有 start/finish，而每个用例都要写
+ * `$room->fsm()` 判空——包一次比每处判一次更容易看出"这里在推进状态"。
+ */
+function fire(Room $room, string $event): bool
+{
+    $fsm = $room->fsm();
+    if ($fsm === null) {
+        return false;
+    }
+    return $fsm->fire($event);
+}
+
 function caseLifecycle(): void
 {
     echo "[1] 房间生命周期与状态机" . PHP_EOL;
@@ -54,7 +86,8 @@ function caseLifecycle(): void
     $room = $svc->room();
 
     T::ok($mgr->count() === 1, "管理器里有 1 个房间");
-    T::ok($room->state() === Room::WAITING, "初始为 WAITING");
+    T::ok($room->state() === ThreeStage::WAITING, "初始为 WAITING");
+    T::ok($room->fsm() !== null, "RoomService 默认注入三段式状态机");
     T::ok($s->timers()->size() === 1, "帧定时器已注册", "timers=" . $s->timers()->size());
 
     sendTo($s, $addr, RoomService::MSG_JOIN, "1");
@@ -66,12 +99,12 @@ function caseLifecycle(): void
     T::ok($room->playerCount() === 2, "第 3 人被拒（满员）", "count=" . $room->playerCount());
 
     sendTo($s, $addr, RoomService::MSG_START);
-    T::ok($room->state() === Room::PLAYING, "开始后为 PLAYING");
+    T::ok($room->state() === ThreeStage::PLAYING, "开始后为 PLAYING");
     sendTo($s, $addr, RoomService::MSG_START);
-    T::ok($room->state() === Room::PLAYING, "重复 start 被拒");
+    T::ok($room->state() === ThreeStage::PLAYING, "重复 start 被拒");
 
     sendTo($s, $addr, RoomService::MSG_FINISH);
-    T::ok($room->state() === Room::SETTLED, "结束后为 SETTLED");
+    T::ok($room->state() === ThreeStage::SETTLED, "结束后为 SETTLED");
 
     // 全员离开 → 自动回收
     sendTo($s, $addr, RoomService::MSG_LEAVE, "1");
@@ -97,19 +130,23 @@ function caseClosedRejects(): void
     sendTo($s, $addr, RoomService::MSG_JOIN, "1");
     sendTo($s, $addr, RoomService::MSG_CLOSE);
 
-    T::ok($room->state() === Room::CLOSED, "状态为 CLOSED");
+    T::ok($room->state() === ThreeStage::CLOSED, "状态为 CLOSED");
     T::ok(!$room->add(9), "CLOSED 后 add 返回 false");
-    T::ok(!$room->start(), "CLOSED 后 start 返回 false");
-    T::ok($room->playerCount() === 0, "关闭时清空玩家");
+    T::ok(!fire($room, "start"), "CLOSED 后 fire(start) 返回 false");
+    // 旧用例断言的是"关闭时清空玩家"。现在 close() 只置标志——
+    // 结算与快照还要按 uid 遍历，清空会把数据一起丢掉。
+    T::ok($room->playerCount() === 1, "close 不清成员（只置标志）", "count=" . $room->playerCount());
     T::ok($room->tick(50) === false, "CLOSED 后 tick 不推进");
 }
 
-/** 成员身份：观战不占席位、席位回收、结算后拒收 */
+/** 成员身份：观战不占席位、席位回收、状态语义归业务 */
 function caseMemberRoles(): void
 {
     echo PHP_EOL . "[2.1] 成员身份与席位" . PHP_EOL;
 
-    $room = new Room(1, 4);
+    // 成员表相关用例不需要状态机也能跑，但统一用三段式，
+    // 免得"有的房间带 fsm、有的不带"把后面的断言搅乱
+    $room = ThreeStage::room(1, 4);
     T::eq($room->maxPlayers(), 4, "席位上限 4");
 
     for ($i = 1; $i <= 4; $i++) {
@@ -147,30 +184,44 @@ function caseMemberRoles(): void
         T::eq($m6->seat, 1, "补到 2 号空出的 1 号位");
     }
 
-    // 身份过滤
-    T::eq(count($room->seated()), 4, "占席位 4 人");
+    // 身份过滤。`seated()` 在 MemberTable 上，Room 只透出 uids()——
+    // 需要"按席位排"这类成员表语义，就显式走 members()
+    T::eq(count($room->members()->seated()), 4, "占席位 4 人");
     T::eq(count($room->members()->spectators()), 1, "观战 1 人");
     T::eq(count($room->uids()), 5, "全部 5 人（含观战）");
 
     // 席位顺序
-    $seated = $room->seated();
+    $seated = $room->members()->seated();
     T::eq($seated[0], 1, "席位 0 是 1 号");
     T::eq($seated[1], 6, "席位 1 是补位的 6 号");
 
-    // 结算后拒收（观战也拒）
-    $room->start();
-    $room->finish();
-    T::eq($room->state(), Room::SETTLED, "已结算");
-    T::ok(!$room->add(7), "SETTLED 后拒收玩家");
-    T::ok($room->addAs(101, Member::SPECTATOR) === null, "SETTLED 后连观战也拒");
+    // 结算后 Room **不**自动拒人：它不解释状态（见 Room 类注释）。
+    // 旧用例断言"SETTLED 后拒收"，那是状态机还焊在 Room 里时的行为。
+    // 业务要拒绝，得自己看 state()——这里把这条契约固定下来。
+    fire($room, "start");
+    fire($room, "finish");
+    T::eq($room->state(), ThreeStage::SETTLED, "已结算");
 
-    // close 清空成员
-    T::ok($room->close(), "close 成功");
-    T::eq($room->memberCount(), 0, "close 后成员清空");
-    T::eq($room->state(), Room::CLOSED, "状态 CLOSED");
+    // "状态不参与准入"必须用**空房**验：当前这间 4 个席位已坐满，
+    // add 失败会来自满员而不是状态，断言会假绿。
+    $room3 = ThreeStage::room(3, 4);
+    fire($room3, "start");
+    fire($room3, "finish");
+    T::eq($room3->state(), ThreeStage::SETTLED, "新房间结算");
+    T::ok($room3->add(7), "SETTLED 后 add 仍成功（Room 不解释状态）");
+    T::ok($room3->addAs(101, Member::SPECTATOR) !== null, "SETTLED 后观战也收");
+
+    // close()：置标志 + 走 close 边，成员保留
+    $before = $room->memberCount();
+    $room->close();
+    T::ok($room->isClosed(), "close 后 isClosed 为真");
+    T::eq($room->memberCount(), $before, "close 不清成员");
+    T::ok(!$room->add(8), "关闭后不再收人");
+    T::eq($room->state(), ThreeStage::CLOSED, "状态机走到 CLOSED");
+    T::ok(!fire($room, "start"), "CLOSED 后无法再开战");
 
     // 非法身份
-    $room2 = new Room(2, 2);
+    $room2 = ThreeStage::room(2, 2);
     T::ok($room2->addAs(1, 99) === null, "未知身份被拒");
     T::ok($room2->addAs(0, Member::PLAYER) === null, "uid=0 被拒");
     T::ok($room2->addAs(-5, Member::PLAYER) === null, "负 uid 被拒");
@@ -267,7 +318,7 @@ function caseNoLeak(): void
     $n = 100;
     for ($i = 0; $i < $n; $i++) {
         $rid = $mgr->create(4);
-    $addr = $mgr->addrOf($rid);
+        $addr = $mgr->addrOf($rid);
         sendTo($s, $addr, RoomService::MSG_JOIN, "1");
         sendTo($s, $addr, RoomService::MSG_LEAVE, "1");
     }
@@ -377,7 +428,7 @@ function caseShared(): void
         return;
     }
     T::ok($room->playerCount() === 1, "玩家加入成功", "players=" . $room->playerCount());
-    T::ok($room->state() === Room::PLAYING, "已开战", "state=" . $room->stateName());
+    T::ok($room->state() === ThreeStage::PLAYING, "已开战", "state=" . $room->stateName());
 
     // 宿主统一驱动：投一帧，房间里的实体应该推进
     usleep(60000);

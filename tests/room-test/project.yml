@@ -10,4 +10,4 @@ sources:
   - /data/TypeServer/tsf/pkg/room/src
   - /data/TypeServer/tsf/pkg/fsm/src
   - /data/TypeServer/tsf/pkg/frameloop/src
-  - /data/TypeServer/bench/room-test/main.php
+  - /data/TypeServer/tests/room-test/main.php

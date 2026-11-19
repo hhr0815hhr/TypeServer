@@ -93,8 +93,10 @@ final class DuelService extends Service
         // 这个回调不会执行，快照会留下来，正是重启恢复需要的
         $this->dropSnapshot();
 
-        // 先取 uid 列表再 close()：close 会清空成员表，之后再遍历就一个都拿不到，
-        // uid → 地址的转发表会永远留着，那人从此匹配不上（也是个泄漏）。
+        // 先取 uid 列表再 close()。`Room::close()` 现在**不清成员表**（只置标志并走
+        // close 边），所以顺序其实无所谓；但保持"先取快照再关"仍然是更稳的写法——
+        // 它不依赖 close 的实现细节，将来真要清成员也不会漏掉这张转发表。
+        // （漏掉的后果：uid → 地址的转发项永远留着，那人从此匹配不上。）
         $uids = $this->duel->room()->uids();
         $this->duel->room()->close();
         if ($this->manager === null) {
