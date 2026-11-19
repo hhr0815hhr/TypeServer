@@ -77,6 +77,47 @@ $half = intdiv($id, 2);
 **规律**：**任何要求具体类型的表达式，都不要直接喂属性访问**。`switch` / `intdiv` /
 数学运算 / 字符串函数都可能踩。
 
+**同一规律的运行期版本**：`filemtime($this->path)` 这类"内置函数直接吃属性"，
+编译期**不报错**，跑到那一行才炸：
+
+```
+filemtime(): Argument #1 ($filename) not passed
+```
+
+看起来像"参数没传"，其实是编译成了不传参的调用。先 `$path = $this->path;` 即可。
+`tsf lint` 会以「提示」级别扫出这种写法（不阻塞，因为框架自身也有若干处）。
+
+---
+
+### `error: 'xxx' is not captured`（闭包漏 `use`）
+
+**症状**：PHP 源码看着没问题，解释执行顶多一条 `Undefined variable` 的 warning，
+但 AOT 编译失败，报错是 **C++ lambda 的捕获问题**：
+
+```
+main.cc:192:52: error: 'server' is not captured
+note: the lambda has no capture-default
+```
+
+**真实原因**：PHP 闭包**必须显式 `use`**，不会自动捕获外层变量。
+解释执行时它只是 warning，AOT 直接当编译错误——**同一份代码在两种运行方式下表现完全不同**。
+
+**典型写法**：
+
+```php
+$addr = Scheduler::instance()->spawnOf(function () use ($gw): Service {
+    return new Output($gw, function (string $data): void {
+        bridge($server, $data);      // ✗ 内层闭包漏了 use ($server)
+    });
+});
+```
+
+**修法**：内层闭包也要 `use ($server)`。嵌套闭包要一层层检查，这是最容易漏的地方。
+
+**定位技巧**：这类错误常被"并行编译吞错误"放大——只看到
+`Compilation failed for: .../main.cc`。0.9.0 起 `tsf build` 会自动用 `-j 1`
+重试一次；手动方式是 `tpc project.yml -j 1 -O2`。
+
 ---
 
 ### `Argument "mw" must be an instance of "Closure", "Foo" given`
