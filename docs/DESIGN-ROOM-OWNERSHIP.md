@@ -1,7 +1,7 @@
 # 房间归属（Room Ownership）设计
 
 > 状态：**设计稿**，未实现。编制 2026-11-16。
-> 前置结论见 `tsf/README.md` §12.9「多 worker 不是一个数字的事」与 `CHANGELOG.md` 的同名小节。
+> 前置结论见 `docs/archive/tsf-readme-full.md` §12.9「多 worker 不是一个数字的事」与 `CHANGELOG.md` 的同名小节。
 
 ---
 

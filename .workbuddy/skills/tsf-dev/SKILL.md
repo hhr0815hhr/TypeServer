@@ -25,8 +25,10 @@ description: |
 
 > **仓库**：`D:\hhr\TypeServer`（主仓库）+ `D:\hhr\TypeServer\tsf`（submodule → `hhr0815hhr/tsf`）
 >
-> **文档在哪**：教程在 `docs/guide/`（12 篇，3094 行）；框架详细说明在 `tsf/README.md`
-> （3689 行，§5 是 AOT 约束，§9~§25 是各组件）。**别重复读，按下面导航过去。**
+> **文档在哪**：教程在 `docs/guide/`（13 篇，3094 行）；框架说明在 `tsf/README.md`
+> （约 520 行：安装 / 核心概念 / AOT 红线 13 条 / 去哪看更多）；
+> 开发全过程的实测数据在 `docs/archive/tsf-readme-full.md`（3856 行，**按需查，别通读**）。
+> **别重复读，按下面导航过去。**
 
 ## 这个 skill 里有什么
 
@@ -141,7 +143,7 @@ tsf verify --list          # 列出有哪些套件
 
 | 别做 | 为什么 |
 |:--|:--|
-| **手写 `project.yml`** | 漏 `-O2` 会让基准全线偏低约一倍（README §5.10 的测量事故） |
+| **手写 `project.yml`** | 漏 `-O2` 会让基准全线偏低约一倍（README AOT 红线第 9 条 的测量事故） |
 | **commit message 里用 `<` `>` `` ` `` `$`** | 被 shell 解析，改用 `git commit -F 文件` |
 | **把 HTTP 塞进游戏服进程** | 短连接和长连接的连接管理会打架（max_conn / 心跳 / fd 复用） |
 | **让登录服直接改游戏内状态** | 游戏服内存有副本，会被下次刷盘覆盖；应该写邮件/订单再由游戏服发放 |

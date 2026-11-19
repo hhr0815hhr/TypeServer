@@ -665,7 +665,7 @@ PASS 只结算了存量那一局
 （SWOOLE_PROCESS 模式下 master 的 SIGTERM 由 Swoole 自己接管）。所以改成文件触发，
 不依赖信号通道；k8s 用 `preStop` hook 执行 `./duel drain`。
 
-**过程中踩到两个静默失败**（都已写进 `tsf/README.md` §5.2.2）：
+**过程中踩到两个静默失败**（都已写进 `docs/archive/tsf-readme-full.md` §5.2.2）：
 
 1. `Swoole\Timer::tick` 的回调**必须声明 `int $timerId`**，空参闭包在 AOT 下一次都不触发、
    且没有任何报错。定位办法：在回调里写探针文件，比看日志快。
@@ -712,7 +712,7 @@ PASS 杀 node 1 后 node 0 不受影响
 ## v0.6.0 — 2026-11-16（首次封版）
 
 首个可交付版本。对应里程碑 M0–M6 全部交付，M7（wasm 热更）未做。
-细节与验收依据见 `docs/FRAMEWORK-TASK.md`；框架原理与实测过程见 `tsf/README.md`。
+细节与验收依据见 `docs/FRAMEWORK-TASK.md`；框架原理与实测过程见 `docs/archive/tsf-readme-full.md`。
 
 ### 交付内容
 

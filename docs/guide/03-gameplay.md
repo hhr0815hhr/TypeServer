@@ -212,4 +212,4 @@ $manager->send($roomId, RoomManager::OP_JOIN, ["uid" => $uid]);
 - **`match`**：`MatchQueue` + `MatchService`，做"凑人开一局"。如果你的匹配规则复杂
   （分段位、分模式、跨服），建议自己写——这个包只覆盖最基础的同分匹配。
 - **`entity`**：`Entity` + `EntitySet`，带属性的实体集合。**它不含 ECS**——
-  `tsf/README.md` §十一 有实测结论：ECS 在这个运行时里得不偿失。
+  `docs/archive/tsf-readme-full.md` §十一 有实测结论：ECS 在这个运行时里得不偿失。

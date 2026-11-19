@@ -299,7 +299,7 @@ $frame = $dec($buf, $consumed);   // $consumed 仍然是 0，不报错
 
 ### 连接数到 8,000 就 OOM，但 RSS 只有 80 MB
 
-> **未独立验证**：来自项目文档（`tsf/README.md` §5.11），未做连接数压测。
+> **未独立验证**：来自项目文档（`tsf/README.md` AOT 红线第 11 条），未做连接数压测。
 > 结论（内核 socket buffer 不受 RSS 统计）可信，具体数字未复测。
 
 **症状**：
@@ -403,11 +403,11 @@ PHP Fatal error: Allowed memory size of 536870912 bytes exhausted
 
 | 现象 | 真实原因 |
 |:--|:--|
-| 基准数据全线偏低约一倍 | 手写 `project.yml` 漏了 `-O2`（见 `tsf/README.md` §5.10） |
+| 基准数据全线偏低约一倍 | 手写 `project.yml` 漏了 `-O2`（见 `tsf/README.md` AOT 红线第 9 条） |
 | `composer require` 报 `could not be found in any version` | 包没发到 Packagist，或者忘了加 `repositories` |
 | 端口连不上 | `tsf new` 默认 **9001**，`demo/idle` 是 **9501**，登录服是 **9101** |
 | `git commit -m "..."` 内容被吃掉 | message 里的 `<` `>` `` ` `` `$` 被 shell 解析，改用 `git commit -F 文件` |
-| 测试只在某个实现上通过 | 测试依赖时序，不是真通过（见 §5.6） |
+| 测试只在某个实现上通过 | 测试依赖时序，不是真通过（见 AOT 红线第 13 条） |
 
 ---
 
