@@ -2,6 +2,13 @@
 
 两个 echo 示例，以及它们为什么不能合并。
 
+> 除这两个之外，目录下还有若干独立工程，各自带 `run.sh`：
+> `battle`（战斗最小闭环：AOI + 帧循环 + 配置热更 + GM，压测报告见仓库根的
+> `VERIFY-BATTLE.md`）、`duel`（1v1 对战 + 快照恢复）、`doudizhu`（回合制 + 状态机）、
+> `idle`、`mmo-mini`、`sharded-world`（分片 + 跨 worker 转发）。
+>
+> 构建方式统一：`php85 ../tsf/bin/tsf build <dir>`（不各自装 composer）。
+
 ## `demo-echo` — 正常示例
 
 最小可用的 echo 服务：登录 → 发消息 → 原样回显。协议分帧、限流、鉴权全走配置。
