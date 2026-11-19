@@ -1,0 +1,9 @@
+{
+    "name": "battle",
+    "packages": [
+        "entity",
+        "aoi",
+        "room",
+        "script"
+    ]
+}
