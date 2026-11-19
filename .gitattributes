@@ -1,0 +1,22 @@
+# 只钉住"必须在 Linux 上被解释执行"的文件，其余一概不动。
+#
+# 为什么不用 `* text=auto eol=lf`：本仓库的 blob 已经是 LF，但 Windows 上
+# core.autocrlf=true 会把它们检出成 CRLF。加全局规则等于让每个文件都"内容变了"，
+# 一次提交 892 个文件的行尾——噪音盖住真实改动，不值得。
+#
+# 真正会因 CRLF 直接失效的只有两类：
+#   1. shell 脚本：`set -u\r` → `set: -: invalid option`（报错完全误导）
+#   2. 无扩展名的入口：shebang 变成 `#!/usr/bin/env php85\r` → ENOENT
+# 而 `tsf verify` 靠这些脚本跑，所以只钉这两类就够了。
+
+*.sh   text eol=lf
+*.bash text eol=lf
+
+# 可执行入口：首行 shebang 对行尾极敏感
+/tsf/bin/tsf text eol=lf
+
+*.png binary
+*.jpg binary
+*.so  binary
+*.a   binary
+*.gz  binary

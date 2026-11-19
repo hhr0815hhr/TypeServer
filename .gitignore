@@ -34,6 +34,8 @@
 !*.txt
 !*.lock
 !.gitignore
+# 行尾规则本身必须入库，否则「Windows 克隆跑不了 verify」会一直复现
+!.gitattributes
 !.gitkeep
 
 # 无扩展名的脚本：只有这一个，漏了就整个 CLI 都没了
