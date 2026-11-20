@@ -5,6 +5,7 @@ use TSF\Handoff\ClusterTransport;
 use TSF\Handoff\Gate;
 use TSF\Handoff\Handoff;
 use TSF\Handoff\Lease;
+use TSF\Handoff\Transport;
 use TSF\Handoff\MemoryLease;
 use TSF\Handoff\Ownership;
 use TSF\Handoff\Rebalancer;
@@ -181,6 +182,19 @@ final class MapOwnership implements Ownership
     public function ownerOf(string $key): int
     {
         return $this->map[$key] ?? 0;
+    }
+}
+
+/** 只记录投递、不真发：用来直接喂协议报文（测老格式兼容） */
+final class CaptureTransport implements Transport
+{
+    /** @var array<int, array{0: int, 1: int, 2: string}> */
+    public array $sent = [];
+
+    public function sendRaw(int $dstAddr, int $srcLocalId, int $msgId, string $payload): bool
+    {
+        $this->sent[] = [$msgId, $dstAddr, $payload];
+        return true;
     }
 }
 
@@ -419,6 +433,73 @@ function runLeaseLost(Cluster $c1, Handoff $h1, Cluster $c2, Handoff $h2): void
     T::ok($g->state("z:1") === Gate::OPEN, "最终闸门回到 OPEN");
 }
 
+
+/**
+ * 版本协商：状态版本比目标新时必须拒绝。
+ *
+ * 这是唯一能在"搬之前"拦住数据分家的位置——搬过去之后才发现读不懂，
+ * 源侧以为自己已经交出去了，目标侧那边是半坏的对象。
+ */
+function runVersionGate(Cluster $c1, Cluster $c2): void
+{
+    echo PHP_EOL . "== 状态版本协商 ==" . PHP_EOL;
+
+    // 源 = v8，目标 = v7：目标读不懂，必须拒绝
+    $src = new Handoff(1, 2, new ClusterTransport($c1), 300, 8);
+    $dst = new Handoff(2, 2, new ClusterTransport($c2), 300, 7);
+    $rec = new Rec();
+    $dst->onInstall(function (string $key, string $state, int $ver) use ($rec): bool {
+        $rec->installs++;
+        return true;
+    });
+    $src->onCommit(function (string $key, int $ver) use ($rec): void {
+        $rec->commits++;
+    });
+    $src->onRollback(function (string $key, int $ver, string $why) use ($rec): void {
+        $rec->rollbacks++;
+        $rec->why = $why;
+    });
+
+    T::ok($src->stateVersion() === 8 && $dst->stateVersion() === 7, "两侧版本不同（8 / 7）");
+    T::ok($src->begin(2, 2, "vg:1", 1, "state-v8", nowMs()), "发起交接");
+    pump($c1, $src, $c2, $dst, 40);
+    T::ok($rec->installs === 0, "目标没有安装（版本太旧）", "n=" . $rec->installs);
+    T::ok($rec->rollbacks === 1, "源侧回滚");
+    T::ok($rec->why === "version", "回滚原因是 version", $rec->why);
+    T::ok($dst->stats()["version_denied"] === 1, "目标侧记到一次版本拒绝");
+
+    // 反向：源 = v7，目标 = v8 → 可以搬（目标能把状态迁上去）
+    $src2 = new Handoff(1, 3, new ClusterTransport($c1), 300, 7);
+    $dst2 = new Handoff(2, 3, new ClusterTransport($c2), 300, 8);
+    $rec2 = new Rec();
+    $dst2->onInstall(function (string $key, string $state, int $ver) use ($rec2): bool {
+        $rec2->installs++;
+        return true;
+    });
+    $src2->onCommit(function (string $key, int $ver) use ($rec2): void {
+        $rec2->commits++;
+    });
+    $src2->begin(2, 3, "vg:2", 1, "state-v7", nowMs());
+    pump($c1, $src2, $c2, $dst2, 40);
+    T::ok($rec2->installs === 1, "旧状态可以搬到新代码上（升级路径）");
+    T::ok($rec2->commits === 1, "源侧确认成功");
+
+    // 老报文兼容：没有 M2 标签的三段载荷必须照旧被接受
+    $cap = new CaptureTransport();
+    $legacyDst = new Handoff(2, 4, $cap, 300, 7);
+    $rec3 = new Rec();
+    $legacyDst->onInstall(function (string $key, string $state, int $ver) use ($rec3): bool {
+        $rec3->installs++;
+        $rec3->lastState = $state;
+        return true;
+    });
+    $payload = "legacy:1" . "\x1f" . "1" . "\x1f" . "OLD-STATE";
+    $legacyDst->handle(new Message(0, Handoff::MSG_MIGRATE, $payload));
+    T::ok($rec3->installs === 1, "老格式载荷仍被接受（滚动升级窗口）");
+    T::ok($rec3->lastState === "OLD-STATE", "老格式的状态字节没被截断", $rec3->lastState);
+    T::ok(count($cap->sent) === 1 && $cap->sent[0][0] === Handoff::MSG_ACCEPT, "回了 ACCEPT");
+}
+
 function main(): void
 {
     echo "== 状态交接（handoff）==" . PHP_EOL;
@@ -555,6 +636,7 @@ function main(): void
     runRebalance($c1, $h1, $c2, $h2, $r2);
     runAbort($c1, $h1, $c2, $h2, $r1, $r2);
     runLeaseLost($c1, $h1, $c2, $h2);
+    runVersionGate($c1, $c2);
 
     $c1->closeAll();
     $c2->closeAll();
