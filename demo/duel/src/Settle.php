@@ -2,6 +2,7 @@
 
 namespace Duel;
 
+use TSF\EventLog\Checkpoint;
 use TSF\EventLog\EventLog;
 use TSF\EventLog\MergedLog;
 use TSF\Room\RoomIds;
@@ -88,6 +89,22 @@ final class Settle
     /** @var int 最近一次写入的事件序号 */
     private int $lastSeq = 0;
 
+    /** 检查点；null 表示不启用（每次都从头重放） */
+    private ?Checkpoint $ckpt = null;
+
+    /** 每折叠多少条压一次检查点 */
+    private int $ckptEvery = 10000;
+
+    private int $sinceCkpt = 0;
+
+    /**
+     * 检查点是否真的可用。
+     *
+     * 多节点（`MergedLog`）时为 false：检查点里的 seq 只是**自己那份日志**的坐标，
+     * 拿它当全局水位会把别的节点还没折的事件跳过去——静默丢数据，比慢一点糟得多。
+     */
+    private bool $ckptActive = false;
+
     /** @var int 日志里出现过的最大房间号（进程重启后用来避开已经结过账的号） */
     private int $maxRoom = 0;
 
@@ -97,12 +114,28 @@ final class Settle
     /**
      * @param array<EventLog> $readers 读侧日志（多节点时传全部节点的文件）。空 = 只读自己那份
      */
-    public function __construct(EventLog $log, ?Wallet $wallet = null, array $readers = [])
-    {
+    public function __construct(
+        EventLog $log,
+        ?Wallet $wallet = null,
+        array $readers = [],
+        ?Checkpoint $ckpt = null,
+        int $ckptEvery = 10000
+    ) {
         $this->log = $log;
         $this->readers = $readers === [] ? [$log] : $readers;
         $this->wallet = $wallet !== null ? $wallet : new Wallet();
-        $this->rebuildFrom();
+        $this->ckpt = $ckpt;
+        $this->ckptEvery = $ckptEvery > 0 ? $ckptEvery : 10000;
+        $this->ckptActive = $ckpt !== null && count($this->readers) === 1;
+
+        if ($this->ckptActive && $ckpt !== null && $ckpt->load()) {
+            // 有检查点：先恢复折叠结果，再只重放它之后的尾巴。
+            // 注意不能 reset —— state 本身就是 reset 之后的起点
+            $this->restoreState($ckpt->state());
+            $this->rebuildFrom($ckpt->seq() + 1, false);
+        } else {
+            $this->rebuildFrom(1, true);
+        }
     }
 
     /**
@@ -122,19 +155,114 @@ final class Settle
      * 从日志重建余额与去重表。构造时自动调一次；这里公开是为了让测试能反复验证
      * "重放是幂等的"——连调两次余额不该翻倍。
      */
-    public function rebuildFrom(int $fromSeq = 1): int
+    public function rebuildFrom(int $fromSeq = 1, bool $reset = true): int
     {
-        $this->wallet->reset();
-        $this->seen = [];
-        $this->replayed = 0;
-        $this->settled = 0;
-        $this->debited = 0;
-        $this->maxRoom = 0;
-        $this->rooms = [];
+        if ($reset) {
+            $this->wallet->reset();
+            $this->seen = [];
+            $this->replayed = 0;
+            $this->settled = 0;
+            $this->debited = 0;
+            $this->maxRoom = 0;
+            $this->rooms = [];
+        }
         foreach ($this->readEvents($fromSeq) as $ev) {
             $this->apply($ev);
         }
         return $this->replayed;
+    }
+
+    /**
+     * 把当前折叠结果摊平成检查点能存的形状（`Checkpoint` 只收标量）。
+     *
+     * 前缀是约定不是装饰：`w:` 余额、`s:` 已折叠的业务 id、`r:` 出现过的房间号。
+     * 塞进同一个扁平 map 是为了让检查点只有**一次** rename —— 分多段写就要保证
+     * 多段同时生效，而原子性正是检查点最要紧的东西。
+     *
+     * @return array<string, int|string|float|bool>
+     */
+    public function exportState(): array
+    {
+        $out = [];
+        $out["m"] = $this->maxRoom;
+        $out["n"] = $this->settled;
+        foreach ($this->wallet->all() as $uid => $bal) {
+            $out["w:" . $uid] = $bal;
+        }
+        foreach ($this->seen as $id => $yes) {
+            $out["s:" . $id] = 1;
+        }
+        foreach ($this->rooms as $room => $yes) {
+            $out["r:" . $room] = 1;
+        }
+        return $out;
+    }
+
+    /** @param array<string, int|string|float|bool> $state */
+    private function restoreState(array $state): void
+    {
+        $this->wallet->reset();
+        $this->seen = [];
+        $this->rooms = [];
+        $this->maxRoom = 0;
+        $this->settled = 0;
+        $this->replayed = 0;
+        $this->debited = 0;
+
+        foreach ($state as $k => $v) {
+            $key = (string) $k;
+            if ($key === "m") {
+                $this->maxRoom = is_int($v) ? $v : 0;
+                continue;
+            }
+            if ($key === "n") {
+                $this->settled = is_int($v) ? $v : 0;
+                continue;
+            }
+            if (strpos($key, "w:") === 0) {
+                $uid = (int) substr($key, 2);
+                $bal = is_int($v) ? $v : 0;
+                if ($uid > 0 && $bal !== 0) {
+                    $this->wallet->credit($uid, $bal);
+                }
+                continue;
+            }
+            if (strpos($key, "s:") === 0) {
+                $this->seen[substr($key, 2)] = true;
+                continue;
+            }
+            if (strpos($key, "r:") === 0) {
+                $this->rooms[(int) substr($key, 2)] = true;
+            }
+        }
+    }
+
+    /**
+     * 够数就压一次检查点，顺手把老日志截掉。
+     *
+     * 截断的风险全在顺序上，而顺序由 `Checkpoint::saveAndPrune()` 固化（先写后截）。
+     * 这里只管"什么时候压"：每 `ckptEvery` 条一次。压太勤会把 `seen` 表反复全量
+     * 序列化变成写放大，压太懒则重启要重放很多——一万条是个折中。
+     */
+    private function maybeCheckpoint(): void
+    {
+        if (!$this->ckptActive || $this->ckpt === null) {
+            return;
+        }
+        $this->sinceCkpt++;
+        if ($this->sinceCkpt < $this->ckptEvery) {
+            return;
+        }
+        $this->sinceCkpt = 0;
+        $seq = $this->log->lastSeq();
+        if ($seq <= 0) {
+            return;
+        }
+        $kept = $this->ckpt->saveAndPrune($this->log, $seq, $this->exportState());
+        if ($kept < 0) {
+            // 检查点没写成就绝不截断（saveAndPrune 内部已保证），下次再试
+            Logger::warn("settle: 检查点写入失败，跳过截断", ["seq" => $seq]);
+        }
     }
 
     /** @param array{s: int, id: string, k: string, t: int, d: array} $ev */
@@ -229,6 +357,7 @@ final class Settle
         $this->rooms[$roomId] = true;
         $this->wallet->credit($winner, $amount);
         $this->lastSeq = $seq;
+        $this->maybeCheckpoint();
         return true;
     }
 
@@ -271,6 +400,7 @@ final class Settle
                 "ref" => $ref,
             ]);
         }
+        $this->maybeCheckpoint();
         return true;
     }
 
@@ -296,6 +426,7 @@ final class Settle
         $this->seen[$id] = true;
         $this->lastSeq = $seq;
         $this->wallet->credit($uid, $amount);
+        $this->maybeCheckpoint();
         return true;
     }
 

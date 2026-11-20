@@ -42,6 +42,9 @@ function fresh(string $name): string
     if (is_file($p . ".ckpt")) {
         unlink($p . ".ckpt");
     }
+    if (is_file($p . ".seq")) {
+        unlink($p . ".seq");
+    }
     return $p;
 }
 
@@ -149,6 +152,23 @@ function main(): void
     $cpo2 = new Checkpoint($p . ".ckpt");
     $cpo2->load();
     T::ok($cpo2->seq() === 9 && ($cpo2->state()["v"] ?? 0) === 2, "新检查点覆盖旧的");
+
+    // 9) 截空之后序号不能回退：否则检查点水位失效，重启会丢数据
+    $p = fresh("water.log");
+    $lg = new EventLog($p);
+    seed($lg, 30, 1);
+    $cw = new Checkpoint($p . ".ckpt");
+    $cw->saveAndPrune($lg, 30, ["x" => 1]);
+    T::ok(count($lg->replay()) === 0, "日志被截空");
+    T::ok($lg->lastSeq() === 30, "高水位仍是 30", "last=" . $lg->lastSeq());
+    $seqNext = $lg->append("tx:31", "credit", ["uid" => 1, "delta" => 1]);
+    T::ok($seqNext === 31, "新事件接着 31，而不是重置成 1", "seq=" . $seqNext);
+    $lg->commit();
+    $lg->close();
+    $lg2 = new EventLog($p);
+    T::ok($lg2->lastSeq() === 31, "重开后高水位 31", "last=" . $lg2->lastSeq());
+    T::ok($lg2->replay()[0]["s"] === 31, "重开后能读到 31 号");
+    $lg2->close();
 
     // 8) 恢复耗时：全量 vs 检查点+尾巴
     $p = fresh("speed.log");

@@ -11,6 +11,7 @@
  */
 
 use Duel\Settle;
+use TSF\EventLog\Checkpoint;
 use TSF\EventLog\EventLog;
 
 const DIR = "/tmp/settle_test";
@@ -422,6 +423,50 @@ function caseMergeNodeLogs(): void
     $r1->close();
 }
 
+
+function caseCheckpoint(): void
+{
+    echo "== [15] 检查点：恢复等价 + 截断 ==" . PHP_EOL;
+    $path = fresh("ckpt");
+    $log = new EventLog($path);
+    // 每 20 条压一次，方便在测试里触发
+    $cp = new Checkpoint($path . ".ckpt");
+    $st = new Settle($log, null, [], $cp, 20);
+
+    $sum = 0;
+    for ($i = 1; $i <= 100; $i++) {
+        $winner = 1000 + ($i % 5);
+        if ($st->settle($i, $winner)) {
+            $sum += Settle::REWARD;
+        }
+    }
+    T::eq($st->wallet()->total(), $sum, "压检查点不影响余额");
+    T::ok($cp->exists(), "检查点已写出");
+    T::ok($cp->seq() > 0, "检查点记录了水位", "seq=" . $cp->seq());
+    $left = count($log->replay());
+    T::ok($left < 100, "老日志已被截断", "left=" . $left);
+
+    $before = $st->wallet()->all();
+    $log->close();
+
+    // 模拟重启：检查点在，日志只剩尾巴
+    $log2 = new EventLog($path);
+    $cp2 = new Checkpoint($path . ".ckpt");
+    $st2 = new Settle($log2, null, [], $cp2, 20);
+    T::eq($st2->wallet()->total(), $sum, "重启后总余额一致");
+    $same = true;
+    foreach ($before as $uid => $bal) {
+        if ($st2->balanceOf($uid) !== $bal) {
+            $same = false;
+        }
+    }
+    T::ok($same, "逐人余额一致");
+    T::ok($st2->isSettled(100), "去重表也恢复了");
+    T::ok(!$st2->settle(100, 1000), "已结算的房间不会再发一次奖");
+    T::eq($st2->stats()["settled"], 100, "结算笔数从检查点恢复");
+    $log2->close();
+}
+
 function main(): void
 {
     @mkdir(DIR, 0777, true);
@@ -439,6 +484,7 @@ function main(): void
     caseDebitRebuild();
     caseReconcile();
     caseMergeNodeLogs();
+    caseCheckpoint();
 
     echo PHP_EOL . "结果: " . T::$pass . " 通过 / " . T::$fail . " 失败" . PHP_EOL;
     exit(T::$fail === 0 ? 0 : 1);
