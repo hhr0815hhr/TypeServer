@@ -172,8 +172,75 @@ function benchManyServices(int $count): void
     say("  平均派发      " . number_format(($t4 - $t3) / 1000 / ($count > 0 ? $count : 1), 2) . " μs/服务");
 }
 
+/**
+ * 协程模式的纯消息吞吐。
+ *
+ * 为什么不能直接用 `drain()`：协程模式下 `tick()` 只是**创建协程就返回**，
+ * 消息在协程里异步处理。原来的 `drain()` 循环会因为"队列看起来空了"提前退出，
+ * 测出来的数字是"派发速度"而不是"处理速度"——一个典型的测错但看起来合理的坑。
+ *
+ * 所以这里必须等"处理完成"这个事实：在协程里轮询计数，用 `Coroutine::sleep` 让出，
+ * 让派发出来的协程有机会跑。`Coroutine\run` 自己带事件循环，不需要 Event::wait。
+ */
+function benchThroughputCoro(int $n): void
+{
+    $rate = 0.0;
+    $count = 0;
+    $singleNs = 0.0;
+
+    \Swoole\Coroutine\run(function () use ($n, &$rate, &$count, &$singleNs): void {
+        Scheduler::reset();
+        $s = Scheduler::instance();
+        $s->setCoroutine(true);
+        $s->register("count", function () {
+            return new CountService();
+        });
+        $addr = $s->spawn("count");
+        $svc = $s->serviceOf($addr);
+        if (!($svc instanceof CountService)) {
+            return;
+        }
+
+        $t0 = hrtime(true);
+        for ($i = 0; $i < $n; $i++) {
+            $s->deliver($addr, 1001, "x");
+        }
+        $s->tick(0);        // 首次派发：创建协程，剩下的靠轮询推进
+
+        $guard = 0;
+        while ($svc->count < $n) {
+            \Swoole\Coroutine::sleep(0.001);   // Swoole 的下限是 1ms
+            $s->tick(0);
+            $guard++;
+            if ($guard > 60000) {
+                break;      // 12s 上限，防止测挂
+            }
+        }
+        $dt = (hrtime(true) - $t0) / 1e9;
+        if ($dt > 0) {
+            $rate = $n / $dt;
+            $singleNs = $dt * 1e9 / $n;
+        }
+        $count = $svc->count;
+    });
+
+    say("  协程模式（深队列 " . number_format($n) . " 条）"
+        . "  " . str_pad(number_format($rate, 0), 9) . " msg/s"
+        . "  单条 " . number_format($singleNs, 0) . " ns"
+        . "  实际处理 " . number_format($count) . " 条");
+}
+
 function main(): void
 {
+    $argv = $_SERVER["argv"] ?? [];
+    if (isset($argv[1]) && $argv[1] === "coro") {
+        // 只跑协程对比：同一档位（深队列 10 万）分别测同步/协程
+        say("== 协程 vs 同步：同一负载下的纯消息吞吐 ==");
+        benchThroughput(100000, 0, 3);
+        benchThroughputCoro(100000);
+        return;
+    }
+
     say("== 1) 吞吐：单服务 投递+派发（每档 5 轮取中位）==");
     benchThroughput(100000, 0, 5);
     benchThroughput(100000, 64, 5);
