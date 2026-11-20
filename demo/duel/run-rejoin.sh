@@ -7,6 +7,19 @@
 #   3. 服务端日志里有 player rejoined，且没有走判负路径
 #   4. 这一局最后正常打完（对面拿到 RESULT）
 set -u
+
+# 示例写死了 9101/9102。本机上这两个端口可能被别的服务占着（比如 mir_login/mir_game），
+# 硬起的话客户端会连到别人的进程，几十秒后得到一堆看不懂的 FAIL。
+# 77 = 主动跳过，verify 会把这套标成 SKIP 而不是 FAIL。
+if command -v ss >/dev/null 2>&1; then
+    for _p in 9101 9102; do
+        if ss -lnt 2>/dev/null | grep -q ":$_p "; then
+            echo "SKIP 端口 $_p 已被占用（本机有别的服务在跑），无法起示例"
+            exit 77
+        fi
+    done
+fi
+
 cd "$(dirname "$0")" || exit 1
 
 # duel 是编译产物、不入库。没编过就先编——否则新克隆/CI 会一路跑到「0. 清场」
