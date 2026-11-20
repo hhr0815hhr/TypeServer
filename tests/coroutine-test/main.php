@@ -4,7 +4,7 @@
  * 协程化 Scheduler 的效果验证。
  *
  * 两个服务：
- *   A：每 200ms 做一次 redis PING（公网，RTT 约 31ms）
+ *   A：每 200ms 做一次 30ms 的阻塞调用（usleep 模拟慢 I/O）
  *   B：每 10ms 打一个时间戳
  *
  * 关闭协程：A 在 tick 里同步跑，卡住整个事件循环 → B 的间隔出现 31ms 尖峰
@@ -20,57 +20,34 @@ use TSF\Service\Service;
 const MSG_PING = 8101;
 const MSG_TICK = 8102;
 
-/** A：故意慢的服务（公网 redis，RTT 约 31ms） */
+/**
+ * A：故意慢的服务——每次处理都做一次 30ms 的"阻塞调用"。
+ *
+ * 原来这里连的是作者环境里的一台公网 redis（RTT ~31ms）。换台机器就连不上，
+ * 测试照样"通过"，但**一次都没真正验证**——和仓库里那些没接线的用例是一个毛病。
+ *
+ * 现在用 `usleep(30000)` 直接模拟。为什么它等价：`Runtime::enableCoroutine`
+ * 的 `SWOOLE_HOOK_SLEEP` 会把 usleep 变成"协程让出"，同步模式下则实实在在卡住
+ * 整个 worker。要验证的命题（"慢调用会不会阻塞其他服务"）完全一样，
+ * 而且不依赖 redis 扩展装没装。
+ *
+ * 顺带一个 AOT 教训：原来写 `try { new \Redis() } catch (\Throwable $e) { return null; }`，
+ * 扩展不存在时抛的是 `Error`，**catch 没接住**（和 PDOException 那次一样），
+ * 服务直接崩了、PING 计数永远是 0。AOT 下不要指望 catch 兜住"类不存在"。
+ */
 final class SlowService extends Service
 {
-    /** @var \Redis|null */
-    private $redis = null;
-
     public static int $pings = 0;
 
     public static float $totalMs = 0.0;
-
-    public function onStart(): void
-    {
-        // **故意不在这里建连。**
-        //
-        // onStart 在 spawnOf 时执行，那时不在协程上下文 —— 这里建的连接从建立起
-        // 就是阻塞的，之后在哪个协程里调用都照样卡住整个事件循环。
-        // 实测对比：onStart 建连 → 打点尖峰 14/267；协程内建连 → 0/298。
-        //
-        // 所以留给第一条 onMessage 去建（协程模式下那时已经在协程里了）。
-    }
-
-    private function conn(): ?\Redis
-    {
-        if ($this->redis instanceof \Redis) {
-            return $this->redis;
-        }
-        $r = new \Redis();
-        try {
-            $ok = $r->connect("127.0.0.1", 22379, 3.0);
-            if (!$ok) {
-                return null;
-            }
-            $r->auth("");
-        } catch (\Throwable $e) {
-            return null;
-        }
-        $this->redis = $r;
-        return $r;
-    }
 
     public function onMessage(Message $m): void
     {
         if ($m->msgId !== MSG_PING) {
             return;
         }
-        $r = $this->conn();
-        if ($r === null) {
-            return;
-        }
         $t0 = hrtime(true);
-        $r->ping();
+        usleep(30000);              // 模拟 30ms 的阻塞 I/O
         $d = (hrtime(true) - $t0) / 1e6;
         self::$totalMs += $d;
         self::$pings++;
@@ -98,7 +75,12 @@ function main(): void
     echo "模式: " . ($mode ? "协程" : "同步") . PHP_EOL;
 
     // 必须在创建任何协程之前开 hook
-    \Swoole\Runtime::enableCoroutine(SWOOLE_HOOK_ALL);
+    // **只在协程模式开 hook**。原来两档都开，导致"同步模式"里的 usleep 也被
+    // hook 成协程让出，测不出尖峰——那样对比的是"有 hook 但单协程"和"有 hook 多协程"，
+    // 而不是"阻塞"和"不阻塞"。
+    if ($mode) {
+        \Swoole\Runtime::enableCoroutine(SWOOLE_HOOK_ALL);
+    }
     Scheduler::instance()->setCoroutine($mode);
 
     $slowAddr = Scheduler::instance()->spawnOf(function (): SlowService {
@@ -161,7 +143,7 @@ function main(): void
 
         $pings = SlowService::$pings;
         $avgMs = $pings > 0 ? SlowService::$totalMs / $pings : 0.0;
-        echo "redis 调用: " . $pings . " 次，平均 " . round($avgMs, 1) . " ms" . PHP_EOL;
+        echo "慢调用: " . $pings . " 次，平均 " . round($avgMs, 1) . " ms" . PHP_EOL;
 
         echo PHP_EOL . "判定: ";
         if ($mode) {
@@ -174,7 +156,7 @@ function main(): void
             if ($max > 20.0) {
                 echo "OK 符合预期（同步模式有 " . round($max, 1) . "ms 尖峰）";
             } else {
-                echo "FAIL 没有尖峰，说明 redis 不够慢";
+                echo "FAIL 没有尖峰，说明慢调用不够慢";
             }
         }
         echo PHP_EOL;

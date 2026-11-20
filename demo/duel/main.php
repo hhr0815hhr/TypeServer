@@ -67,6 +67,21 @@ function main(): void
     Scheduler::instance()->crashDir($base . "/var/crash");
     Scheduler::instance()->enableTrace(16);
 
+    // 协程模式：`server.coroutine: true` 打开。
+    //
+    // 它解决的是**阻塞 I/O 拖垮整个 worker**，不是 CPU 吞吐。实测（tests/coroutine-test）：
+    // 同一个 30ms 的慢调用做 14 次，同步模式下别的服务被卡 40.7ms，协程模式下 10.8ms。
+    // 纯消息场景（没有阻塞调用）协程不会主动让出，所以吞吐基本不变——这是"按需开"的理由：
+    // 有 DB/HTTP 调用的服必须开，纯转发/纯内存玩法可以不开。
+    //
+    // `Runtime::enableCoroutine` 必须在 Server 启动前调用，之后开的 hook 不生效。
+    $coro = Config::getBool("server.coroutine", false);
+    if ($coro) {
+        \Swoole\Runtime::enableCoroutine(SWOOLE_HOOK_ALL);
+        Scheduler::instance()->setCoroutine(true);
+        Logger::info("coroutine mode on", ["hook" => "all"]);
+    }
+
     $host = Config::getString("server.host", "0.0.0.0");
     $port = Config::getInt("server.port", 9101);
 
