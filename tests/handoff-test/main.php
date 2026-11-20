@@ -4,6 +4,8 @@ use TSF\Cluster\Cluster;
 use TSF\Handoff\ClusterTransport;
 use TSF\Handoff\Gate;
 use TSF\Handoff\Handoff;
+use TSF\Handoff\Ownership;
+use TSF\Handoff\Rebalancer;
 use TSF\Service\Message;
 
 /**
@@ -165,6 +167,113 @@ function runGate(): void
         . " queued=" . $st["queued"] . " dropped=" . $st["dropped"] . PHP_EOL;
 }
 
+/** 写死的归属表：让"该搬/不该搬/不可达"三种场景可控，不必真凑一个哈希环 */
+final class MapOwnership implements Ownership
+{
+    /** @var array<string, int> */
+    public array $map = [];
+
+    public function ownerOf(string $key): int
+    {
+        return $this->map[$key] ?? 0;
+    }
+}
+
+/** 重平衡事件记录 */
+final class Ev
+{
+    /** @var array<int, string> */
+    public array $moved = [];
+
+    /** @var array<int, string> */
+    public array $failed = [];
+
+    public string $queue = "";
+}
+
+/**
+ * 自动重平衡：扫差异 → 限流 → 复用 Gate/Handoff → 结果收口。
+ *
+ * 复用 main() 里已经握好手的两条链路，所以不需要再起一套 Cluster。
+ */
+function runRebalance(Cluster $c1, Handoff $h1, Cluster $c2, Handoff $h2, Rec $r2): void
+{
+    echo PHP_EOL . "== 自动重平衡（Rebalancer）==" . PHP_EOL;
+
+    $g = new Gate();
+    $own = new MapOwnership();
+    $own->map["k:1"] = 2;       // 该搬到 node2
+    $own->map["k:2"] = 3;       // 该搬到 node3，但没建链
+    $own->map["k:self"] = 1;    // 归自己，不动
+    $own->map["k:skip"] = 2;    // 该搬，但业务说暂时不能搬
+    $own->map["k:rej"] = 2;     // 该搬，目标会拒绝
+
+    $rb = new Rebalancer(1, 1, $h1, $g, $own, 1);   // limit = 1，逼出限流行为
+    $ev = new Ev();
+
+    $rb->onExport(function (string $key): ?string {
+        if ($key === "k:skip") {
+            return null;        // 业务拒绝导出
+        }
+        return "st:" . $key;
+    });
+    $rb->onMoved(function (string $key, int $target, array $queued) use ($ev): void {
+        $ev->moved[] = $key . ">" . $target;
+        $ev->queue = implode(",", $queued);
+    });
+    $rb->onFailed(function (string $key, int $target, string $why) use ($ev): void {
+        $ev->failed[] = $key . "!" . $why;
+    });
+
+    $rb->own("k:1");
+    $rb->own("k:2");
+    $rb->own("k:self");
+    $rb->own("k:skip");
+    $rb->own("k:rej");
+    T::ok($rb->ownCount() === 5, "登记 5 个 key");
+    T::ok(!$rb->own("k:1"), "重复登记返回 false");
+
+    // 第一轮：limit=1，只能发起 1 个
+    $n = $rb->scan(nowMs());
+    T::ok($n === 1, "limit=1 时只发起 1 个", "n=" . $n);
+    T::ok($rb->inflight() === 1, "在飞 1 个");
+
+    // 冻结期间来的请求排队，交接成功后随结果一起交出去
+    T::ok($g->submit("k:1", "op-during") === Gate::QUEUED, "冻结期间请求排队");
+    pump($c1, $h1, $c2, $h2, 40);
+    // 一轮 scan 同时做"收口上一轮"和"发起下一轮"，所以 k:1 在这里被收口、
+    // k:rej 在这里被发起
+    $n2 = $rb->scan(nowMs());
+    T::ok(in_array("k:1>2", $ev->moved), "k:1 交给 node2", implode("|", $ev->moved));
+    T::ok($ev->queue === "op-during", "排队请求随结果交出", $ev->queue);
+    T::ok(!$rb->isOwned("k:1"), "交接后不再归本地");
+    T::ok($g->state("k:1") === Gate::FORWARD, "闸门转 FORWARD");
+
+    // 同一轮里：k:2 目标不可达要立刻解冻，k:skip 被业务跳过，k:rej 发起成功
+    T::ok($n2 === 1, "该轮只有 k:rej 发起成功", "n=" . $n2);
+    T::ok($g->state("k:2") === Gate::OPEN, "不可达的 key 闸门回 OPEN");
+    T::ok(!$h1->isPending("k:2"), "不可达的 key 不再在飞");
+    T::ok($rb->stats()["skipped"] >= 1, "export 返回 null 的被跳过",
+        "skipped=" . $rb->stats()["skipped"]);
+
+    // 限流：k:rej 在飞时再扫一轮，什么都不该发起（limit=1）
+    T::ok($rb->scan(nowMs()) === 0, "在飞已达上限时不再发起");
+
+    // 第三轮：目标拒绝 → failed，key 仍归本地，且进入退避期不再重试
+    $r2->accept = false;
+    pump($c1, $h1, $c2, $h2, 40);
+    T::ok($rb->scan(nowMs()) === 0, "失败退避期内不重试");
+    T::ok(in_array("k:rej!rejected", $ev->failed), "拒绝触发 failed", implode("|", $ev->failed));
+    T::ok($rb->isOwned("k:rej"), "失败后仍归本地");
+    T::ok($g->state("k:rej") === Gate::OPEN, "失败后闸门回 OPEN");
+    $r2->accept = true;
+
+    $st = $rb->stats();
+    echo "  重平衡统计: started=" . $st["started"] . " moved=" . $st["moved"]
+        . " failed=" . $st["failed"] . " skipped=" . $st["skipped"]
+        . " owned=" . $st["owned"] . PHP_EOL;
+}
+
 function main(): void
 {
     echo "== 状态交接（handoff）==" . PHP_EOL;
@@ -287,11 +396,14 @@ function main(): void
     T::ok($g->state("room:8") === Gate::OPEN, "拒绝后闸门回 OPEN");
     T::ok($r1->rollbackQueue === "n1", "队列在本地放回", $r1->rollbackQueue);
     T::ok($g->submit("room:8", "n2") === Gate::PASS, "回滚后本地继续处理");
+    $r2->accept = true;     // 复原，否则后面的重平衡用例会全被拒
 
     $st = $h1->stats();
     echo "  源侧统计: sent=" . $st["sent"] . " accepted=" . $st["accepted"]
         . " rejected=" . $st["rejected"] . " timeout=" . $st["timeout"]
         . " ignored=" . $st["ignored"] . PHP_EOL;
+
+    runRebalance($c1, $h1, $c2, $h2, $r2);
 
     $c1->closeAll();
     $c2->closeAll();
