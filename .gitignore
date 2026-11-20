@@ -16,6 +16,11 @@
 # 否则会出现「本机编得过、clone 下来编不过」——ext/codec 的 .cc 就这么漏过一次。
 # 提交前跑 `python3 tools/repo-guard.py` 可以抓这类漏网。
 !*.php
+
+# 测试目录的跳过标记（无扩展名，被上面的 `*` 挡住了）。
+# 它必须入库：`tsf test` 靠它判断"这个用例依赖外部服务，别在自动集合里跑"，
+# 理由也写在文件里 —— 藏在 CI 配置里的跳过理由没人会看第二眼。
+!skip-auto
 # PHP 扩展的 configure 配方（ext/interp）
 !*.m4
 !*.md

@@ -99,6 +99,10 @@ PASS  script         脚本热更（16 项）                          15.8s
 PASS  http           HTTP 接口（8 项）                         15.7s
 ```
 
+**另有 `tsf test`：发现式跑 `tests/*/main.php`**（不维护清单），
+`--unwired` 只看没接进 `verify` 的那批。当前结果：22 通过 / 4 跳过（依赖本机 MySQL
+或属交互式探测，用 `skip-auto` 标记）。它约 6–15 分钟，所以**不进门禁**，用于定期体检。
+
 `tsf verify --list` 看清单，`tsf verify <id>` 只跑一个。缺工具链的套件会标 `SKIP`
 而不是 FAIL——环境问题不该把整套判成失败。
 
