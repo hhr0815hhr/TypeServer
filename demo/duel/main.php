@@ -59,7 +59,13 @@ function main(): void
 {
     $base = __DIR__;
     Bootstrap::boot($base, "app");
-    Bootstrap::ensureDirs([$base . "/var/log"]);
+    Bootstrap::ensureDirs([$base . "/var/log", $base . "/var/crash"]);
+
+    // 崩溃取证：每个服务留最近 16 条消息摘要，崩溃时连业务状态一起落盘到 var/crash/。
+    // 成本约 100ns/条，对房间服可以忽略；换来的是"玩家说卡了一下"能查到现场。
+    // 压测时要关（`enableTrace` 不调即可），否则 115 万 msg/s 会多出 10% 开销。
+    Scheduler::instance()->crashDir($base . "/var/crash");
+    Scheduler::instance()->enableTrace(16);
 
     $host = Config::getString("server.host", "0.0.0.0");
     $port = Config::getInt("server.port", 9101);

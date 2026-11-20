@@ -32,6 +32,26 @@ final class DuelService extends Service
     /** 掉线判负（由 DuelManager 转发） */
     public const MSG_FORFEIT = 5405;
 
+    /**
+     * 崩溃现场：这局打到哪了。
+     *
+     * 没有它，崩溃日志只有"哪个 msgId 出错"；有它才能回答"这局是不是快结算了、
+     * 谁快死了、回放能不能对上"。字段只放排障真正会看的，别把整个对象序列化进去。
+     */
+    public function dumpState(): string
+    {
+        // 用公开方法而不是直接读字段：hp 是 private，且"当前打到哪"本来就该由
+        // DuelRoom 自己回答（它的 snapshot() 就是给持久化用的那份数据）
+        $snap = [
+            "room" => $this->duel->room()->id(),
+            "hp" => $this->duel->snapshot()["hp"] ?? [],
+            "elapsedMs" => $this->duel->elapsedMs(),
+            "winner" => $this->duel->winner(),
+        ];
+        $out = json_encode($snap, JSON_UNESCAPED_UNICODE);
+        return is_string($out) ? $out : "";
+    }
+
     private DuelRoom $duel;
 
     private FrameLoop $loop;

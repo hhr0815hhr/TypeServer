@@ -1,5 +1,6 @@
 <?php
 
+use TSF\Kernel\CrashDump;
 use TSF\Service\Message;
 use TSF\Service\Scheduler;
 use TSF\Service\Service;
@@ -46,6 +47,9 @@ final class Recorder extends Service
 
     public bool $throwOnMessage = false;
 
+    /** >0 时表示"处理到第 N 条再崩"，用来制造"崩溃前有历史"的现场 */
+    public int $crashAt = 0;
+
     public function onStop(): void
     {
         $this->stopCalled++;
@@ -74,6 +78,9 @@ final class Recorder extends Service
 
         if ($this->throwOnMessage) {
             throw new \RuntimeException("boom");
+        }
+        if ($this->crashAt > 0 && count($this->got) >= $this->crashAt) {
+            throw new \RuntimeException("boom-at-" . $this->crashAt);
         }
     }
 }
@@ -197,6 +204,82 @@ function caseKill(): void
     T::ok(!$s->kill($addr), "重复 kill 返回 false");
 }
 
+
+/**
+ * 崩溃取证：崩溃时留下的不该只是"哪条 msgId 出错"，而是崩溃前的现场。
+ */
+function caseCrashDump(): void
+{
+    echo PHP_EOL . "[9] 崩溃取证：落盘的现场" . PHP_EOL;
+    $dir = sys_get_temp_dir() . "/tsf_crash_" . posix_getpid() . "_" . mt_rand(1000, 9999);
+    @mkdir($dir, 0777, true);
+    foreach (glob($dir . "/crash-*.jsonl") ?: [] as $old) {
+        @unlink((string) $old);
+    }
+
+    Scheduler::reset();
+    $s = Scheduler::instance();
+    $s->crashDir($dir);
+    $s->enableTrace(4);
+    $s->register("rec", function () {
+        return new Recorder();
+    });
+    $a = $s->spawn("rec");
+    $sa = $s->serviceOf($a);
+    if (!($sa instanceof Recorder)) {
+        return;
+    }
+    $sa->crashAt = 3;      // 处理到第 3 条才崩 → recent 里应有前两条
+
+    $s->deliver($a, 1001, "m1");
+    $s->deliver($a, 1002, "m2");
+    $s->deliver($a, 1003, "m3");
+    $s->tick();
+
+    $files = glob($dir . "/crash-*.jsonl");
+    T::ok(is_array($files) && count($files) === 1, "崩溃写了一个 dump", "n=" . (is_array($files) ? count($files) : 0));
+    $raw = "";
+    if (is_array($files) && isset($files[0])) {
+        $raw = (string) file_get_contents((string) $files[0]);
+    }
+    T::ok(strpos($raw, '"svc":"local:1"') !== false, "dump 里记了服务标签", $raw === "" ? "空" : "");
+    T::ok(strpos($raw, '"msgId":1003') !== false, "dump 里记了崩溃那条消息号");
+    T::ok(strpos($raw, "boom-at-3") !== false, "dump 里记了异常文本");
+    T::ok(strpos($raw, "|1001|") !== false && strpos($raw, "|1002|") !== false, "dump 里记了崩溃前的消息");
+    T::ok(strpos($raw, "|1003|") !== false, "崩溃那条也在 recent 里（它是最后处理的）");
+    T::ok(strpos($raw, '"recent"') !== false, "有 recent 段");
+
+    // 关闭取证时仍然写 dump（只是没有 recent），因为"挂了"本身必须留痕
+    Scheduler::reset();
+    $s2 = Scheduler::instance();
+    $s2->crashDir($dir);
+    $s2->register("rec", function () {
+        return new Recorder();
+    });
+    $b = $s2->spawn("rec");
+    $sb = $s2->serviceOf($b);
+    if (!($sb instanceof Recorder)) {
+        return;
+    }
+    $sb->throwOnMessage = true;
+    $s2->deliver($b, 2001, "boom");
+    $s2->tick();
+    $files2 = glob($dir . "/crash-*.jsonl");
+    T::ok(is_array($files2) && count($files2) === 2, "关闭取证也写 dump", "n=" . (is_array($files2) ? count($files2) : 0));
+
+    // 保留上限：文件名带毫秒时间戳，旧的要被清掉
+    for ($i = 0; $i < 5; $i++) {
+        CrashDump::save($dir, "fill:" . $i, 1, new \RuntimeException("x"), [], "", [], 3);
+    }
+    $files3 = glob($dir . "/crash-*.jsonl");
+    T::ok(is_array($files3) && count($files3) <= 3, "超过保留上限会删最旧的", "n=" . (is_array($files3) ? count($files3) : 0));
+
+    foreach (glob($dir . "/crash-*.jsonl") ?: [] as $f) {
+        @unlink((string) $f);
+    }
+    @rmdir($dir);
+}
+
 function caseErrorIsolation(): void
 {
     echo PHP_EOL . "[5] 错误隔离：一个服务抛异常，不影响其他服务" . PHP_EOL;
@@ -315,6 +398,7 @@ function main(): void
     caseBetween();
     caseSelfReentrancy();
     caseKill();
+    caseCrashDump();
     caseErrorIsolation();
     caseFairness();
     caseOverflow();
