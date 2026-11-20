@@ -64,8 +64,31 @@ const DSN = "mysql:host=127.0.0.1;port=52315;dbname=tsf;charset=utf8mb4";
 const USER = "root";
 const PASS = 'CHANGE_ME';
 
+/**
+ * 没有可用的 MySQL 就 SKIP（退出码 77）。
+ *
+ * 用**端口探测**而不是 try/catch：AOT 下 `catch (\Throwable)` 接不住 PDO 构造抛的
+ * `PDOException`（实测：异常直接冒成 Fatal error）。探测 socket 不涉及异常类型，
+ * 而且"端口没人监听"本来就是这里要判断的事。
+ *
+ * 注意只探测可达性，不探测认证：服务在但密码不对属于**真配置问题**，应该红。
+ */
+function requireMysql(string $host, int $port, float $timeout = 0.3): void
+{
+    $errno = 0;
+    $errstr = "";
+    $s = @stream_socket_client("tcp://" . $host . ":" . $port, $errno, $errstr, $timeout);
+    if ($s === false) {
+        echo "SKIP 需要可用的 MySQL（" . $host . ":" . $port . "）" . PHP_EOL;
+        echo "     起一个：bash scripts/dev-mysql.sh" . PHP_EOL;
+        exit(77);
+    }
+    fclose($s);
+}
+
 function main(): void
 {
+    requireMysql("127.0.0.1", 52315);
     $db = new Db(DSN, USER, PASS);
 
     echo "== [1] 连接 ==" . PHP_EOL;
