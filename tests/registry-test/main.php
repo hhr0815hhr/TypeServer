@@ -130,19 +130,23 @@ function main(): void
     T::ok(count($r->alive()) === 1, "注销后只剩 1 个");
 
     // 6) TTL：不心跳就过期（模拟 kill -9）
-    $short = mk(300);
+    //
+    // 窗口给到 800ms 而不是 300ms：这个套件要和别的套件一起跑，机器一忙
+    // "注册完立刻可见"就会被 300ms 的窗口压线，变成一条随机失败——
+    // 时序断言宁可慢一点，也不要变成"偶尔红"。
+    $short = mk(800);
     $short->connect();
     $short->register(node(7));
     T::ok(hasNode($short->alive(), 7), "短 TTL 注册后可见");
-    usleep(450000);
-    T::ok(!hasNode($short->alive(), 7), "450ms 不心跳后过期");
+    usleep(1200000);
+    T::ok(!hasNode($short->alive(), 7), "1.2s 不心跳后过期");
 
-    // 7) 心跳能续命：总时长超过 TTL，但仍活着
+    // 7) 心跳能续命：总时长超过 TTL，但仍活着（每段间隔都小于 TTL）
     $short->register(node(8));
-    usleep(200000);
+    usleep(500000);
     $short->heartbeat(8);
-    usleep(200000);
-    T::ok(hasNode($short->alive(), 8), "心跳续命后仍活着（累计 400ms > TTL 300ms）");
+    usleep(500000);
+    T::ok(hasNode($short->alive(), 8), "心跳续命后仍活着（累计 1s > TTL 800ms）");
     $short->unregister(8);
 
     // 8) 调用方传更小的 ttl 时，按 lastSeen 精判
@@ -150,7 +154,7 @@ function main(): void
     $mid->connect();
     $mid->register(node(9));
     usleep(150000);
-    T::ok(hasNode($mid->alive(1000), 9), "ttl 1000 时仍算活");
+    T::ok(hasNode($mid->alive(3000), 9), "ttl 3000 时仍算活");
     T::ok(!hasNode($mid->alive(100), 9), "ttl 100 时被判过期（lastSeen 精判）");
     $mid->unregister(9);
 

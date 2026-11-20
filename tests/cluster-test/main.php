@@ -209,6 +209,16 @@ function runUnit(): void
     }
     echo "  非法长度抛错  " . ($threw ? "OK" : "FAIL") . PHP_EOL;
 
+    // 4.1) msgId 越界：必须抛错，不能静默截断
+    //     （69001 落在 2 字节之外，截断后变成 3465，接收端只会"没收到"）
+    $threw = false;
+    try {
+        Packet::encode(1, 2, 0, 69001, "x");
+    } catch (\RuntimeException $e) {
+        $threw = true;
+    }
+    echo "  msgId 越界抛错  " . ($threw ? "OK" : "FAIL") . PHP_EOL;
+
     // 5) 不可达节点：send 返回 false 且计入 drop
     $c = new Cluster(1, "/tmp/tsf_unit.sock");
     $ok = $c->send((3 << 24) | 5, 1, 2001, "x");

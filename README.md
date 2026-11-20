@@ -70,28 +70,29 @@ php85 client.php 9001          # 3) 另开终端验证
 
 ---
 
-## 验证：一条命令跑完 351 项断言
+## 验证：一条命令跑完 377 项断言
 
 ```bash
 bash scripts/ci-preflight.sh   # 先看环境（缺什么、缺在哪、怎么补）
-tsf verify                     # 13 个套件
+tsf verify                     # 14 个套件
 ```
 
 ```
 结果    套件             内容                                耗时
-PASS  semantics      AOT 语言语义差分（45 用例）                  15.2s
-PASS  swoole         Swoole 契约（6 项）                       9.4s
-PASS  settle         金币账本（91 项）                          9.8s
-PASS  settle-crash   账本崩溃重放（14 项）                       58.9s
+PASS  semantics      AOT 语言语义差分（45 用例）                  17.5s
+PASS  swoole         Swoole 契约（6 项）                       9.3s
+PASS  settle         金币账本（91 项）                          17.2s
+PASS  settle-crash   账本崩溃重放（14 项）                       45.9s
 PASS  fd             fd/内存守卫（10 项）                       0.0s
-PASS  room           房间/成员/共享宿主（100 项）                  13.0s
-PASS  cluster        集群/房间归属（11 项）                      14.4s
-PASS  cluster-chan   集群通道/握手（TCP 11 项 + UDS 2000 往返）   16.8s
-PASS  registry       Redis 注册表（25 项，无 Redis 则 SKIP）     15.5s
-PASS  drain          进程 drain（8 项）                        13.5s
-PASS  rejoin         断线重连（6 项）                            8.6s
-PASS  script         脚本热更（16 项）                          10.5s
-PASS  http           HTTP 接口（8 项）                         14.4s
+PASS  room           房间/成员/共享宿主（100 项）                  20.6s
+PASS  cluster        集群/房间归属（11 项）                      14.9s
+PASS  cluster-chan   集群通道/握手（TCP 11 项 + UDS 2000 往返）   16.7s
+PASS  registry       Redis 注册表（25 项，无 Redis 则 SKIP）     19.4s
+PASS  handoff        状态交接（26 项：交接/幂等/拒绝/超时）            17.7s
+PASS  drain          进程 drain（8 项）                        13.2s
+PASS  rejoin         断线重连（6 项）                            8.5s
+PASS  script         脚本热更（16 项）                          15.8s
+PASS  http           HTTP 接口（8 项）                         15.7s
 ```
 
 `tsf verify --list` 看清单，`tsf verify <id>` 只跑一个。缺工具链的套件会标 `SKIP`
