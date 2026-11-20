@@ -500,6 +500,54 @@ function runVersionGate(Cluster $c1, Cluster $c2): void
     T::ok(count($cap->sent) === 1 && $cap->sent[0][0] === Handoff::MSG_ACCEPT, "回了 ACCEPT");
 }
 
+
+/**
+ * 版本落后时的调度：不换目标，只"暂时别试"。
+ *
+ * 换目标是错的——`Ownership` 指出的 owner 是契约，搬到非 owner 会造出所有权分家。
+ * 正确行为是等对方升级，期间不要把限流槽位浪费在必然被拒的交接上。
+ */
+function runSkewScheduling(Cluster $c1, Cluster $c2): void
+{
+    echo PHP_EOL . "== 版本落后时的调度 ==" . PHP_EOL;
+
+    $src = new Handoff(1, 5, new ClusterTransport($c1), 300, 8);
+    $dst = new Handoff(2, 5, new ClusterTransport($c2), 300, 7);
+    $dst->onInstall(function (string $key, string $state, int $ver): bool {
+        return true;
+    });
+
+    $own = new MapOwnership();
+    $own->map["sk:1"] = 2;
+    $own->map["sk:2"] = 2;
+    $g = new Gate();
+    $rb = new Rebalancer(1, 5, $src, $g, $own, 1);   // limit=1，一次只发一个
+    $rb->setStaleTtl(200);
+    $rb->onExport(function (string $key): ?string {
+        return "st:" . $key;
+    });
+    $rb->own("sk:1");
+    $rb->own("sk:2");
+
+    $t0 = nowMs();
+    T::ok($rb->scan($t0) === 1, "首轮只发起 1 个（limit=1）");
+    pump($c1, $src, $c2, $dst, 40);
+    T::ok($rb->scan($t0 + 10) === 0, "收口后本轮不再发起");
+    T::ok($rb->isStale(2), "目标节点被标记为版本落后");
+    T::ok($rb->stats()["version_blocked"] === 1, "记到一次版本拒绝",
+        "n=" . $rb->stats()["version_blocked"]);
+
+    // sk:2 的目标也是 2：现在应该被直接跳过，而不是再撞一次
+    $skipBefore = $rb->stats()["skew_skipped"];
+    T::ok($rb->scan($t0 + 20) === 0, "落后目标上的 key 本轮不再发起");
+    T::ok($rb->stats()["skew_skipped"] > $skipBefore, "记到 skew_skipped",
+        "n=" . $rb->stats()["skew_skipped"]);
+
+    // 过了试探期：重新尝试（对方可能已经升级）
+    T::ok($rb->scan($t0 + 300) === 1, "过了试探期会再试一次");
+    T::ok(!$rb->isStale(2) || $rb->stats()["version_blocked"] >= 1, "标记可被清除");
+}
+
 function main(): void
 {
     echo "== 状态交接（handoff）==" . PHP_EOL;
@@ -637,6 +685,7 @@ function main(): void
     runAbort($c1, $h1, $c2, $h2, $r1, $r2);
     runLeaseLost($c1, $h1, $c2, $h2);
     runVersionGate($c1, $c2);
+    runSkewScheduling($c1, $c2);
 
     $c1->closeAll();
     $c2->closeAll();
