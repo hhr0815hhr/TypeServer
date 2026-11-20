@@ -2,6 +2,7 @@
 
 use TSF\Cluster\Cluster;
 use TSF\Handoff\ClusterTransport;
+use TSF\Handoff\Gate;
 use TSF\Handoff\Handoff;
 use TSF\Service\Message;
 
@@ -55,6 +56,12 @@ final class Rec
 
     /** 目标侧是否接受安装 */
     public bool $accept = true;
+
+    /** commit 时闸门交出的队列（联调用：验证保序） */
+    public string $commitQueue = "";
+
+    /** rollback 时闸门交回的队列 */
+    public string $rollbackQueue = "";
 }
 
 function nowMs(): int
@@ -93,6 +100,71 @@ function pumpOne(Cluster $c, Handoff $h, int $rounds = 6): void
     }
 }
 
+/**
+ * 闸门（Gate）：冻结期间的请求不丢、不乱序、不双写。
+ *
+ * 纯对象，不需要 Cluster —— 它只做"挡住并排队"，真正搬运是 Handoff 的事。
+ */
+function runGate(): void
+{
+    echo PHP_EOL . "== 交接闸门（Gate）==" . PHP_EOL;
+    $g = new Gate();
+
+    // 1) 没冻结时直接放行
+    T::ok($g->submit("room:1", "op0") === Gate::PASS, "未冻结时 pass");
+
+    // 2) 冻结
+    T::ok($g->freeze("room:1", 2, 1), "freeze 返回 true");
+    T::ok(!$g->freeze("room:1", 2, 1), "重复 freeze 返回 false（不重置队列）");
+    $t = $g->targetOf("room:1");
+    T::ok($t[0] === 2 && $t[1] === 1, "记住目标节点与入口");
+
+    // 3) 冻结期间的请求排队，不丢
+    T::ok($g->submit("room:1", "op1") === Gate::QUEUED, "冻结后 queued");
+    T::ok($g->submit("room:1", "op2") === Gate::QUEUED, "第二条 queued");
+    T::ok($g->submit("room:1", "op3") === Gate::QUEUED, "第三条 queued");
+    T::ok($g->queueSize("room:1") === 3, "队列 3 条", "n=" . $g->queueSize("room:1"));
+    T::ok($g->state("room:1") === Gate::FROZEN, "状态 FROZEN");
+
+    // 4) 交接成功：队列按原序交给新宿主，之后直接转发
+    $out = $g->commit("room:1");
+    T::ok(implode(",", $out) === "op1,op2,op3", "commit 交出队列且保序", implode(",", $out));
+    T::ok($g->state("room:1") === Gate::FORWARD, "commit 后状态 FORWARD");
+    T::ok($g->submit("room:1", "op4") === Gate::FORWARDED, "交接后 submit 提示转发");
+    T::ok($g->queueSize("room:1") === 0, "队列已清空");
+
+    // 5) 交接失败：队列在本地按原序放回
+    $g->freeze("room:2", 3, 1);
+    $g->submit("room:2", "b1");
+    $g->submit("room:2", "b2");
+    $back = $g->rollback("room:2");
+    T::ok(implode(",", $back) === "b1,b2", "rollback 交回队列且保序", implode(",", $back));
+    T::ok($g->state("room:2") === Gate::OPEN, "rollback 后回到 OPEN");
+    T::ok($g->submit("room:2", "b3") === Gate::PASS, "回滚后本地照常处理");
+
+    // 6) 队列上限：满了必须让调用方拒绝，而不是静默丢弃
+    $g->freeze("room:3", 4, 1, 2);
+    $g->submit("room:3", "c1");
+    $g->submit("room:3", "c2");
+    T::ok($g->submit("room:3", "c3") === Gate::OVERFLOW, "超上限返回 overflow");
+    T::ok($g->queueSize("room:3") === 2, "队列没被撑破", "n=" . $g->queueSize("room:3"));
+    T::ok($g->dropped("room:3") === 1, "记到一次拒绝");
+    $g->rollback("room:3");
+
+    // 7) key 之间互不影响
+    $g->freeze("room:4", 5, 1);
+    T::ok($g->submit("room:5", "x") === Gate::PASS, "别的 key 不受影响");
+    $g->rollback("room:4");
+
+    // 8) 非冻结状态下 commit/rollback 空转（调用方重复收尾时不该出错）
+    T::ok($g->commit("room:5") === [], "OPEN 下 commit 返回空");
+    T::ok($g->rollback("room:5") === [], "OPEN 下 rollback 返回空");
+
+    $st = $g->stats();
+    echo "  闸门统计: frozen=" . $st["frozen"] . " forward=" . $st["forward"]
+        . " queued=" . $st["queued"] . " dropped=" . $st["dropped"] . PHP_EOL;
+}
+
 function main(): void
 {
     echo "== 状态交接（handoff）==" . PHP_EOL;
@@ -108,18 +180,24 @@ function main(): void
 
     $r1 = new Rec();
     $r2 = new Rec();
+    $g = new Gate();
 
-    // 源侧：成功 → commit；失败 → rollback
-    $h1->onCommit(function (string $key, int $ver) use ($r1): void {
+    // 源侧：成功 → commit（队列交给新宿主）；失败 → rollback（队列就地放回）
+    // 这两行就是 README 里让人照抄的装配方式
+    $h1->onCommit(function (string $key, int $ver) use ($r1, $g): void {
         $r1->commits++;
         $r1->lastKey = $key;
         $r1->lastVer = $ver;
+        $q = $g->commit($key);
+        $r1->commitQueue = implode(",", $q);
     });
-    $h1->onRollback(function (string $key, int $ver, string $why) use ($r1): void {
+    $h1->onRollback(function (string $key, int $ver, string $why) use ($r1, $g): void {
         $r1->rollbacks++;
         $r1->lastKey = $key;
         $r1->lastVer = $ver;
         $r1->why = $why;
+        $q = $g->rollback($key);
+        $r1->rollbackQueue = implode(",", $q);
     });
     // 目标侧：安装
     $h2->onInstall(function (string $key, string $state, int $ver) use ($r2): bool {
@@ -189,6 +267,27 @@ function main(): void
     // 7) 目标不可达（没建链）
     T::ok(!$h1->begin(9, 1, "room:6", 1, "x", nowMs()), "不可达节点 → false");
 
+    // 8) 与闸门联调：冻结 → 排队 → 交接成功 → 队列按序交给新宿主
+    T::ok($g->freeze("room:7", 2, 1), "联调：冻结 room:7");
+    $g->submit("room:7", "m1");
+    $g->submit("room:7", "m2");
+    T::ok($h1->begin(2, 1, "room:7", 1, "state-E", nowMs()), "联调：发起交接");
+    pump($c1, $h1, $c2, $h2, 40);
+    T::ok($g->state("room:7") === Gate::FORWARD, "交接成功后闸门转 FORWARD");
+    T::ok($r1->commitQueue === "m1,m2", "队列按原序交给新宿主", $r1->commitQueue);
+    T::ok($g->submit("room:7", "m3") === Gate::FORWARDED, "此后新请求直接转发");
+
+    // 9) 与闸门联调：目标拒绝 → 队列在本地放回
+    $g->freeze("room:8", 2, 1);
+    $g->submit("room:8", "n1");
+    $r1->rollbackQueue = "";
+    $r2->accept = false;
+    T::ok($h1->begin(2, 1, "room:8", 1, "state-F", nowMs()), "联调：发起将被拒的交接");
+    pump($c1, $h1, $c2, $h2, 40);
+    T::ok($g->state("room:8") === Gate::OPEN, "拒绝后闸门回 OPEN");
+    T::ok($r1->rollbackQueue === "n1", "队列在本地放回", $r1->rollbackQueue);
+    T::ok($g->submit("room:8", "n2") === Gate::PASS, "回滚后本地继续处理");
+
     $st = $h1->stats();
     echo "  源侧统计: sent=" . $st["sent"] . " accepted=" . $st["accepted"]
         . " rejected=" . $st["rejected"] . " timeout=" . $st["timeout"]
@@ -196,6 +295,8 @@ function main(): void
 
     $c1->closeAll();
     $c2->closeAll();
+
+    runGate();
 
     echo PHP_EOL . "结果: " . T::$pass . " 通过 / " . T::$fail . " 失败" . PHP_EOL;
 }
