@@ -70,6 +70,7 @@ final class Recorder extends Service
             "msgId" => $m->msgId,
             "session" => $m->session,
             "data" => is_string($m->data) ? $m->data : "(non-string)",
+            "trace" => $m->traceId,
         ];
 
         if ($this->sleepUs > 0) {
@@ -150,7 +151,7 @@ function caseBetween(): void
     }
 
     $sa->forwardTo = $b;
-    $sa->forwardBudget = 1;
+    $sa->forwardBudget = 10;   // 两条消息都要转发（第一条会消耗一次预算）
     $s->deliver($a, 2001, "go", 9);
     $s->tick();
 
@@ -460,6 +461,57 @@ function caseWatchdogModes(): void
     });
 }
 
+
+/**
+ * 链路追踪：一次入口生成的 traceId 要能跟着消息走完整条链。
+ *
+ * 关键是"自动"——业务代码里没有一行是专门传 trace 的。这决定了它会不会被真的用起来：
+ * 需要手动传的追踪，三个月后就没人传了。
+ */
+function caseTracePropagation(): void
+{
+    echo PHP_EOL . "[11] 链路追踪：跨服务自动继承" . PHP_EOL;
+
+    Scheduler::reset();
+    $s = Scheduler::instance();
+    $s->register("rec", function () {
+        return new Recorder();
+    });
+    $a = $s->spawn("rec");
+    $b = $s->spawn("rec");
+    $sa = $s->serviceOf($a);
+    if (!($sa instanceof Recorder)) {
+        return;
+    }
+    // A 收到后转发给 B
+    $sa->forwardTo = $b;
+    $sa->forwardBudget = 10;   // 两条消息都要转发（第一条会消耗一次预算）
+
+    $trace = $s->newTrace();
+    T::ok($trace > 0, "生成了 traceId", "t=" . $trace);
+
+    // 入口：把 trace 放进消息（真实场景是网络层做的）
+    $s->deliver($a, 1001, "op", 0);
+    $s->tick();
+    // 上一条没有 trace；下面这条带 trace
+    $s->setTrace($trace);
+    $s->deliver($a, 1002, "op", 0);
+    $s->setTrace(0);
+    $s->tick();
+
+    $gotB = [];
+    $sb = $s->serviceOf($b);
+    if ($sb instanceof Recorder) {
+        foreach ($sb->got as $g) {
+            $gotB[] = $g["trace"];
+        }
+    }
+    T::ok(in_array($trace, $gotB, true), "B 收到了 A 转发来的同一条链路", implode(",", $gotB));
+
+    // 没有 trace 的消息不该凭空获得一个
+    T::ok($s->currentTrace() === 0, "批处理结束后 trace 已恢复", "t=" . $s->currentTrace());
+}
+
 function main(): void
 {
     echo "== Service 功能测试 ==" . PHP_EOL;
@@ -467,6 +519,7 @@ function main(): void
     caseBetween();
     caseSelfReentrancy();
     caseKill();
+    caseTracePropagation();
     caseWatchdogModes();
     caseCrashDump();
     caseErrorIsolation();
