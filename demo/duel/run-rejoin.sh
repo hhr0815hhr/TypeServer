@@ -8,19 +8,14 @@
 #   4. 这一局最后正常打完（对面拿到 RESULT）
 set -u
 
-# 示例写死了 9101/9102。本机上这两个端口可能被别的服务占着（比如 mir_login/mir_game），
-# 硬起的话客户端会连到别人的进程，几十秒后得到一堆看不懂的 FAIL。
-# 77 = 主动跳过，verify 会把这套标成 SKIP 而不是 FAIL。
-if command -v ss >/dev/null 2>&1; then
-    for _p in 9101 9102; do
-        if ss -lnt 2>/dev/null | grep -q ":$_p "; then
-            echo "SKIP 端口 $_p 已被占用（本机有别的服务在跑），无法起示例"
-            exit 77
-        fi
-    done
-fi
+# 端口从 9101 起挑空闲的：开发机上固定端口常被别的服务占着（本机是 mir_*），
+# 写死的话客户端会连到别人的进程，几十秒后给出一堆和代码无关的 FAIL。
+
 
 cd "$(dirname "$0")" || exit 1
+. ../../scripts/lib.sh
+
+P0=$(pick_port 9101) || { echo "SKIP 9101 起连续 50 个端口都被占用"; exit 77; }
 
 # duel 是编译产物、不入库。没编过就先编——否则新克隆/CI 会一路跑到「0. 清场」
 # 才因为 ./duel 不存在而失败，而本地编过的环境是绿的（假绿比报错更费时间）。
@@ -38,14 +33,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-wait_port() {
-    local port="$1" i
-    for i in $(seq 1 80); do
-        ss -ltn 2>/dev/null | grep -q ":$port " && return 0
-        sleep 0.1
-    done
-    return 1
-}
 
 echo "=== 0. 清场 ==="
 cleanup
@@ -55,14 +42,14 @@ mkdir -p var/snap var/log
 
 echo
 echo "=== 1. 起服，两个客户端开打 ==="
-./duel > /tmp/rj_srv.log 2>&1 &
+TSF_PORT=$P0 TSF_PORT_AUTO=1 ./duel > /tmp/rj_srv.log 2>&1 &
 SRV=$!
-wait_port 9101 || { echo "没起来"; exit 1; }
+wait_port $P0 || { echo "没起来"; exit 1; }
 sleep 0.5
 
-php85 client.php 9101 tok-1001 aggressive > /tmp/rj_a.log 2>&1 &
+php85 client.php $P0 tok-1001 aggressive > /tmp/rj_a.log 2>&1 &
 CL_A=$!
-php85 client.php 9101 tok-1002 passive > /tmp/rj_b.log 2>&1 &
+php85 client.php $P0 tok-1002 passive > /tmp/rj_b.log 2>&1 &
 CL_B=$!
 
 for _ in $(seq 1 40); do
@@ -90,7 +77,7 @@ fi
 
 echo
 echo "=== 3. 宽限期内重连并 REJOIN ==="
-php85 client.php 9101 tok-1001 aggressive --rejoin > /tmp/rj_a2.log 2>&1 &
+php85 client.php $P0 tok-1001 aggressive --rejoin > /tmp/rj_a2.log 2>&1 &
 CL_A2=$!
 for _ in $(seq 1 20); do
     grep -q "REJOINED\|NOTICE\|timeout" /tmp/rj_a2.log 2>/dev/null && break

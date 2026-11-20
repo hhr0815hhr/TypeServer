@@ -7,23 +7,19 @@
 #   3. 对账能把两份日志归并起来看（`wallet-check` 的数字 = 两边之和）
 #   4. 同一个 node_id 起第二个进程会被拒（双主防护）
 #
-# 端口：node 0 = 9101，node 1 = 9102（同机多进程不能用同一端口——
+# 端口：node 0 / node 1 各一个（同机多进程不能用同一端口——
 # Swoole 在构造 Server 时就 bind，`reuse_port` 选项来不及生效，实测过）。
+# 从 9101/9102 起挑空闲的：这两个端口在开发机上常被别的东西占着（本机是 mir_*），
+# 写死的话客户端会连到别人的进程，几十秒后给出一堆和代码无关的 FAIL。
 set -u
-
-# 示例写死了 9101/9102。本机上这两个端口可能被别的服务占着（比如 mir_login/mir_game），
-# 硬起的话客户端会连到别人的进程，几十秒后得到一堆看不懂的 FAIL。
-# 77 = 主动跳过，verify 会把这套标成 SKIP 而不是 FAIL。
-if command -v ss >/dev/null 2>&1; then
-    for _p in 9101 9102; do
-        if ss -lnt 2>/dev/null | grep -q ":$_p "; then
-            echo "SKIP 端口 $_p 已被占用（本机有别的服务在跑），无法起示例"
-            exit 77
-        fi
-    done
-fi
-
 cd "$(dirname "$0")" || exit 1
+. ../../scripts/lib.sh
+
+P0=$(pick_port 9101) || { echo "SKIP 9101 起连续 50 个端口都被占用"; exit 77; }
+P1=$(pick_port $((P0 + 1))) || { echo "SKIP 挑不到第二个端口"; exit 77; }
+if [ "$P1" = "$P0" ]; then
+    P1=$(pick_port $((P0 + 1))) || { echo "SKIP 挑不到第二个端口"; exit 77; }
+fi
 
 # duel 是编译产物、不入库。没编过就先编——否则新克隆/CI 会一路跑到「0. 清场」
 # 才因为 ./duel 不存在而失败，而本地编过的环境是绿的（假绿比报错更费时间）。
@@ -40,15 +36,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-wait_port() {
-    local port="$1" i
-    for i in $(seq 1 80); do
-        ss -ltn 2>/dev/null | grep -q ":$port " && return 0
-        sleep 0.1
-    done
-    return 1
-}
-
 echo "=== 0. 清场 ==="
 cleanup
 rm -rf var/snap var/log var/settle.log var/settle.n*.log var/duel.db var/node*.lock var/drain.n*
@@ -57,21 +44,21 @@ mkdir -p var/snap var/log
 echo "已重置 var/"
 
 echo
-echo "=== 1. 起两个进程（node 0:9101, node 1:9102）==="
-./duel > /tmp/cl_n0.log 2>&1 &
+echo "=== 1. 起两个进程（node 0:$P0, node 1:$P1）==="
+TSF_PORT=$P0 TSF_PORT_AUTO=1 ./duel > /tmp/cl_n0.log 2>&1 &
 N0=$!
-TSF_ENV=node1 ./duel > /tmp/cl_n1.log 2>&1 &
+TSF_ENV=node1 TSF_PORT=$P1 TSF_PORT_AUTO=1 ./duel > /tmp/cl_n1.log 2>&1 &
 N1=$!
 
-wait_port 9101 || { echo "node 0 没起来"; tail -5 /tmp/cl_n0.log; exit 1; }
-wait_port 9102 || { echo "node 1 没起来"; tail -5 /tmp/cl_n1.log; exit 1; }
+wait_port $P0 || { echo "node 0 没起来（$P0）"; tail -5 /tmp/cl_n0.log; exit 1; }
+wait_port $P1 || { echo "node 1 没起来（$P1）"; tail -5 /tmp/cl_n1.log; exit 1; }
 sleep 1
-ok "两个进程都在监听（9101 / 9102）"
+ok "两个进程都在监听（$P0 / $P1）"
 
 echo
 echo "=== 2. node 0 上打一局 ==="
-php85 client.php 9101 tok-1001 aggressive > /tmp/cl_a.log 2>&1 &
-php85 client.php 9101 tok-1002 passive > /tmp/cl_b.log 2>&1 &
+php85 client.php $P0 tok-1001 aggressive > /tmp/cl_a.log 2>&1 &
+php85 client.php $P0 tok-1002 passive > /tmp/cl_b.log 2>&1 &
 for _ in $(seq 1 60); do
     grep -q "RESULT" /tmp/cl_a.log 2>/dev/null && break
     sleep 0.5
@@ -80,8 +67,8 @@ if grep -q "RESULT" /tmp/cl_a.log; then ok "node 0 一局打完了"; else bad "n
 
 echo
 echo "=== 3. node 1 上打一局 ==="
-php85 client.php 9102 tok-2001 aggressive > /tmp/cl_c.log 2>&1 &
-php85 client.php 9102 tok-2002 passive > /tmp/cl_d.log 2>&1 &
+php85 client.php $P1 tok-2001 aggressive > /tmp/cl_c.log 2>&1 &
+php85 client.php $P1 tok-2002 passive > /tmp/cl_d.log 2>&1 &
 for _ in $(seq 1 60); do
     grep -q "RESULT" /tmp/cl_c.log 2>/dev/null && break
     sleep 0.5
@@ -129,7 +116,7 @@ esac
 
 echo
 echo "=== 6. 同 node_id 起第二个进程应被拒（双主防护）==="
-if timeout 5 ./duel 2>&1 | grep -q "已被进程"; then
+if TSF_PORT=$P0 timeout 5 ./duel 2>&1 | grep -q "已被进程"; then
     ok "重复 node_id 被拒绝"
 else
     bad "重复 node_id 没被拒绝"

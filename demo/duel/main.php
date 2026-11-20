@@ -34,6 +34,27 @@ use TSF\Transport\ServerFactory;
  * 依赖是单向的：房间不认识 Gateway，只拿着一个「把消息发给某个 uid」的闭包。
  * 将来要把房间拆到别的进程，改这一个闭包就行。
  */
+/**
+ * 从 `$start` 起找一个能 bind 的端口；连续 `$max` 个都被占则返回 0。
+ *
+ * 探完立刻关掉，所以"探测成功"和"稍后真的 bind 成功"之间有个极小窗口。
+ * 这里不追求绝对，只把常见情况（开发机端口被占）处理掉——真正的兜底仍然是
+ * bind 失败时报错，而不是假装"已保证可用"。
+ */
+function pickFreePort(string $host, int $start, int $max): int
+{
+    $probe = ($host === "" || $host === "0.0.0.0") ? "127.0.0.1" : $host;
+    for ($i = 0; $i <= $max; $i++) {
+        $p = $start + $i;
+        $s = @stream_socket_server("tcp://" . $probe . ":" . $p, $errno, $errstr);
+        if ($s !== false) {
+            @fclose($s);
+            return $p;
+        }
+    }
+    return 0;
+}
+
 function main(): void
 {
     $base = __DIR__;
@@ -42,6 +63,22 @@ function main(): void
 
     $host = Config::getString("server.host", "0.0.0.0");
     $port = Config::getInt("server.port", 9101);
+
+    // 端口可被环境变量覆盖：示例脚本先挑一个空闲端口再传进来，避免固定端口被
+    // 别的进程占着时客户端连错服务（本机 9101/9102 常被 mir_* 占用）。
+    $envPort = getenv("TSF_PORT");
+    if (is_string($envPort) && $envPort !== "" && (int) $envPort > 0) {
+        $port = (int) $envPort;
+    }
+    // 从"挑到"到"bind"之间还有窗口，可能被别人抢走；开了这个开关就再顺延一次。
+    // 默认不开：生产服务不该悄悄换端口，那会让网关指向一个没人监听的地址。
+    if (getenv("TSF_PORT_AUTO") === "1") {
+        $picked = pickFreePort($host, $port, 20);
+        if ($picked > 0 && $picked !== $port) {
+            Logger::warn("端口被占用，顺延", ["from" => $port, "to" => $picked]);
+            $port = $picked;
+        }
+    }
 
     $opts = [
         // 以前这里写死 1，**配置里的 server.worker_num 被静默忽略**——
