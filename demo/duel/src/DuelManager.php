@@ -7,6 +7,7 @@ use TSF\Kernel\Logger;
 use TSF\Service\Scheduler;
 use TSF\Room\RoomIds;
 use TSF\Snapshot\Restorer;
+use TSF\Snapshot\Schema;
 use TSF\Snapshot\Snapshot;
 use TSF\Snapshot\Store;
 
@@ -213,6 +214,17 @@ final class DuelManager
         // 房间号的属性，而不是一张需要同步的映射表。
         $node = $this->nodeId;
 
+        // 状态版本迁移链。`v1` 只引入了版本标记本身：老快照（没有 `_v`）的结构
+        // 和新的一样，所以这一步是恒等的。
+        //
+        // 不是为了凑数——**第一次真改结构时，新步骤登记在这里**，而 v0 的老快照
+        // 必须在滚动重启窗口内仍然能读。`Schema` 会拒绝"比代码新"的快照，
+        // 所以回滚到老二进制也安全（它读不了新结构的快照，会跳过而不是读错）。
+        $schema = new Schema(1);
+        $schema->step(1, function (array $st): array {
+            return $st;
+        });
+
         $restorer = new Restorer(50, 200);
         $stat = $restorer->restore(
             $store,
@@ -242,7 +254,8 @@ final class DuelManager
             // 不会走到任何 delete 分支）
             function (int $rid) use ($node): bool {
                 return RoomIds::node($rid) === $node;
-            }
+            },
+            $schema
         );
 
         foreach ($spawned as $s) {

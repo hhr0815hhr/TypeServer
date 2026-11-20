@@ -1,0 +1,6 @@
+{
+    "name": "snapshot-migrate-test",
+    "packages": [
+        "snapshot"
+    ]
+}
