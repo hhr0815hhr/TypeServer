@@ -70,7 +70,7 @@ php85 client.php 9001          # 3) 另开终端验证
 
 ---
 
-## 验证：一条命令跑完 511 项断言
+## 验证：一条命令跑完 515 项断言
 
 ```bash
 bash scripts/ci-preflight.sh   # 先看环境（缺什么、缺在哪、怎么补）
@@ -89,7 +89,7 @@ PASS  cluster        集群/房间归属（11 项）                      14.9s
 PASS  cluster-chan   集群通道/握手（TCP 11 项 + UDS 2000 往返）   16.7s
 PASS  registry       Redis 注册表+租约（38 项，无 Redis 则 SKIP） 20.9s
 PASS  handoff        状态交接（101 项：交接/闸门/重平衡/租约/撤销）      15.6s
-PASS  checkpoint     事件日志检查点（28 项：截断/等价/水位/坏点被拒）      18.4s
+PASS  checkpoint     事件日志检查点（32 项：截断/等价/水位/坏点被拒）      27.9s
 PASS  drain          进程 drain（8 项）                        13.2s
 PASS  rejoin         断线重连（6 项）                            8.5s
 PASS  script         脚本热更（16 项）                          15.8s

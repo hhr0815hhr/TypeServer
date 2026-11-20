@@ -160,6 +160,8 @@ function main(): void
     $cw = new Checkpoint($p . ".ckpt");
     $cw->saveAndPrune($lg, 30, ["x" => 1]);
     T::ok(count($lg->replay()) === 0, "日志被截空");
+    // 整段截断应该是"删文件"而不是"读整文件再写空"：日志大时差别是几十 MB 的白读
+    T::ok(!is_file($p), "整段截断后文件被删掉（不是留个空文件）");
     T::ok($lg->lastSeq() === 30, "高水位仍是 30", "last=" . $lg->lastSeq());
     $seqNext = $lg->append("tx:31", "credit", ["uid" => 1, "delta" => 1]);
     T::ok($seqNext === 31, "新事件接着 31，而不是重置成 1", "seq=" . $seqNext);
@@ -168,7 +170,24 @@ function main(): void
     $lg2 = new EventLog($p);
     T::ok($lg2->lastSeq() === 31, "重开后高水位 31", "last=" . $lg2->lastSeq());
     T::ok($lg2->replay()[0]["s"] === 31, "重开后能读到 31 号");
+
     $lg2->close();
+
+    // 部分截断保留**原始行**：重新 json_encode 会把未知字段吃掉，
+    // 而日志是事实记录，不该因为一次归档被改写
+    $p = fresh("raw.log");
+    $lg3 = new EventLog($p);
+    seed($lg3, 3, 1);
+    file_put_contents($p, '{"s":999,"id":"legacy","k":"credit","t":1,"d":{},"extra":"keep-me"}' . "\n", FILE_APPEND);
+    $lg3->truncate(2);
+    $rawAfter = file_get_contents($p);
+    T::ok(is_string($rawAfter) && strpos($rawAfter, "keep-me") !== false, "部分截断保留了未知字段");
+    $tailS = [];
+    foreach ($lg3->replay() as $e) {
+        $tailS[] = $e["s"];
+    }
+    T::ok($tailS === [3, 999], "保留的序号正确", "s=" . implode(",", $tailS));
+    $lg3->close();
 
     // 8) 恢复耗时：全量 vs 检查点+尾巴
     $p = fresh("speed.log");
@@ -198,6 +217,18 @@ function main(): void
     T::ok($same2, "3 万条事件下两种恢复结果一致");
     echo "  恢复耗时        全量=" . $usFull . " µs，检查点+尾巴=" . $usTail . " µs" . PHP_EOL;
     T::ok($usTail < $usFull, "检查点恢复更快", "tail=" . $usTail . " full=" . $usFull);
+
+    // 整段截断：快速路径不读文件，耗时应该与日志大小无关
+    $pfull = fresh("full.log");
+    $lgf = new EventLog($pfull);
+    seed($lgf, 30000, 1);
+    $t3 = hrtime(true);
+    $lgf->truncate($lgf->lastSeq());
+    $usTrunc = intdiv(hrtime(true) - $t3, 1000);
+    echo "  整段截断        3 万条耗时 " . $usTrunc . " µs，"
+        . (is_file($pfull) ? "文件仍在" : "文件已删") . PHP_EOL;
+    T::ok(!is_file($pfull), "3 万条整段截断后文件已删（O(1)，不随日志增长）");
+    $lgf->close();
 
     echo PHP_EOL . "结果: " . T::$pass . " 通过 / " . T::$fail . " 失败" . PHP_EOL;
 }
