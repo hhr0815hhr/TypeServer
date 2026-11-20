@@ -4,6 +4,8 @@ use TSF\Cluster\Cluster;
 use TSF\Handoff\ClusterTransport;
 use TSF\Handoff\Gate;
 use TSF\Handoff\Handoff;
+use TSF\Handoff\Lease;
+use TSF\Handoff\MemoryLease;
 use TSF\Handoff\Ownership;
 use TSF\Handoff\Rebalancer;
 use TSF\Service\Message;
@@ -179,6 +181,30 @@ final class MapOwnership implements Ownership
     }
 }
 
+/** 永远拿不到租约：模拟"另一个节点认为这个 key 归他" */
+final class DenyLease implements Lease
+{
+    public function tryAcquire(string $key, int $ttlMs): bool
+    {
+        return false;
+    }
+
+    public function renew(string $key, int $ttlMs): bool
+    {
+        return false;
+    }
+
+    public function release(string $key): bool
+    {
+        return true;
+    }
+
+    public function holds(string $key): bool
+    {
+        return false;
+    }
+}
+
 /** 重平衡事件记录 */
 final class Ev
 {
@@ -209,6 +235,8 @@ function runRebalance(Cluster $c1, Handoff $h1, Cluster $c2, Handoff $h2, Rec $r
     $own->map["k:rej"] = 2;     // 该搬，目标会拒绝
 
     $rb = new Rebalancer(1, 1, $h1, $g, $own, 1);   // limit = 1，逼出限流行为
+    $lease = new MemoryLease(1);
+    $rb->useLease($lease, 5000);
     $ev = new Ev();
 
     $rb->onExport(function (string $key): ?string {
@@ -248,6 +276,7 @@ function runRebalance(Cluster $c1, Handoff $h1, Cluster $c2, Handoff $h2, Rec $r
     T::ok($ev->queue === "op-during", "排队请求随结果交出", $ev->queue);
     T::ok(!$rb->isOwned("k:1"), "交接后不再归本地");
     T::ok($g->state("k:1") === Gate::FORWARD, "闸门转 FORWARD");
+    T::ok(!$lease->holds("k:1"), "交接成功后租约已释放（交给新宿主去取）");
 
     // 同一轮里：k:2 目标不可达要立刻解冻，k:skip 被业务跳过，k:rej 发起成功
     T::ok($n2 === 1, "该轮只有 k:rej 发起成功", "n=" . $n2);
@@ -268,10 +297,24 @@ function runRebalance(Cluster $c1, Handoff $h1, Cluster $c2, Handoff $h2, Rec $r
     T::ok($g->state("k:rej") === Gate::OPEN, "失败后闸门回 OPEN");
     $r2->accept = true;
 
+    // 租约被拒：拿不到就不许搬（这是防"两个节点同时认为自己是 owner"的唯一手段）
+    $own2 = new MapOwnership();
+    $own2->map["l:1"] = 2;
+    $g2 = new Gate();
+    $rb2 = new Rebalancer(1, 1, $h1, $g2, $own2, 4);
+    $rb2->useLease(new DenyLease(), 5000);
+    $rb2->onExport(function (string $key): ?string {
+        return "st:" . $key;
+    });
+    $rb2->own("l:1");
+    T::ok($rb2->scan(nowMs()) === 0, "租约被拒时不发起交接");
+    T::ok($rb2->stats()["lease_denied"] === 1, "记到一次 lease_denied");
+    T::ok($g2->state("l:1") === Gate::OPEN, "被拒的 key 不会被冻结");
+
     $st = $rb->stats();
     echo "  重平衡统计: started=" . $st["started"] . " moved=" . $st["moved"]
         . " failed=" . $st["failed"] . " skipped=" . $st["skipped"]
-        . " owned=" . $st["owned"] . PHP_EOL;
+        . " lease_denied=" . $st["lease_denied"] . " owned=" . $st["owned"] . PHP_EOL;
 }
 
 function main(): void

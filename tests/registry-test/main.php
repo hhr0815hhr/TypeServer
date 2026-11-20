@@ -1,6 +1,7 @@
 <?php
 
 use TSF\Discovery\NodeInfo;
+use TSF\Registry\RedisLease;
 use TSF\Registry\RedisRegistry;
 use TSF\Registry\Resp;
 
@@ -157,6 +158,30 @@ function main(): void
     T::ok(hasNode($mid->alive(3000), 9), "ttl 3000 时仍算活");
     T::ok(!hasNode($mid->alive(100), 9), "ttl 100 时被判过期（lastSeen 精判）");
     $mid->unregister(9);
+
+    // 9) 归属租约：跨节点互斥（这是防"两个节点同时搬同一份状态"的唯一手段）
+    $l1 = new RedisLease("127.0.0.1", 6379, "", 0, PREFIX, 1);
+    $l2 = new RedisLease("127.0.0.1", 6379, "", 0, PREFIX, 2);
+    T::ok($l1->connect() && $l2->connect(), "租约建连");
+    T::ok($l1->token() !== $l2->token(), "两个实例的 token 不同");
+    T::ok($l1->tryAcquire("room:1", 5000), "节点1 拿到租约");
+    T::ok(!$l2->tryAcquire("room:1", 5000), "节点2 拿不到（互斥）");
+    T::ok($l1->holds("room:1"), "节点1 确认持有");
+    T::ok(!$l2->holds("room:1"), "节点2 确认不持有");
+    T::ok(!$l2->renew("room:1", 5000), "别人的租约续不了");
+    T::ok($l1->renew("room:1", 5000), "自己的能续");
+    T::ok($l1->release("room:1"), "释放成功");
+    T::ok($l2->tryAcquire("room:1", 5000), "释放后节点2 能拿到");
+    $l2->release("room:1");
+
+    // 过期即失效：持有者崩了不能把 key 永久锁死
+    T::ok($l1->tryAcquire("room:2", 150), "短 TTL 拿到");
+    usleep(300000);
+    T::ok($l2->tryAcquire("room:2", 5000), "过期后别人能拿");
+    T::ok(!$l1->renew("room:2", 5000), "过期后原持有者续不上");
+    $l2->release("room:2");
+    $l1->close();
+    $l2->close();
 
     cleanup($probe);
     $probe->close();
