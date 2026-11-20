@@ -189,6 +189,35 @@ function main(): void
     T::ok($tailS === [3, 999], "保留的序号正确", "s=" . implode(",", $tailS));
     $lg3->close();
 
+    // 10) 增量：基座 + 多个 delta 叠加，删除键要真的消失
+    $p = fresh("delta.ckpt");
+    $cd = new Checkpoint($p);
+    T::ok($cd->save(10, ["a" => 1, "b" => 2]), "写基座");
+    T::ok($cd->saveDelta(20, ["b" => 20, "c" => 3], []), "写增量 1");
+    T::ok($cd->saveDelta(30, ["d" => 4], ["a"]), "写增量 2（带删除）");
+    T::ok($cd->deltaCount() === 2, "两个增量", "n=" . $cd->deltaCount());
+
+    $cd2 = new Checkpoint($p);
+    T::ok($cd2->load(), "基座+增量 加载成功", $cd2->reason());
+    T::ok($cd2->seq() === 30, "水位取最大序号", "seq=" . $cd2->seq());
+    $st2 = $cd2->state();
+    T::ok(($st2["b"] ?? 0) === 20, "增量覆盖旧值", "b=" . ($st2["b"] ?? 0));
+    T::ok(($st2["c"] ?? 0) === 3, "增量新增生效");
+    T::ok(!isset($st2["a"]), "增量删除生效");
+
+    // 压实：写新基座并清掉增量
+    T::ok($cd->compact(40, ["z" => 9]), "压实成功");
+    T::ok($cd->deltaCount() === 0, "增量被清空", "n=" . $cd->deltaCount());
+    $cd3 = new Checkpoint($p);
+    $cd3->load();
+    T::ok($cd3->seq() === 40 && ($cd3->state()["z"] ?? 0) === 9, "压实后只剩基座状态");
+
+    // 坏增量必须整体判失败：只加载基座会得到"半旧的"状态，比加载失败更危险
+    file_put_contents($p . ".d50", "TSFCKPD1 50 deadbeef\n{\"set\":{\"x\":1}}");
+    $cd4 = new Checkpoint($p);
+    T::ok(!$cd4->load(), "坏增量导致整体失败", $cd4->reason());
+    unlink($p . ".d50");
+
     // 8) 恢复耗时：全量 vs 检查点+尾巴
     $p = fresh("speed.log");
     $log = new EventLog($p);

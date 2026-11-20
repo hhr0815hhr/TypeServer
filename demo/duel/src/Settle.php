@@ -109,6 +109,28 @@ final class Settle
     /** 去重表保留多少个最近的 id（按事件序号算） */
     private int $seenWindow = 200000;
 
+    /**
+     * 自上次检查点以来"变过"的键。增量检查点只写这些。
+     *
+     * 为什么不导出时比对新旧状态：那是上百万次比较，和全量写一样贵。
+     * 改动发生的时刻本来就知道，顺手记下来才是 O(变化)。
+     *
+     * @var array<int, true>
+     */
+    private array $dirtyUsers = [];
+
+    /** @var array<string, true> */
+    private array $dirtySeen = [];
+
+    /** @var array<int, true> */
+    private array $dirtyRooms = [];
+
+    /** 距离上次压实写了几个增量 */
+    private int $deltaCount = 0;
+
+    /** 攒多少个增量压一次全量基座 */
+    private int $compactEvery = 20;
+
     private int $sinceCkpt = 0;
 
     /**
@@ -134,7 +156,8 @@ final class Settle
         array $readers = [],
         ?Checkpoint $ckpt = null,
         int $ckptEvery = 10000,
-        int $seenWindow = 200000
+        int $seenWindow = 200000,
+        int $compactEvery = 20
     ) {
         $this->log = $log;
         $this->readers = $readers === [] ? [$log] : $readers;
@@ -142,12 +165,14 @@ final class Settle
         $this->ckpt = $ckpt;
         $this->ckptEvery = $ckptEvery > 0 ? $ckptEvery : 10000;
         $this->seenWindow = $seenWindow > 0 ? $seenWindow : 200000;
+        $this->compactEvery = $compactEvery > 0 ? $compactEvery : 20;
         $this->ckptActive = $ckpt !== null && count($this->readers) === 1;
 
         if ($this->ckptActive && $ckpt !== null && $ckpt->load()) {
             // 有检查点：先恢复折叠结果，再只重放它之后的尾巴。
             // 注意不能 reset —— state 本身就是 reset 之后的起点
             $this->restoreState($ckpt->state());
+            $this->deltaCount = $ckpt->deltaCount();
             $this->rebuildFrom($ckpt->seq() + 1, false);
         } else {
             $this->rebuildFrom(1, true);
@@ -263,11 +288,12 @@ final class Settle
      * 游戏里房间号单调递增，这个风险可以接受；如果哪天要做"补发历史奖励"，
      * 必须绕过这条路径或先用日志对账。
      */
-    private function pruneSeen(int $belowSeq): void
+    /** @return array<int, string> 被裁掉的 id（增量检查点要据此写 del 列表） */
+    private function pruneSeen(int $belowSeq): array
     {
         $keepFrom = $belowSeq - $this->seenWindow;
         if ($keepFrom <= 0 || $this->seen === []) {
-            return;
+            return [];
         }
         $drop = [];
         foreach ($this->seen as $id => $seqNo) {
@@ -277,7 +303,40 @@ final class Settle
         }
         foreach ($drop as $id) {
             unset($this->seen[$id]);
+            unset($this->dirtySeen[$id]);   // 已经要删了，别再写进 set
         }
+        return $drop;
+    }
+
+    /**
+     * 自上次检查点以来变化的键，形状与 `exportState()` 一致。
+     *
+     * @return array<string, int|string|float|bool>
+     */
+    private function dirtySet(): array
+    {
+        // m / n 是两个计数器，量级极小，每次带上省得单独判断
+        $set = ["m" => $this->maxRoom, "n" => $this->settled];
+        foreach ($this->dirtyUsers as $uid => $yes) {
+            $u = (int) $uid;
+            if ($u > 0) {
+                $set["w:" . $u] = $this->wallet->balance($u);
+            }
+        }
+        foreach ($this->dirtySeen as $id => $yes) {
+            $set["s:" . $id] = $this->seen[(string) $id] ?? 0;
+        }
+        foreach ($this->dirtyRooms as $room => $yes) {
+            $set["r:" . $room] = 1;
+        }
+        return $set;
+    }
+
+    private function clearDirty(): void
+    {
+        $this->dirtyUsers = [];
+        $this->dirtySeen = [];
+        $this->dirtyRooms = [];
     }
 
     /** 去重表当前有多少条（观测：应该稳定在 seenWindow 附近，而不是一直涨） */
@@ -307,13 +366,30 @@ final class Settle
         if ($seq <= 0) {
             return;
         }
-        // 先裁剪再导出：导出的是裁剪后的表，检查点才不会越来越大
-        $this->pruneSeen($seq);
-        $kept = $this->ckpt->saveAndPrune($this->log, $seq, $this->exportState());
-        if ($kept < 0) {
-            // 检查点没写成就绝不截断（saveAndPrune 内部已保证），下次再试
-            Logger::warn("settle: 检查点写入失败，跳过截断", ["seq" => $seq]);
+
+        // 先裁剪再写：裁剪掉的 id 要进 del 列表，否则检查点只会越写越大
+        $dropped = $this->pruneSeen($seq);
+        $this->deltaCount++;
+
+        // 第一个检查点必须是全量基座：没有基座时写增量，恢复时无从叠加
+        if (!$this->ckpt->exists() || $this->deltaCount >= $this->compactEvery) {
+            // 定期压实：把增量折叠回基座。不压实的话，恢复时要叠加几十个增量，
+            // 而每个增量都要读一次文件、解一次 JSON
+            if (!$this->ckpt->compact($seq, $this->exportState())) {
+                Logger::warn("settle: 检查点压实失败，跳过截断", ["seq" => $seq]);
+                return;
+            }
+            $this->log->truncate($seq);
+            $this->deltaCount = 0;
+        } else {
+            $kept = $this->ckpt->saveDeltaAndPrune($this->log, $seq, $this->dirtySet(), $dropped);
+            if ($kept < 0) {
+                // 增量没写成就绝不截断：日志是唯一能重建状态的依据
+                Logger::warn("settle: 增量检查点写入失败，跳过截断", ["seq" => $seq]);
+                return;
+            }
         }
+        $this->clearDirty();
     }
 
     /** @param array{s: int, id: string, k: string, t: int, d: array} $ev */
@@ -330,6 +406,7 @@ final class Settle
             return;
         }
         $this->seen[$id] = $ev["s"];
+        $this->dirtySeen[$id] = true;
         $this->replayed++;
 
         $d = is_array($ev["d"]) ? $ev["d"] : [];
@@ -342,7 +419,9 @@ final class Settle
             }
             if ($room > 0) {
                 $this->rooms[$room] = true;
+                $this->dirtyRooms[$room] = true;
             }
+            $this->dirtyUsers[isset($d["winner"]) ? (int) $d["winner"] : 0] = true;
             $this->wallet->credit(
                 isset($d["winner"]) ? (int) $d["winner"] : 0,
                 isset($d["amount"]) ? (int) $d["amount"] : 0
@@ -351,6 +430,7 @@ final class Settle
         }
 
         if ($ev["k"] === self::KIND_CREDIT) {
+            $this->dirtyUsers[isset($d["uid"]) ? (int) $d["uid"] : 0] = true;
             $this->wallet->credit(
                 isset($d["uid"]) ? (int) $d["uid"] : 0,
                 isset($d["amount"]) ? (int) $d["amount"] : 0
@@ -360,6 +440,7 @@ final class Settle
 
         if ($ev["k"] === self::KIND_DEBIT) {
             $uid = isset($d["uid"]) ? (int) $d["uid"] : 0;
+            $this->dirtyUsers[$uid] = true;
             $amount = isset($d["amount"]) ? (int) $d["amount"] : 0;
             if (!$this->wallet->debit($uid, $amount)) {
                 // 日志里有一笔扣款，但按顺序重放时余额不够——说明日志被改过、
@@ -401,11 +482,14 @@ final class Settle
         // 先记在去重表里，再改余额：万一 credit 之后有人重入，
         // 也只会看到"已结算"，不会变成两条
         $this->seen[$id] = $seq;
+        $this->dirtySeen[$id] = true;
         $this->settled++;
         if ($roomId > $this->maxRoom) {
             $this->maxRoom = $roomId;
         }
         $this->rooms[$roomId] = true;
+        $this->dirtyRooms[$roomId] = true;
+        $this->dirtyUsers[$winner] = true;
         $this->wallet->credit($winner, $amount);
         $this->lastSeq = $seq;
         $this->maybeCheckpoint();
@@ -441,6 +525,8 @@ final class Settle
         ]);
 
         $this->seen[$id] = $seq;
+        $this->dirtySeen[$id] = true;
+        $this->dirtyUsers[$uid] = true;
         $this->debited++;
         $this->lastSeq = $seq;
         if (!$this->wallet->debit($uid, $amount)) {
@@ -475,6 +561,8 @@ final class Settle
         ]);
 
         $this->seen[$id] = $seq;
+        $this->dirtySeen[$id] = true;
+        $this->dirtyUsers[$uid] = true;
         $this->lastSeq = $seq;
         $this->wallet->credit($uid, $amount);
         $this->maybeCheckpoint();

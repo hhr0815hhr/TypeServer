@@ -445,6 +445,8 @@ function caseCheckpoint(): void
     T::ok($cp->seq() > 0, "检查点记录了水位", "seq=" . $cp->seq());
     $left = count($log->replay());
     T::ok($left < 100, "老日志已被截断", "left=" . $left);
+    // 第一次必须写基座，之后只写增量（100 条 / 每 20 条一次 = 1 基座 + 4 增量）
+    T::ok($cp->deltaCount() === 4, "首次写基座，其余写增量", "deltas=" . $cp->deltaCount());
 
     $before = $st->wallet()->all();
     $log->close();
@@ -506,6 +508,35 @@ function caseSeenWindow(): void
     $log2->close();
 }
 
+
+function caseCompact(): void
+{
+    echo "== [17] 增量定期压实 ==" . PHP_EOL;
+    $path = fresh("compact");
+    $log = new EventLog($path);
+    $cp = new Checkpoint($path . ".ckpt");
+    // 每 10 条一个检查点、每 5 个增量压实一次
+    $st = new Settle($log, null, [], $cp, 10, 200000, 5);
+
+    $sum = 0;
+    for ($i = 1; $i <= 200; $i++) {
+        if ($st->settle($i, 2000 + ($i % 4))) {
+            $sum += Settle::REWARD;
+        }
+    }
+    T::eq($st->wallet()->total(), $sum, "压实不影响余额");
+    T::ok($cp->deltaCount() <= 5, "增量个数被压在阈内", "deltas=" . $cp->deltaCount());
+    T::ok($cp->deltaCount() > 0, "确实在写增量（不是每次都全量）", "deltas=" . $cp->deltaCount());
+    $log->close();
+
+    $log2 = new EventLog($path);
+    $cp2 = new Checkpoint($path . ".ckpt");
+    $st2 = new Settle($log2, null, [], $cp2, 10, 200000, 5);
+    T::eq($st2->wallet()->total(), $sum, "基座+增量恢复后余额一致");
+    T::ok($st2->isSettled(200), "最近的 id 还在");
+    $log2->close();
+}
+
 function main(): void
 {
     @mkdir(DIR, 0777, true);
@@ -525,6 +556,7 @@ function main(): void
     caseMergeNodeLogs();
     caseCheckpoint();
     caseSeenWindow();
+    caseCompact();
 
     echo PHP_EOL . "结果: " . T::$pass . " 通过 / " . T::$fail . " 失败" . PHP_EOL;
     exit(T::$fail === 0 ? 0 : 1);
