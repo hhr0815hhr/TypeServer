@@ -467,6 +467,45 @@ function caseCheckpoint(): void
     $log2->close();
 }
 
+
+function caseSeenWindow(): void
+{
+    echo "== [16] 去重表有界裁剪 ==" . PHP_EOL;
+    $path = fresh("seen");
+    $log = new EventLog($path);
+    $cp = new Checkpoint($path . ".ckpt");
+    // 窗口 100、每 50 条压一次：跑 400 局后去重表应稳定在 100 上下，而不是 400
+    $st = new Settle($log, null, [], $cp, 50, 100);
+
+    $sum = 0;
+    for ($i = 1; $i <= 400; $i++) {
+        if ($st->settle($i, 1000 + ($i % 3))) {
+            $sum += Settle::REWARD;
+        }
+    }
+    T::eq($st->wallet()->total(), $sum, "裁剪不影响余额");
+    T::ok($st->seenCount() <= 150, "去重表被裁到窗口附近", "seen=" . $st->seenCount());
+    T::ok($st->seenCount() > 50, "裁剪不会把窗口内的也删掉", "seen=" . $st->seenCount());
+
+    // 窗口内仍然幂等
+    T::ok(!$st->settle(400, 1000), "最近的房间仍然挡住重复结算");
+    T::ok(!$st->settle(399, 1001), "倒数第二个也挡得住");
+
+    // 窗口外的旧 id 已经忘掉：这是刻意的取舍，写清楚
+    T::ok(!$st->isSettled(1), "很久以前的房间号已被裁掉（刻意）");
+
+    $log->close();
+
+    // 重启：余额仍要对（裁剪只忘 id，不动钱）
+    $log2 = new EventLog($path);
+    $cp2 = new Checkpoint($path . ".ckpt");
+    $st2 = new Settle($log2, null, [], $cp2, 50, 100);
+    T::eq($st2->wallet()->total(), $sum, "重启后余额一致");
+    T::ok($st2->isSettled(400), "重启后最近的 id 还在");
+    T::eq($st2->stats()["settled"], 400, "结算笔数不因裁剪而丢");
+    $log2->close();
+}
+
 function main(): void
 {
     @mkdir(DIR, 0777, true);
@@ -485,6 +524,7 @@ function main(): void
     caseReconcile();
     caseMergeNodeLogs();
     caseCheckpoint();
+    caseSeenWindow();
 
     echo PHP_EOL . "结果: " . T::$pass . " 通过 / " . T::$fail . " 失败" . PHP_EOL;
     exit(T::$fail === 0 ? 0 : 1);

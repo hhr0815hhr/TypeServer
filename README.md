@@ -70,7 +70,7 @@ php85 client.php 9001          # 3) 另开终端验证
 
 ---
 
-## 验证：一条命令跑完 502 项断言
+## 验证：一条命令跑完 511 项断言
 
 ```bash
 bash scripts/ci-preflight.sh   # 先看环境（缺什么、缺在哪、怎么补）
@@ -81,7 +81,7 @@ tsf verify                     # 15 个套件
 结果    套件             内容                                耗时
 PASS  semantics      AOT 语言语义差分（45 用例）                  17.5s
 PASS  swoole         Swoole 契约（6 项）                       9.3s
-PASS  settle         金币账本（100 项）                         19.7s
+PASS  settle         金币账本（109 项）                        23.1s
 PASS  settle-crash   账本崩溃重放（14 项）                       45.9s
 PASS  fd             fd/内存守卫（10 项）                       0.0s
 PASS  room           房间/成员/共享宿主（100 项）                  20.6s

@@ -74,7 +74,18 @@ final class Settle
 
     private Wallet $wallet;
 
-    /** @var array<string, true> 已经折叠过的业务 id */
+    /**
+     * 已经折叠过的业务 id => 它的事件序号。
+     *
+     * 存序号而不是 `true`，是为了能**有界裁剪**：去重表本身会随事件数线性增长，
+     * 跑一年就是几十万条字符串键。序号是天然的裁剪依据——被检查点截断掉的那段历史
+     * 再也不会被重放，所以它们的 id 也可以忘掉。
+     *
+     * 保留窗口（`$seenWindow`）比"截断水位"宽松一截：即使事件已经不在日志里了，
+     * 也再留一段，挡住"客户端重试一个很旧的请求"这种运行期重复。
+     *
+     * @var array<string, int>
+     */
     private array $seen = [];
 
     /** @var int 重放折叠了多少条事件（诊断用） */
@@ -94,6 +105,9 @@ final class Settle
 
     /** 每折叠多少条压一次检查点 */
     private int $ckptEvery = 10000;
+
+    /** 去重表保留多少个最近的 id（按事件序号算） */
+    private int $seenWindow = 200000;
 
     private int $sinceCkpt = 0;
 
@@ -119,13 +133,15 @@ final class Settle
         ?Wallet $wallet = null,
         array $readers = [],
         ?Checkpoint $ckpt = null,
-        int $ckptEvery = 10000
+        int $ckptEvery = 10000,
+        int $seenWindow = 200000
     ) {
         $this->log = $log;
         $this->readers = $readers === [] ? [$log] : $readers;
         $this->wallet = $wallet !== null ? $wallet : new Wallet();
         $this->ckpt = $ckpt;
         $this->ckptEvery = $ckptEvery > 0 ? $ckptEvery : 10000;
+        $this->seenWindow = $seenWindow > 0 ? $seenWindow : 200000;
         $this->ckptActive = $ckpt !== null && count($this->readers) === 1;
 
         if ($this->ckptActive && $ckpt !== null && $ckpt->load()) {
@@ -189,8 +205,8 @@ final class Settle
         foreach ($this->wallet->all() as $uid => $bal) {
             $out["w:" . $uid] = $bal;
         }
-        foreach ($this->seen as $id => $yes) {
-            $out["s:" . $id] = 1;
+        foreach ($this->seen as $id => $seqNo) {
+            $out["s:" . $id] = $seqNo;
         }
         foreach ($this->rooms as $room => $yes) {
             $out["r:" . $room] = 1;
@@ -228,13 +244,46 @@ final class Settle
                 continue;
             }
             if (strpos($key, "s:") === 0) {
-                $this->seen[substr($key, 2)] = true;
+                $this->seen[substr($key, 2)] = is_int($v) ? $v : 0;
                 continue;
             }
             if (strpos($key, "r:") === 0) {
                 $this->rooms[(int) substr($key, 2)] = true;
             }
         }
+    }
+
+    /**
+     * 裁剪去重表：只保留序号在 `$seenWindow` 之内的 id。
+     *
+     * 安全性来自"截断"：这些事件已经从日志里删掉了（`saveAndPrune` 先写检查点再截断），
+     * 不会被重放，所以忘掉它们的 id 不会导致重复入账。
+     *
+     * 代价写清楚：**把一个很久以前的房间号再结算一次，会被当成新的一局**。
+     * 游戏里房间号单调递增，这个风险可以接受；如果哪天要做"补发历史奖励"，
+     * 必须绕过这条路径或先用日志对账。
+     */
+    private function pruneSeen(int $belowSeq): void
+    {
+        $keepFrom = $belowSeq - $this->seenWindow;
+        if ($keepFrom <= 0 || $this->seen === []) {
+            return;
+        }
+        $drop = [];
+        foreach ($this->seen as $id => $seqNo) {
+            if ($seqNo > 0 && $seqNo <= $keepFrom) {
+                $drop[] = (string) $id;
+            }
+        }
+        foreach ($drop as $id) {
+            unset($this->seen[$id]);
+        }
+    }
+
+    /** 去重表当前有多少条（观测：应该稳定在 seenWindow 附近，而不是一直涨） */
+    public function seenCount(): int
+    {
+        return count($this->seen);
     }
 
     /**
@@ -258,6 +307,8 @@ final class Settle
         if ($seq <= 0) {
             return;
         }
+        // 先裁剪再导出：导出的是裁剪后的表，检查点才不会越来越大
+        $this->pruneSeen($seq);
         $kept = $this->ckpt->saveAndPrune($this->log, $seq, $this->exportState());
         if ($kept < 0) {
             // 检查点没写成就绝不截断（saveAndPrune 内部已保证），下次再试
@@ -278,7 +329,7 @@ final class Settle
             ]);
             return;
         }
-        $this->seen[$id] = true;
+        $this->seen[$id] = $ev["s"];
         $this->replayed++;
 
         $d = is_array($ev["d"]) ? $ev["d"] : [];
@@ -349,7 +400,7 @@ final class Settle
 
         // 先记在去重表里，再改余额：万一 credit 之后有人重入，
         // 也只会看到"已结算"，不会变成两条
-        $this->seen[$id] = true;
+        $this->seen[$id] = $seq;
         $this->settled++;
         if ($roomId > $this->maxRoom) {
             $this->maxRoom = $roomId;
@@ -389,7 +440,7 @@ final class Settle
             "ref" => $ref,
         ]);
 
-        $this->seen[$id] = true;
+        $this->seen[$id] = $seq;
         $this->debited++;
         $this->lastSeq = $seq;
         if (!$this->wallet->debit($uid, $amount)) {
@@ -423,7 +474,7 @@ final class Settle
             "ref" => $ref,
         ]);
 
-        $this->seen[$id] = true;
+        $this->seen[$id] = $seq;
         $this->lastSeq = $seq;
         $this->wallet->credit($uid, $amount);
         $this->maybeCheckpoint();
@@ -589,6 +640,7 @@ final class Settle
             "settled" => $this->settled,
             "debited" => $this->debited,
             "total" => $this->wallet->total(),
+            "seen" => count($this->seen),
             "log" => $this->log->stats(),
         ];
     }
