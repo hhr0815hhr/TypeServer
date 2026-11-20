@@ -70,26 +70,27 @@ php85 client.php 9001          # 3) 另开终端验证
 
 ---
 
-## 验证：一条命令跑完 315 项断言
+## 验证：一条命令跑完 326 项断言
 
 ```bash
 bash scripts/ci-preflight.sh   # 先看环境（缺什么、缺在哪、怎么补）
-tsf verify                     # 11 个套件
+tsf verify                     # 12 个套件
 ```
 
 ```
 结果    套件             内容                                耗时
-PASS  semantics      AOT 语言语义差分（45 用例）                  18.2s
-PASS  swoole         Swoole 契约（6 项）                       9.3s
-PASS  settle         金币账本（91 项）                          18.3s
-PASS  settle-crash   账本崩溃重放（14 项）                       48.9s
+PASS  semantics      AOT 语言语义差分（45 用例）                  14.8s
+PASS  swoole         Swoole 契约（6 项）                       9.4s
+PASS  settle         金币账本（91 项）                          16.9s
+PASS  settle-crash   账本崩溃重放（14 项）                       54.6s
 PASS  fd             fd/内存守卫（10 项）                       0.0s
-PASS  room           房间/成员/共享宿主（100 项）                  17.1s
-PASS  cluster        集群/房间归属（11 项）                      14.5s
-PASS  drain          进程 drain（8 项）                        13.2s
-PASS  rejoin         断线重连（6 项）                            8.7s
-PASS  script         脚本热更（16 项）                          14.8s
-PASS  http           HTTP 接口（8 项）                         16.4s
+PASS  room           房间/成员/共享宿主（100 项）                  18.7s
+PASS  cluster        集群/房间归属（11 项）                      15.1s
+PASS  cluster-chan   集群通道/握手（TCP 11 项 + UDS 2000 往返）   15.3s
+PASS  drain          进程 drain（8 项）                        13.9s
+PASS  rejoin         断线重连（6 项）                            8.5s
+PASS  script         脚本热更（16 项）                          14.7s
+PASS  http           HTTP 接口（8 项）                         11.4s
 ```
 
 `tsf verify --list` 看清单，`tsf verify <id>` 只跑一个。缺工具链的套件会标 `SKIP`

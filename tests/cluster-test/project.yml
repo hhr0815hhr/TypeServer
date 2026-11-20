@@ -7,4 +7,4 @@ sources:
   - /data/TypeServer/tsf/src
   - /data/TypeServer/tsf/ext/codec/php-src
   - /data/TypeServer/tsf/ext/codec/cpp-src
-  - /data/TypeServer/bench/cluster-test/main.php
+  - /data/TypeServer/tests/cluster-test/main.php

@@ -144,17 +144,21 @@ L0 接入层       Swoole（TCP/WS/协程），AOT 只编胶水
 
 ### 4.3 集群：最强的能力，也是最大的天花板
 
-`tsf/src/Cluster/Cluster.php` 只实现了 **Unix domain socket**：
+评审当时，`tsf/src/Cluster/Cluster.php` **只实现了 Unix domain socket**：
 
 ```php
-stream_socket_server("unix://" . $this->path, ...);   // :70
-stream_socket_client("unix://" . $path, ...);         // :82
+stream_socket_server("unix://" . $this->path, ...);   // 评审时的 :70
+stream_socket_client("unix://" . $path, ...);         // 评审时的 :82
 ```
 
 配套的服务发现是**本地文件注册表**（`{node}.json` + `{node}.beat`，靠 `scandir` 轮询）。
 
-**这意味着**：`node_id` 1..255 的地址空间是为多机设计的，但**当前实现只能跑在同一台机器上**。  
+**这意味着**：`node_id` 1..255 的地址空间是为多机设计的，但**实现只能跑在同一台机器上**。  
 `Shard\Router`、`CircuitBreaker`、`Discovery` 这一整套跨服基础设施，在单机上跑得通，跨机跑不通——换传输层（TCP + 握手鉴权 + 序列化协商）是必须补的一课。
+
+> **2026-11-20 已补传输层**（§13）：`tcp://host:port` 与 unix 同一套 API，每条连接先握手
+> （节点号 / codec / HMAC 三校验，失败带原因）。剩下的缺口是**服务发现仍为本机文件**，
+> 跨机需要中心化注册表。所以现在的状态是"传输能跨机，目录还不能"。
 
 ---
 
@@ -194,8 +198,12 @@ stream_socket_client("unix://" . $path, ...);         // :82
 
 **① 位置透明有了，跨机没有。**  
 TSF 的 `Addr::pack(nodeId, id)` + `deliver()` 位运算，是 OTP/Skynet 那套"业务不关心目标在哪"的正确抽象。  
-Skynet 用 `harbor` + TCP 把这条路走完；TSF 停在 Unix socket。  
+Skynet 用 `harbor` + TCP 把这条路走完；TSF 原本停在 Unix socket。  
 **抽象对了，实现没走完**——这是"好的架构设计 + 未完成的工程"的典型状态。
+
+> **2026-11-20 更新**：传输层已补上 TCP + 握手（§13），`tcp://host:port` 与 unix 走同一套 API，
+> 跨机传包可用。**但节点目录仍是本地文件注册表**（`Discovery\FileRegistry` 靠 `scandir` 轮询），
+> 跨机还没有中心化注册表——所以现在是"传输能跨机，目录还不能"，离"多机集群"还差一步。
 
 **② 热更：文档诚实，代价真实。**  
 `ARCHITECTURE-DESIGN.md` 明确写"进程内类替换不成立"，给出 T0（配置）/T1（闭包）/T2（滚动重启）三级方案，这一步比很多自研框架诚实。  
@@ -254,12 +262,26 @@ Skynet 官方不带这种设施；传统 C++ 服通常有，但很少有可跑�
 
 ### 不适合
 
-1. **需要跨机扩展的重度 MMO**：集群只支持 Unix socket，做不了多机。
+1. **重度 MMO 的全量迁移**：传输层已可跨机，但服务发现仍是本机文件注册表，节点目录没有中心化，`Shard`/`Router` 的透明寻址在跨机场景下还缺"目录"这一环。
 2. **要求不停服改逻辑的线上项目**：没有代码级热更，T2 丢状态。
 3. **高频状态同步（30 Hz+）**：3.4 万 msg/s/worker 撑不住百人同屏。
 4. **平台化中台**：缺中心化注册/配置中心/链路追踪，运维能力停留在"打日志"。
 5. **团队没有 AOT 子集纪律**：`mixed`、动态调用、`switch` fallthrough 都会静默降级或报错。
 
+
+## 九、演进建议与状态
+
+| 优先级 | 事项 | 为什么 | 状态 |
+|:--:|:--|:--|:--|
+| **P0** | 修 D1/D2/D3/D5/D6 | 否则"新克隆跑不通、镜像自检报红、压测测出 0"，任何外部评估第一小时就会放弃 | ✅ 2026-11-19（§12） |
+| **P1** | Cluster 换 TCP + 握手 | 从"单机框架"变成"分布式框架"的唯一一道门；`Shard`/`Breaker` 已写好，只缺传输 | ✅ 2026-11-20（§13） |
+| **P1** | 服务发现换 Redis/etcd | 文件注册表跨机就要共享文件系统，而 NFS 的 mtime 与性能都不适合做心跳 | 未做 |
+| **P2** | `PlayerState::migrate()` 接入 T2 | 把"重启"升级为"带状态迁移的无感升级"，文档已给方案 | 未做 |
+| **P2** | eventlog 加 checkpoint/truncate | 启动时间是日志长度的线性函数，线上跑三个月就会痛 | 未做 |
+| **P3** | 指标导出 Prometheus | 现在只打日志，排障靠 grep | 未做 |
+| **P3** | `tpc` 类方法表校验（D4） | 让"编译通过"真正等于"能跑" | 未做，属 typephp 上游 |
+
+---
 
 ## 十、总体评价
 
@@ -455,5 +477,56 @@ D4 的根因在 `tpc`：它对 `private Room $room;` 这种**已声明类型**�
 一批 demo 的启动前置（端口、迁移、配置）。这次没有直接加，原因是它牵涉每个 demo 的
 启动差异，草率加进去大概率变成"常年红、被忽略"的套件——那比没有更糟。
 建议单独排期，先只覆盖 `demo/duel` + `demo/doudizhu` 两个已知可启动的。
+
+---
+
+## 十三、P1 · Cluster 跨机传输 + 握手（2026-11-20）
+
+### 做了什么
+
+| 文件 | 改动 |
+|:--|:--|
+| `src/Cluster/Cluster.php` | 地址解析（裸路径 / `unix://` / `tcp://host:port`）；`listen/connect` 双传输；`poll()` 驱动握手；`hasPeer/peerNodes` 改为"握手完成才算通"；`closeAll` 只对 unix 删 socket 文件 |
+| `src/Cluster/Link.php` | 握手状态机（魔数 + hello + 校验），失败带原因；`drain()` 在握手完成前返回空 |
+| `tests/cluster-test/` | 修 `project.yml` 的源码路径（又是指向不存在的 `bench/cluster-test`）；补 11 项 TCP 用例 + 重写 `run.sh`；接入 `tsf verify` |
+
+### 握手协议
+
+```
+连接建立 → 双方各发: "TSFC\x01" + Packet(msgId=0, payload="node\x1Fcodec\x1Fnonce\x1Fmac")
+校验: 节点号范围 / 不是自己 / codec 一致 / mac = HMAC-SHA256(secret, node|codec|nonce)
+通过 → 认这条链路；不过 → 断开 + 记 hs_fail + 日志带原因
+```
+
+为什么值得做：旧版靠"第一个包里的 src 节点位"认身份。Unix socket 时代意味着
+"本机任意进程都能自称 node 7"；到了 TCP 就是"任意人可冒充"。握手把身份从
+**数据里声明**变成**连接时证明**。
+
+三条拒绝原因给的是可操作信息，而不是一个布尔：
+`bad-magic`（对方不是 TSF）/ `bad-mac`（密钥配错）/ `codec-mismatch:json!=raw`（两端协议不一致）。
+这三者的处理方式完全不同——只回一个 false，排障时只能猜。
+
+### 兼容性
+
+**裸路径仍是 unix**，所以 `tests/{breaker,shard-router}-test`、`bench/{rpc-cluster,shard-cross,breaker-live,cluster-bench}`
+一行不用改。UDS 路径在新协议下实测 2000 次往返 p99 274 µs（阈值 500 µs）。
+
+### 复验
+
+```
+PASS  cluster-chan   集群通道/握手（TCP 11 项 + UDS 2000 往返）   15.3s
+通过 12 / 失败 0 / 跳过 0
+```
+
+TCP 侧断言覆盖：建链、双向认节点、传包与 `src` 带节点号、垃圾字节被魔数拦、
+密钥不符、codec 不符、重复节点号（dup）。
+
+### 这次**没有**解决的
+
+1. **服务发现仍是本机文件**（`Discovery\FileRegistry`）。所以现在只能说"传输能跨机"，
+   不能说"多机集群可用"——节点目录还没有中心化版本。
+2. **只校验不加密**：payload 仍是明文，能监听链路的人照样能读。要更强得上 TLS。
+3. **重放只防最近一次**：nonce 由 hrtime+pid+计数器派生，服务端不缓存历史，
+   拿到旧 hello 且对端恰好下线时仍可能重放成功。真要防要窗口缓存或 TLS。
 
 

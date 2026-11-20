@@ -2,6 +2,7 @@
 
 use TSF\Cluster\Cluster;
 use TSF\Cluster\Packet;
+use TSF\Protocol\Payload\JsonPayload;
 use TSF\Service\Message;
 use TSF\Service\Scheduler;
 use TSF\Service\Service;
@@ -9,6 +10,25 @@ use TSF\Service\Service;
 const MSG_PING = 2001;
 
 const MSG_PONG = 2002;
+
+/** 断言计数：run.sh 靠 FAIL 行判定，和 room-test 保持同一套约定 */
+final class R
+{
+    public static int $pass = 0;
+
+    public static int $fail = 0;
+
+    public static function ok(bool $cond, string $name, string $extra = ""): void
+    {
+        if ($cond) {
+            self::$pass++;
+            echo "  PASS  " . $name . ($extra !== "" ? "  (" . $extra . ")" : "") . PHP_EOL;
+        } else {
+            self::$fail++;
+            echo "  FAIL  " . $name . ($extra !== "" ? "  (" . $extra . ")" : "") . PHP_EOL;
+        }
+    }
+}
 
 /** 服务端：收到什么就原样回给发送方 */
 final class EchoService extends Service
@@ -215,6 +235,103 @@ function runUnit(): void
     echo "  本机地址不误判 " . (Scheduler::instance()->has($addr) && $c->stats()["drop"] === 1 ? "OK" : "FAIL") . PHP_EOL;
 }
 
+/** 轮询两条链路若干轮（握手是异步的，单次 poll 不够） */
+function pump2(Cluster $a, Cluster $b, int $rounds = 60): void
+{
+    for ($i = 0; $i < $rounds; $i++) {
+        $a->poll();
+        $b->poll();
+        $a->flush();
+        $b->flush();
+        usleep(2000);
+    }
+}
+
+/**
+ * TCP 通道 + 握手的四类拒斥。
+ *
+ * 这些用例在**一个进程里**跑四个 Cluster，各自监听不同端口：握手是纯传输层行为，
+ * 不需要调度器参与，这样比起四个进程快一个量级，也更容易定位失败点。
+ */
+function runTcp(): void
+{
+    echo "== Cluster TCP / 握手 ==" . PHP_EOL;
+    $addr1 = "tcp://127.0.0.1:23101";
+    $c1 = new Cluster(1, $addr1, null, "s3cr3t");
+    $c1->listen();
+    $c2 = new Cluster(2, "tcp://127.0.0.1:23102", null, "s3cr3t");
+    $c2->listen();
+
+    R::ok($c2->connect(1, $addr1), "TCP 建链");
+    pump2($c1, $c2, 60);
+    R::ok($c1->hasPeer(2), "服务端认下 node2");
+    R::ok($c2->hasPeer(1), "客户端认下 node1");
+
+    // 传包：node2 的本地服务 1 → node1 的本地服务 5
+    $dst = (1 << 24) | 5;
+    R::ok($c2->send($dst, 1, MSG_PING, "hi-tcp"), "send 入队");
+
+    $got = [];
+    for ($i = 0; $i < 100 && $got === []; $i++) {
+        $got = $c1->poll();
+        $c2->poll();
+        $c1->flush();
+        $c2->flush();
+        if ($got === []) {
+            usleep(2000);
+        }
+    }
+    $first = $got === [] ? null : $got[0];
+    $payload = $first !== null ? (is_string($first->data) ? $first->data : "") : "";
+    R::ok($payload === "hi-tcp", "TCP 收到载荷", $payload === "" ? "空" : $payload);
+    R::ok($first !== null && $first->src === ((2 << 24) | 1), "src 带节点号");
+
+    // 1) 垃圾字节：不是我们的协议，应被魔数拦掉，而不是当包长度解析
+    $failBefore = $c1->stats()["hs_fail"];
+    $junk = @stream_socket_client($addr1, $e1, $e2, 1.0);
+    if ($junk !== false) {
+        @fwrite($junk, "GET / HTTP/1.0\r\n\r\n");
+        usleep(20000);
+        $c1->poll();
+        @fclose($junk);
+    }
+    R::ok($c1->stats()["hs_fail"] > $failBefore, "垃圾连接被拒",
+        "hs_fail=" . $c1->stats()["hs_fail"]);
+
+    // 2) 密钥不符
+    $failBefore = $c1->stats()["hs_fail"];
+    $c3 = new Cluster(3, "tcp://127.0.0.1:23103", null, "wrong-secret");
+    $c3->listen();
+    $c3->connect(1, $addr1);
+    pump2($c1, $c3, 60);
+    R::ok(!$c1->hasPeer(3) && !$c3->hasPeer(1), "密钥不符被拒");
+    R::ok($c1->stats()["hs_fail"] > $failBefore, "计入 hs_fail");
+
+    // 3) codec 不一致：两端必须用同一个 payload 协议
+    $c4 = new Cluster(4, "tcp://127.0.0.1:23104", new JsonPayload(), "s3cr3t");
+    $c4->listen();
+    $c4->connect(1, $addr1);
+    pump2($c1, $c4, 60);
+    R::ok(!$c1->hasPeer(4), "codec 不符被拒");
+
+    // 4) 重复节点号：同一节点号不能有两条链路
+    $dupBefore = $c1->stats()["dup"];
+    $c5 = new Cluster(2, "tcp://127.0.0.1:23105", null, "s3cr3t");
+    $c5->listen();
+    $c5->connect(1, $addr1);
+    pump2($c1, $c5, 60);
+    R::ok($c1->stats()["dup"] > $dupBefore, "重复节点号被拒（dup）",
+        "dup=" . $c1->stats()["dup"]);
+
+    echo "  TCP: " . R::$pass . " 通过 / " . R::$fail . " 失败" . PHP_EOL;
+
+    $c1->closeAll();
+    $c2->closeAll();
+    $c3->closeAll();
+    $c4->closeAll();
+    $c5->closeAll();
+}
+
 function main(): void
 {
     $argvv = $_SERVER["argv"] ?? [];
@@ -232,5 +349,9 @@ function main(): void
         runUnit();
         return;
     }
-    echo "用法: cluster_test server|client|unit [count]" . PHP_EOL;
+    if ($role === "tcp") {
+        runTcp();
+        return;
+    }
+    echo "用法: cluster_test server|client|unit|tcp [count]" . PHP_EOL;
 }
