@@ -45,6 +45,46 @@ final class T
     }
 }
 
+/**
+ * 模拟"旧二进制"的对端：它不认识版本化载荷，看到 `V1\x1f` 就回 bad-request。
+ *
+ * 这正是降级协商要处理的情形——新节点先按新格式发，收到 bad-request 后
+ * 标记并改用旧格式重发，一次往返就自愈。
+ */
+final class LegacyService extends Service
+{
+    private Router $rpc;
+
+    private JsonCodec $codec;
+
+    public int $calls = 0;
+
+    public function __construct()
+    {
+        $this->codec = new JsonCodec();
+        $this->rpc = new Router($this->codec);
+        $this->rpc->on("echo", function (string $b, Message $m): string {
+            $this->calls++;
+            return "legacy:" . $b;
+        });
+    }
+
+    public function onMessage(Message $m): void
+    {
+        $raw = is_string($m->data) ? $m->data : "";
+        if (strpos($raw, "V1" . "\x1f") === 0) {
+            Scheduler::instance()->deliver(
+                $m->from,
+                Rpc::MSG_RESP,
+                $this->codec->packResponse(false, "bad-request"),
+                $m->session
+            );
+            return;
+        }
+        $this->rpc->handle($m);
+    }
+}
+
 /** 提供几个方法，覆盖正常/异常/空返回 */
 final class EchoService extends Service
 {
@@ -52,9 +92,9 @@ final class EchoService extends Service
 
     public int $calls = 0;
 
-    public function __construct(?RpcCodec $codec = null)
+    public function __construct(?RpcCodec $codec = null, int $protoVersion = 1)
     {
-        $this->rpc = new Router($codec);
+        $this->rpc = new Router($codec, $protoVersion);
         $this->rpc->on("echo", function (string $b, Message $m): string {
             $this->calls++;
             return "echo:" . $b;
@@ -511,6 +551,86 @@ function caseMismatch(): void
     T::ok($ms < 100, "快速失败（< 100ms，没有等到超时）", number_format($ms, 1) . " ms");
 }
 
+
+function caseVersion(): void
+{
+    echo "== [10] 载荷版本协商 ==" . PHP_EOL;
+
+    // 新客户端 → 新服务端（服务端版本更高）：正常调用，并学到对端版本
+    Scheduler::reset();
+    $s = Scheduler::instance();
+    $echo = $s->spawnOf(function (): EchoService {
+        return new EchoService(null, 8);
+    });
+    $caddr = $s->spawnOf(function (): Client {
+        return new Client(100, null, 1);
+    });
+    $client = $s->serviceOf($caddr);
+    if (!($client instanceof Client)) {
+        throw new \RuntimeException("client 没起来");
+    }
+
+    $got = "";
+    $err = "x";
+    $client->call($echo, "echo", "v", function (?string $r, string $e) use (&$got, &$err): void {
+        $got = $r === null ? "" : $r;
+        $err = $e;
+    });
+    drain($s);
+    T::eq($err, "", "版本化请求正常返回");
+    T::eq($got, "echo:v", "返回体正确");
+    T::eq($client->peerVersion(($echo >> 24) & 0xFF), 8, "学到了对端载荷版本");
+
+    // 客户端比服务端新：服务端应回明确的 version-mismatch，而不是 bad-request 或超时
+    Scheduler::reset();
+    $s2 = Scheduler::instance();
+    $old = $s2->spawnOf(function (): EchoService {
+        return new EchoService(null, 1);
+    });
+    $c2addr = $s2->spawnOf(function (): Client {
+        return new Client(100, null, 9);
+    });
+    $c2 = $s2->serviceOf($c2addr);
+    if (!($c2 instanceof Client)) {
+        throw new \RuntimeException("client 没起来");
+    }
+    $err2 = "";
+    $c2->call($old, "echo", "x", function (?string $r, string $e) use (&$err2): void {
+        $err2 = $e;
+    });
+    drain($s2);
+    T::eq($err2, Rpc::ERR_VERSION, "服务端版本更旧时回 version-mismatch");
+    $osvc = $s2->serviceOf($old);
+    if ($osvc instanceof EchoService) {
+        T::eq($osvc->router()->stats()["version_rejected"], 1, "服务端记到一次版本拒绝");
+        T::eq($osvc->calls, 0, "handler 没有被执行");
+    }
+
+    // 新客户端 → 旧二进制：先吃一个 bad-request，自动降级重发并成功
+    Scheduler::reset();
+    $s3 = Scheduler::instance();
+    $legacy = $s3->spawnOf(function (): LegacyService {
+        return new LegacyService();
+    });
+    $c3addr = $s3->spawnOf(function (): Client {
+        return new Client(200, null, 3);
+    });
+    $c3 = $s3->serviceOf($c3addr);
+    if (!($c3 instanceof Client)) {
+        throw new \RuntimeException("client 没起来");
+    }
+    $got3 = "";
+    $err3 = "x";
+    $c3->call($legacy, "echo", "y", function (?string $r, string $e) use (&$got3, &$err3): void {
+        $got3 = $r === null ? "" : $r;
+        $err3 = $e;
+    });
+    drain($s3);
+    T::eq($err3, "", "降级重发后调用成功");
+    T::eq($got3, "legacy:y", "拿到旧对端的返回");
+    T::ok($c3->isLegacy(($legacy >> 24) & 0xFF), "对端被标记为旧二进制");
+}
+
 function main(): void
 {
     caseOk();
@@ -522,6 +642,7 @@ function main(): void
     caseRawCodec();
     caseCustomCodec();
     caseMismatch();
+    caseVersion();
 
     echo PHP_EOL . "结果: " . T::$pass . " 通过 / " . T::$fail . " 失败" . PHP_EOL;
 }

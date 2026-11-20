@@ -70,11 +70,11 @@ php85 client.php 9001          # 3) 另开终端验证
 
 ---
 
-## 验证：一条命令跑完 594 项断言
+## 验证：一条命令跑完 644 项断言
 
 ```bash
 bash scripts/ci-preflight.sh   # 先看环境（缺什么、缺在哪、怎么补）
-tsf verify                     # 17 个套件
+tsf verify                     # 18 个套件
 ```
 
 ```
@@ -91,7 +91,8 @@ PASS  registry       Redis 注册表+租约（38 项，无 Redis 则 SKIP） 20.
 PASS  handoff        状态交接（120 项：含版本落后调度）                  20.9s
 PASS  checkpoint     事件日志检查点（45 项：截断/等价/水位/增量/坏点被拒） 15.1s
 PASS  schema         状态版本迁移链（19 项：缺 _v/拒绝降级/恢复集成）      14.6s
-PASS  prom           Prometheus 导出（22 项：格式/名字/TYPE 唯一/路由）   24.0s
+PASS  prom           Prometheus 导出（22 项：格式/名字/TYPE 唯一/路由）   20.8s
+PASS  rpc            RPC（50 项：调用/超时/并发/codec/载荷版本协商）    17.3s
 PASS  drain          进程 drain（8 项）                        13.2s
 PASS  rejoin         断线重连（6 项）                            8.5s
 PASS  script         脚本热更（16 项）                          15.8s
