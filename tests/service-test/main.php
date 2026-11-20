@@ -50,6 +50,9 @@ final class Recorder extends Service
     /** >0 时表示"处理到第 N 条再崩"，用来制造"崩溃前有历史"的现场 */
     public int $crashAt = 0;
 
+    /** >0 时每条消息里睡这么久（微秒），用来触发看门狗 */
+    public int $sleepUs = 0;
+
     public function onStop(): void
     {
         $this->stopCalled++;
@@ -68,6 +71,10 @@ final class Recorder extends Service
             "session" => $m->session,
             "data" => is_string($m->data) ? $m->data : "(non-string)",
         ];
+
+        if ($this->sleepUs > 0) {
+            usleep($this->sleepUs);
+        }
 
         if ($this->forwardTo !== 0 && $this->forwardBudget > 0) {
             $this->forwardBudget--;
@@ -391,6 +398,68 @@ function caseOverflow(): void
     T::ok($s->deliver($addr, 1001, "again"), "队列排空后可以继续投递");
 }
 
+
+/**
+ * 看门狗在两种模式下的语义。
+ *
+ * 同步模式：消息的处理耗时就是"独占 worker 的时间"，慢 = 真的卡住别人。
+ * 协程模式：墙钟包含"等 I/O 被挂起"的时间，慢 ≠ 卡住别人；真正卡住别人的信号是
+ *           `tick` 间隔变大。
+ *
+ * 这个用例主要防一件事：**协程路径曾经完全没有看门狗**（同步路径有，照搬时漏了），
+ * 打开协程后慢消息一条都报不出来。
+ */
+function caseWatchdogModes(): void
+{
+    echo PHP_EOL . "[10] 看门狗：同步与协程两种语义" . PHP_EOL;
+
+    // 同步：慢消息被检出，且标记为 blocking
+    Scheduler::reset();
+    $s = Scheduler::instance();
+    $s->setWatchdog(1, "log");
+    $s->register("rec", function () {
+        return new Recorder();
+    });
+    $a = $s->spawn("rec");
+    $sa = $s->serviceOf($a);
+    if (!($sa instanceof Recorder)) {
+        return;
+    }
+    $sa->sleepUs = 3000;                 // 3ms，超过 1ms 阈值
+    $s->deliver($a, 1001, "slow");
+    $s->tick();
+    T::ok($s->stats()["slow"] === 1, "同步模式检出慢消息", "n=" . $s->stats()["slow"]);
+    T::ok($s->stats()["max_msg_us"] >= 3000, "记录了单条最大耗时", "us=" . $s->stats()["max_msg_us"]);
+
+    // 协程：同样能检出（原来检不出），且 tick 间隔指标可用
+    \Swoole\Coroutine\run(function (): void {
+        Scheduler::reset();
+        $s = Scheduler::instance();
+        $s->setCoroutine(true);
+        $s->setWatchdog(1, "log");
+        $s->register("rec", function () {
+            return new Recorder();
+        });
+        $a = $s->spawn("rec");
+        $svc = $s->serviceOf($a);
+        if (!($svc instanceof Recorder)) {
+            return;
+        }
+        $svc->sleepUs = 3000;
+        $s->deliver($a, 1001, "slow");
+        $s->tick(0);
+        \Swoole\Coroutine::sleep(0.02);   // 给派发出去的协程时间跑
+        $s->tick(0);
+        T::ok($s->stats()["slow"] >= 1, "协程模式也检出了慢消息（原来检不出）", "n=" . $s->stats()["slow"]);
+        T::ok($svc->got !== [], "协程确实处理了这条消息");
+        T::ok($s->coroutineEnabled(), "协程模式已开启");
+        // 这里**不该**产生调度告警：sleep 是测试自己让出的，不是协程卡住 CPU。
+        // 调度耗时的判定只在 run() 自循环里做（那里才代表"一轮被卡了多久"）。
+        T::ok($s->stats()["slow_tick"] === 0, "外部 sleep 不被误报成调度卡顿",
+            "n=" . $s->stats()["slow_tick"]);
+    });
+}
+
 function main(): void
 {
     echo "== Service 功能测试 ==" . PHP_EOL;
@@ -398,6 +467,7 @@ function main(): void
     caseBetween();
     caseSelfReentrancy();
     caseKill();
+    caseWatchdogModes();
     caseCrashDump();
     caseErrorIsolation();
     caseFairness();
