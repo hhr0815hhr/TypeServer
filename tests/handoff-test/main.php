@@ -66,6 +66,9 @@ final class Rec
 
     /** rollback 时闸门交回的队列 */
     public string $rollbackQueue = "";
+
+    /** 目标侧卸掉了几次（撤销路径） */
+    public int $uninstalls = 0;
 }
 
 function nowMs(): int
@@ -178,6 +181,30 @@ final class MapOwnership implements Ownership
     public function ownerOf(string $key): int
     {
         return $this->map[$key] ?? 0;
+    }
+}
+
+/** 拿得到但续不上：模拟"交接途中租约被别的节点接手" */
+final class LoseLease implements Lease
+{
+    public function tryAcquire(string $key, int $ttlMs): bool
+    {
+        return true;
+    }
+
+    public function renew(string $key, int $ttlMs): bool
+    {
+        return false;
+    }
+
+    public function release(string $key): bool
+    {
+        return true;
+    }
+
+    public function holds(string $key): bool
+    {
+        return false;
     }
 }
 
@@ -317,6 +344,81 @@ function runRebalance(Cluster $c1, Handoff $h1, Cluster $c2, Handoff $h2, Rec $r
         . " lease_denied=" . $st["lease_denied"] . " owned=" . $st["owned"] . PHP_EOL;
 }
 
+
+/**
+ * 撤销（abort）：源侧反悔时必须能收回，且目标侧装过的部分要卸掉。
+ *
+ * 最难的一条时序是"目标已经装了、源侧才反悔"——这时如果只做本地回滚，
+ * 两份状态就同时存在了。所以撤销要发 ABORT，等对方卸完回 ABORTED 才回滚。
+ */
+function runAbort(Cluster $c1, Handoff $h1, Cluster $c2, Handoff $h2, Rec $r1, Rec $r2): void
+{
+    echo PHP_EOL . "== 撤销（abort）==" . PHP_EOL;
+
+    // 1) 目标装完之后再撤销
+    $commitsBefore = $r1->commits;
+    T::ok($h1->begin(2, 1, "ab:1", 1, "state-1", nowMs()), "发起交接");
+    pumpOne($c1, $h1, 2);                  // 只推源侧：MIGRATE 出去了，但还没人回
+    T::ok($h1->isPending("ab:1"), "仍在飞");
+    T::ok($h1->abort("ab:1", nowMs()), "abort 发出");
+    T::ok(!$h1->isPending("ab:1"), "abort 后不再占用 pending");
+    T::ok($h1->isAborting("ab:1"), "进入撤销中");
+
+    pump($c1, $h1, $c2, $h2, 60);
+    T::ok($h2->installedVersion("ab:1") === 0, "目标侧已卸掉", "ver=" . $h2->installedVersion("ab:1"));
+    T::ok($r2->uninstalls === 1, "onUninstall 被调用", "n=" . $r2->uninstalls);
+    T::ok(!$h1->isAborting("ab:1"), "撤销完成");
+    T::ok($r1->why === "aborted", "源侧回滚原因 aborted", $r1->why);
+    T::ok($r1->commits === $commitsBefore, "撤销前收到的 ACK 没有变成 commit", "commits=" . $r1->commits);
+
+    // 2) 墓碑：撤销之后迟到的 MIGRATE 不能把状态又装回去
+    $instBefore = $r2->installs;
+    T::ok($h1->begin(2, 1, "ab:1", 1, "state-1", nowMs()), "同版本重发");
+    pump($c1, $h1, $c2, $h2, 40);
+    T::ok($r2->installs === $instBefore, "墓碑拦住重装", "n=" . $r2->installs);
+    T::ok($r1->why === "rejected", "源侧收到 REJECT", $r1->why);
+
+    // 3) 没有在飞时 abort 是空操作
+    T::ok(!$h1->abort("nonexistent", nowMs()), "没有在飞时 abort 返回 false");
+
+    // 4) 撤销等不到 ABORTED（对端崩了）：超时也要收敛
+    $h1->begin(2, 1, "ab:2", 1, "state-2", nowMs());
+    pumpOne($c1, $h1, 2);
+    $h1->abort("ab:2", nowMs());
+    T::ok($h1->isAborting("ab:2"), "进入撤销中（对端不回）");
+    $h1->expire(nowMs() + 1000);
+    T::ok(!$h1->isAborting("ab:2"), "超时后不再撤销中");
+    T::ok($r1->why === "abort-timeout", "回滚原因 abort-timeout", $r1->why);
+}
+
+/** 租约中途丢失：在飞的交接要被撤销，而不是硬走完 */
+function runLeaseLost(Cluster $c1, Handoff $h1, Cluster $c2, Handoff $h2): void
+{
+    echo PHP_EOL . "== 租约丢失 ==" . PHP_EOL;
+
+    $own = new MapOwnership();
+    $own->map["z:1"] = 2;
+    $g = new Gate();
+    $rb = new Rebalancer(1, 1, $h1, $g, $own, 4);
+    $rb->useLease(new LoseLease(), 100);      // TTL 100ms，续不上
+    $rb->onExport(function (string $key): ?string {
+        return "st:" . $key;
+    });
+    $rb->own("z:1");
+
+    T::ok($rb->scan(nowMs()) === 1, "首轮拿到租约并发起");
+    T::ok($h1->isPending("z:1"), "交接在飞");
+
+    usleep(60000);                            // 剩 40ms < TTL/2，触发续期
+    $rb->scan(nowMs());
+    T::ok($rb->stats()["lease_lost"] === 1, "记到一次租约丢失", "lost=" . $rb->stats()["lease_lost"]);
+    T::ok($h1->isAborting("z:1"), "在飞交接被撤销而不是硬走完");
+
+    pump($c1, $h1, $c2, $h2, 60);
+    $rb->scan(nowMs());
+    T::ok($g->state("z:1") === Gate::OPEN, "最终闸门回到 OPEN");
+}
+
 function main(): void
 {
     echo "== 状态交接（handoff）==" . PHP_EOL;
@@ -358,6 +460,10 @@ function main(): void
         $r2->lastState = $state;
         $r2->lastVer = $ver;
         return $r2->accept;
+    });
+
+    $h2->onUninstall(function (string $key, int $ver) use ($r2): void {
+        $r2->uninstalls++;
     });
 
     // 0) 建链 + 握手
@@ -447,6 +553,8 @@ function main(): void
         . " ignored=" . $st["ignored"] . PHP_EOL;
 
     runRebalance($c1, $h1, $c2, $h2, $r2);
+    runAbort($c1, $h1, $c2, $h2, $r1, $r2);
+    runLeaseLost($c1, $h1, $c2, $h2);
 
     $c1->closeAll();
     $c2->closeAll();
