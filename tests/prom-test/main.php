@@ -1,6 +1,7 @@
 <?php
 
 use TSF\Http\App;
+use TSF\Http\IpFilter;
 use TSF\Http\MetricsRoute;
 use TSF\Http\Request;
 use TSF\Metrics\Metrics;
@@ -107,7 +108,27 @@ function main(): void
     $ct = $res->headers["content-type"] ?? "";
     T::ok(strpos($ct, "version=0.0.4") !== false, "响应头是 Prometheus 格式", $ct);
 
-    // 9) 空指标表也不能渲染出非法内容
+    // 9) 来源限制：默认只放行回环与私有网段
+    T::ok(IpFilter::allows(IpFilter::PRIVATE_ONLY, "127.0.0.1"), "放行回环");
+    T::ok(IpFilter::allows(IpFilter::PRIVATE_ONLY, "192.168.1.20"), "放行 192.168/16");
+    T::ok(IpFilter::allows(IpFilter::PRIVATE_ONLY, "10.2.3.4"), "放行 10/8");
+    T::ok(IpFilter::allows(IpFilter::PRIVATE_ONLY, "172.20.1.1"), "放行 172.16/12");
+    T::ok(!IpFilter::allows(IpFilter::PRIVATE_ONLY, "172.32.1.1"), "172.32 不在 172.16/12 内");
+    T::ok(!IpFilter::allows(IpFilter::PRIVATE_ONLY, "8.8.8.8"), "拒绝公网");
+    T::ok(!IpFilter::allows(IpFilter::PRIVATE_ONLY, ""), "拿不到来源时拒绝");
+    T::ok(IpFilter::allows(["*"], "8.8.8.8"), "显式 * 才全放开");
+    T::ok(!IpFilter::inCidr("192.168.1.5", "192.168.1.0/33"), "非法掩码一律拒绝");
+    T::ok(IpFilter::inCidr("192.168.1.5", "0.0.0.0/0"), "/0 匹配全部");
+
+    // 路由层真的拦：公网来源 403，内网 200
+    $app2 = new App("127.0.0.1", 18081);
+    MetricsRoute::register($app2, "/metrics", false);
+    $pub = new Request("GET", "/metrics", [], [], [], "", [], "203.0.113.9");
+    T::ok($app2->router()->dispatch($pub)->status === 403, "公网来源被拒 403");
+    $lan = new Request("GET", "/metrics", [], [], [], "", [], "192.168.2.94");
+    T::ok($app2->router()->dispatch($lan)->status === 200, "内网来源 200");
+
+    // 10) 空指标表也不能渲染出非法内容
     Metrics::reset();
     $empty = Prometheus::render(false);
     T::ok($empty === "", "空表渲染为空串", "len=" . strlen($empty));

@@ -85,6 +85,44 @@ final class LegacyService extends Service
     }
 }
 
+/**
+ * 模拟"升级完成"的对端：第一次收到版本化请求时还读不懂（回 bad-request），
+ * 之后就能正常处理。用来验证客户端的 `legacy` 标记会过期并自动恢复。
+ */
+final class UpgradeService extends Service
+{
+    private Router $rpc;
+
+    private JsonCodec $codec;
+
+    private bool $upgraded = false;
+
+    public function __construct()
+    {
+        $this->codec = new JsonCodec();
+        $this->rpc = new Router($this->codec, 8);
+        $this->rpc->on("echo", function (string $b, Message $m): string {
+            return "new:" . $b;
+        });
+    }
+
+    public function onMessage(Message $m): void
+    {
+        $raw = is_string($m->data) ? $m->data : "";
+        if (!$this->upgraded && strpos($raw, "V1" . "\x1f") === 0) {
+            $this->upgraded = true;
+            Scheduler::instance()->deliver(
+                $m->from,
+                Rpc::MSG_RESP,
+                $this->codec->packResponse(false, "bad-request"),
+                $m->session
+            );
+            return;
+        }
+        $this->rpc->handle($m);
+    }
+}
+
 /** 提供几个方法，覆盖正常/异常/空返回 */
 final class EchoService extends Service
 {
@@ -629,6 +667,42 @@ function caseVersion(): void
     T::eq($err3, "", "降级重发后调用成功");
     T::eq($got3, "legacy:y", "拿到旧对端的返回");
     T::ok($c3->isLegacy(($legacy >> 24) & 0xFF), "对端被标记为旧二进制");
+
+    // 降级不能是永久的：对方升级之后要能自己恢复
+    Scheduler::reset();
+    $s4 = Scheduler::instance();
+    $up = $s4->spawnOf(function (): UpgradeService {
+        return new UpgradeService();
+    });
+    $c4addr = $s4->spawnOf(function (): Client {
+        return new Client(200, null, 3);
+    });
+    $c4 = $s4->serviceOf($c4addr);
+    if (!($c4 instanceof Client)) {
+        throw new \RuntimeException("client 没起来");
+    }
+    $c4->setLegacyTtl(1);              // 1ms 后就可以重新试探
+
+    $got4 = "";
+    $c4->call($up, "echo", "z", function (?string $r, string $e) use (&$got4): void {
+        $got4 = $r === null ? "" : $r;
+    });
+    drain($s4);
+    $node = ($up >> 24) & 0xFF;
+    T::eq($got4, "new:z", "首次靠降级成功");
+    T::ok($c4->isLegacy($node), "此时被标记为旧二进制");
+
+    usleep(3000);                       // 越过 TTL
+    T::ok(!$c4->isLegacy($node), "标记过期后自动失效");
+
+    $got5 = "";
+    $c4->call($up, "echo", "w", function (?string $r, string $e) use (&$got5): void {
+        $got5 = $r === null ? "" : $r;
+    });
+    drain($s4);
+    T::eq($got5, "new:w", "重新试探成功");
+    T::eq($c4->peerVersion($node), 8, "学到了升级后的版本");
+    T::ok(!$c4->isLegacy($node), "不再标记为旧二进制");
 }
 
 function main(): void
