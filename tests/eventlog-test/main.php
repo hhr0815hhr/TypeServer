@@ -294,6 +294,61 @@ function caseIdempotent(): void
     unlink($p);
 }
 
+
+/**
+ * 链路 id 落到账上：这是"这笔钱对应哪次操作"的唯一线索。
+ *
+ * 结算链路在"记账"这一环断开的话，前面做得再好也查不到根因——
+ * 玩家说"我这把没收到钱"，你只能知道他打过一局，对不上是哪条日志。
+ */
+function caseTrace(): void
+{
+    echo PHP_EOL . "== trace ==" . PHP_EOL;
+
+    // 1) 有链路时写入 tr
+    \TSF\Kernel\Logger::setTraceProvider(function (): int {
+        return 987654321;
+    });
+    $path = tmpPath("trace.log");
+    $log = new EventLog($path);
+    $log->append("w:1", "debit", ["gold" => 100]);
+    $log->close();
+
+    $raw = (string) file_get_contents($path);
+    T::ok(strpos($raw, '"tr":987654321') !== false, "账上写了 trace", $raw);
+
+    $ev = (new EventLog($path))->replay(1);
+    T::eq(count($ev), 1, "能读回一条");
+    T::eq($ev[0]["tr"], 987654321, "replay 带出 trace");
+
+    // 2) 没有链路时不写（避免每条后台事件都挂 tr:0）
+    \TSF\Kernel\Logger::setTraceProvider(function (): int {
+        return 0;
+    });
+    $path2 = tmpPath("notrace.log");
+    $log2 = new EventLog($path2);
+    $log2->append("w:2", "debit", ["gold" => 1]);
+    $log2->close();
+    $raw2 = (string) file_get_contents($path2);
+    T::ok(strpos($raw2, '"tr"') === false, "无链路时不写 tr", $raw2);
+    $ev2 = (new EventLog($path2))->replay(1);
+    T::eq($ev2[0]["tr"], 0, "replay 对缺失字段给 0");
+
+    // 3) 老文件（没有 tr 字段）仍能正常重放 —— 升级不能要求停服搬账
+    $path3 = tmpPath("legacy.log");
+    $legacy = '{"s":1,"id":"w:3","k":"credit","t":1700000000000,"d":{"gold":5}}' . "\n";
+    file_put_contents($path3, $legacy);
+    $ev3 = (new EventLog($path3))->replay(1);
+    T::eq(count($ev3), 1, "老格式仍可重放");
+    T::eq($ev3[0]["tr"], 0, "老格式没有 trace");
+    T::eq($ev3[0]["d"]["gold"], 5, "老格式数据完整");
+
+    // 收尾：清掉 provider，别影响后面的用例
+    \TSF\Kernel\Logger::setTraceProvider(function (): int {
+        return 0;
+    });
+}
+
 function main(): void
 {
     caseBasic();
@@ -303,6 +358,7 @@ function main(): void
     caseModes();
     casePerf();
     caseIdempotent();
+    caseTrace();
 
     echo PHP_EOL . "结果: " . T::$pass . " 通过 / " . T::$fail . " 失败" . PHP_EOL;
 }

@@ -116,6 +116,8 @@ function main(): void
     );
 
     $server = ServerFactory::make("tcp", $host, $port, $proto->frame(), $opts);
+    // 每个客户端帧建一条链路：结算账上就能对回"是哪次操作"
+    $server->traceFrames(true);
 
     $heartbeat = 30;
     $sessions = new SessionManager($heartbeat);

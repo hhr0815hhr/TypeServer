@@ -71,6 +71,15 @@ final class DuelService extends Service
     /** 金币结算；null 表示不启用（纯规则测试不需要钱） */
     private ?Settle $settle;
 
+    /**
+     * 本局最近一次**玩家操作**的链路 id。
+     *
+     * 结算是由定时器 tick 触发的，那条消息的 trace 是 0——如果直接用当前 trace，
+     * 账上永远拿不到"这笔钱是哪次操作的结果"。所以房间自己记一条：
+     * 谁最后动过，结算就归到那条链路上。
+     */
+    private int $lastTrace = 0;
+
     /** 快照存储；null 表示不存快照 */
     private ?Store $store;
 
@@ -129,6 +138,10 @@ final class DuelService extends Service
 
     public function onMessage(Message $m): void
     {
+        // 记下"这局最近一次玩家操作"的链路，结算时用它（见 $lastTrace 注释）
+        if ($m->traceId > 0) {
+            $this->lastTrace = $m->traceId;
+        }
         // 先取局部变量再判断：直接对 $m->msgId 做 switch 会踩 AOT 的 Variant 转换坑
         $msgId = $m->msgId;
 
@@ -312,7 +325,14 @@ final class DuelService extends Service
         }
         $duel = $this->duel;
         $winner = $duel->winner();
+        // 切到"本局最后一次玩家操作"的链路，让发出去的钱能对回那次操作
+        $sched = Scheduler::instance();
+        $prev = $sched->currentTrace();
+        if ($this->lastTrace > 0) {
+            $sched->setTrace($this->lastTrace);
+        }
         $settle->settle($duel->room()->id(), $winner, Settle::REWARD);
+        $sched->setTrace($prev);
     }
 
     private function broadcast(int $msgId, array $payload): void
