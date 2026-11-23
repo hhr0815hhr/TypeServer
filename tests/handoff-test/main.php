@@ -9,6 +9,8 @@ use TSF\Handoff\Transport;
 use TSF\Handoff\MemoryLease;
 use TSF\Handoff\Ownership;
 use TSF\Handoff\Rebalancer;
+use TSF\Handoff\RingOwnership;
+use TSF\Shard\Ring;
 use TSF\Service\Message;
 
 /**
@@ -548,6 +550,93 @@ function runSkewScheduling(Cluster $c1, Cluster $c2): void
     T::ok(!$rb->isStale(2) || $rb->stats()["version_blocked"] >= 1, "标记可被清除");
 }
 
+
+/**
+ * 滚动升级：一个节点退役时，它持有的状态能不能全部迁走。
+ *
+ * 这是"热更"真正的出路。Lua 系能换 chunk，AOT 系换不了——但业务要的不是
+ * "换函数"，是"**不停服地把新版本换上去**"。用已有的三块零件就能做到：
+ *
+ *   1. `Ring::remove(node)` —— 退役节点退出环，归属立刻落到存活节点
+ *   2. `Rebalancer::scan()` —— 发现自己不再拥有某个 key，就交接出去
+ *   3. `Handoff` + `Gate` —— 冻结 → 暂存 → 提交，失败回滚
+ *
+ * 这个用例只验"数据跟着归属走"，不验编排（谁在什么时候调 remove）。
+ */
+function runRollingUpdate(Cluster $c1, Handoff $h1, Cluster $c2, Handoff $h2): void
+{
+    echo PHP_EOL . "== 滚动升级：节点退役后状态全部迁走 ==" . PHP_EOL;
+
+    $ring = new Ring(64);
+    $ring->add(1);
+    $ring->add(2);
+
+    // 造一批归 node2 的 key（环是哈希的，不能假设前 N 个就是）
+    $mine = [];
+    $i = 0;
+    while (count($mine) < 6 && $i < 500) {
+        // 不复用后面 foreach 的变量：AOT 下同一个名字先后承担两种类型会编译失败
+        $cand = "roll:" . $i;
+        if ($ring->nodeFor($cand) === 2) {
+            $mine[] = $cand;
+        }
+        $i++;
+    }
+    T::ok(count($mine) === 6, "找到 6 个归 node2 的 key", "n=" . count($mine));
+    if (count($mine) !== 6) {
+        return;
+    }
+
+    $own = new RingOwnership($ring);
+    $g = new Gate();
+    $rb = new Rebalancer(2, 9, $h2, $g, $own, 6);
+    $rb->useLease(new MemoryLease(2), 5000);
+
+    $recDst = new Rec();
+    $h1->onInstall(function (string $key, string $state, int $ver) use ($recDst): bool {
+        $recDst->installs++;
+        $recDst->lastState = $state;
+        return true;
+    });
+    $recSrc = new Rec();
+    $h2->onCommit(function (string $key, int $ver) use ($recSrc): void {
+        $recSrc->commits++;
+        $recSrc->lastKey = $key;
+    });
+
+    $rb->onExport(function (string $key): ?string {
+        return "st:" . $key;
+    });
+    foreach ($mine as $key) {
+        $rb->own($key);
+    }
+    T::ok($rb->ownCount() === 6, "node2 持有 6 个 key", "n=" . $rb->ownCount());
+
+    // ---- 升级动作：node2 退役，从环里摘掉 ----
+    $ring->remove(2);
+    // size() 是 vnode 数，不是节点数——要看物理节点用 nodes()
+    T::ok(count($ring->nodes()) === 1, "环里只剩 node1", "n=" . count($ring->nodes()));
+    $allTo1 = true;
+    foreach ($mine as $key2) {
+        if ($ring->nodeFor($key2) !== 1) {
+            $allTo1 = false;
+        }
+    }
+    T::ok($allTo1, "这 6 个 key 的归属全部转到 node1");
+
+    // ---- 驱动迁移 ----
+    $rb->scan(nowMs());
+    pump($c1, $h1, $c2, $h2, 80);
+    // 再扫一轮：迁移结果是"下一轮 scan 收口"的（collect 在 scan 开头跑），
+    // 这是周期扫描的正常语义，不是漏处理
+    $rb->scan(nowMs());
+
+    T::ok($recDst->installs === 6, "node1 装下全部 6 份状态", "n=" . $recDst->installs);
+    T::ok($recSrc->commits === 6, "node2 全部交接完成", "n=" . $recSrc->commits);
+    T::ok($rb->ownCount() === 0, "node2 已无归属（可以安全退出）", "n=" . $rb->ownCount());
+    T::ok($rb->stats()["moved"] === 6, "统计里记录迁移 6 次", "n=" . $rb->stats()["moved"]);
+}
+
 function main(): void
 {
     echo "== 状态交接（handoff）==" . PHP_EOL;
@@ -685,6 +774,7 @@ function main(): void
     runAbort($c1, $h1, $c2, $h2, $r1, $r2);
     runLeaseLost($c1, $h1, $c2, $h2);
     runVersionGate($c1, $c2);
+    runRollingUpdate($c1, $h1, $c2, $h2);
     runSkewScheduling($c1, $c2);
 
     $c1->closeAll();
