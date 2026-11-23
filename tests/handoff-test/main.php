@@ -637,6 +637,61 @@ function runRollingUpdate(Cluster $c1, Handoff $h1, Cluster $c2, Handoff $h2): v
     T::ok($rb->stats()["moved"] === 6, "统计里记录迁移 6 次", "n=" . $rb->stats()["moved"]);
 }
 
+
+/**
+ * 双写窗口：ACCEPT 丢包 + 源侧超时回滚之后，目标侧那份状态还在。
+ *
+ * 这不是 bug，是当前协议**已知的代价**（见 `expire()` 与 `onInstall` 的注释）：
+ * 协议里没有"最终确认"消息，源的超时回滚也不主动发 ABORT，所以目标侧收不到
+ * "这次迁移已经作废"的通知。
+ *
+ * 写这个用例的目的是**把它钉在测试里**：将来如果有人加 COMMIT 确认、
+ * 或者让 expire 主动发 ABORT，这条断言会变红，提醒他"行为变了，去改注释"。
+ * 没有这条，所谓"已知代价"就是一句没人验证的话。
+ */
+function runLostAck(Cluster $c1, Cluster $c2): void
+{
+    echo PHP_EOL . "== 双写窗口（ACCEPT 丢包）==" . PHP_EOL;
+
+    $ttl = 300;
+    $src = new Handoff(1, 7, new ClusterTransport($c1), $ttl, 1);
+    $dst = new Handoff(2, 7, new ClusterTransport($c2), $ttl, 1);
+
+    $installed = [];
+    $uninstalled = [];
+    $dst->onInstall(function (string $key, string $state, int $ver) use (&$installed): bool {
+        $installed[$key] = $state;
+        return true;
+    });
+    $dst->onUninstall(function (string $key, int $ver) use (&$uninstalled): void {
+        $uninstalled[$key] = $ver;
+    });
+    $rolledBack = [];
+    $src->onRollback(function (string $key, int $ver, string $why) use (&$rolledBack): void {
+        $rolledBack[$key] = $why;
+    });
+
+    $t0 = nowMs();
+    T::ok($src->begin(2, 1, "k:lost-ack", 1, "state-v1", $t0), "源侧发起交接");
+
+    // 手工把 MIGRATE 喂给目标（相当于"包到了"），但**不回 ACCEPT**（相当于"ACK 丢了"）
+    $payload = "M2\x1f" . "k:lost-ack" . "\x1f" . "1" . "\x1f" . "1" . "\x1f" . "state-v1";
+    $dst->handle(new Message(1, Handoff::MSG_MIGRATE, $payload));
+    T::ok($dst->installedVersion("k:lost-ack") === 1, "目标侧已安装");
+
+    // 源侧超时：走 expire 回滚
+    $src->expire($t0 + $ttl + 10);
+    T::ok(isset($rolledBack["k:lost-ack"]), "源侧已超时回滚", implode(",", $rolledBack));
+
+    // 关键断言：目标侧那份**还在**，且没有被 uninstall
+    T::ok($dst->installedVersion("k:lost-ack") === 1, "目标侧状态仍在（双写窗口存在）");
+    T::ok(!isset($uninstalled["k:lost-ack"]), "源侧没有发 ABORT，目标未清理");
+
+    // 而且目标侧照样能回 ACCEPT（迟到的 ACK 会被源忽略，不会复原事务）
+    $src->expire($t0 + $ttl + 20);
+    T::ok($src->isPending("k:lost-ack") === false, "源侧已不在飞");
+}
+
 function main(): void
 {
     echo "== 状态交接（handoff）==" . PHP_EOL;
@@ -775,6 +830,7 @@ function main(): void
     runLeaseLost($c1, $h1, $c2, $h2);
     runVersionGate($c1, $c2);
     runRollingUpdate($c1, $h1, $c2, $h2);
+    runLostAck($c1, $c2);
     runSkewScheduling($c1, $c2);
 
     $c1->closeAll();
