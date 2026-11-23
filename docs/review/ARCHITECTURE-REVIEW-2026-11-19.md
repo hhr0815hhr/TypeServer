@@ -3875,3 +3875,88 @@ eventlog   5 项新增（MergedLog）
 entity/fsm/match/shard   全部 PASS
 verify     31 / 0 / 0
 ```
+
+---
+
+## 五十三、接完回归：43 个套件，以及"空检查"的第二次教训（2026-11-23）
+
+### 补了什么
+
+| 类别 | 套件 | 处理 |
+|:--|:--|:--|
+| 真测试（纯逻辑） | breaker / coroutine / guard / metrics / service / discovery / shard-router | 补 run.sh 并注册 |
+| **写了 run.sh 却从没注册** | config / gm / proto / watch | 直接注册 |
+| 需真实数据库 | db-mysql / db-pg / db-shards / redis / mail | `skip-auto` + 写明原因 |
+| 诊断工具（无 PASS/FAIL） | closure / coro-hook / ext / http / pgsql-probe | `skip-auto` + 写明原因 |
+
+verify 从 31 → **43 个套件**（42 通过 / 1 跳过 / 0 失败）。
+
+### 新发现：有 run.sh 不等于进了回归
+
+`config-test`、`gm-test`、`proto-test`、`watch-test` 四个目录**一直有 run.sh**，
+但从没出现在 `verifySuites()` 里。
+
+这比"没 run.sh"更隐蔽：目录看起来完整（有入口脚本、能单独跑），
+只有对着 `verify --list` 逐个比对才能发现。
+
+所以判据必须是"**在 verifySuites 里**"，不是"有 run.sh"。
+
+### 把判据变成 lint 规则（阻塞）
+
+```
+测试没入口：以下目录有 main.php，但既没有 run.sh（进 verify）也没有 skip-auto
+```
+
+规则：每个 `tests/<dir>/main.php` 要么在 `verifySuites()` 里，要么有 `skip-auto`
+写明为什么不进自动集合。**按错误处理**——因为它意味着"测试写了但永远不跑"，
+而修一个的成本极低（补 run.sh 或写一句原因）。
+
+§46 / §49 / §52 三次都是同一个问题，靠人记住"下次记得加"显然不行。
+
+### 但这条检查本身，第一版是空的
+
+写完先验证它能不能拦住（把 watch 从注册表里删掉，看 lint 是否报错）——**没报**。
+
+加调试输出：
+
+```
+DEBUG root=/data/TypeServer/tsf dirs=0 ugated=0 reg=43
+```
+
+`cmdLint` 的 `$root` 是 **`tsf/` 子目录**，而 `tests/` 在它的上一级。
+`glob("tsf/tests/*")` 扫了个不存在的目录，返回空数组，
+于是这个检查**永远通过**。
+
+这是本轮第二次踩"看起来在工作"的坑：
+
+| 次数 | 空检查 | 表现 |
+|:--|:--|:--|
+| 第一次（§49） | `tsf test` 只看退出码 | 输出 87 通过/2 失败，框架报"通过 2/失败 0" |
+| 第二次（本节） | lint 的测试归位检查 | `glob` 扫空目录，永远不报 |
+
+**共同点：检查写完了没有反向验证。** 一个从不失败的检查，和一个不存在的检查
+在输出上完全一样。这次的教训是：**新增任何检查，都要先让它失败一次。**
+
+### 顺带修了一个偶发
+
+`room` 的 `caseReapIdle` 在全量里偶尔失败（单独跑总是通过）。原因是它用绝对值
+断言 `services === 2`，前面用例的残留会让它偏移。
+
+改成先断言前置条件（`reset` 后必须是 0），再用增量判断：
+
+```php
+$svc0 = (int) $s->stats()["services"];
+T::ok($svc0 === 0, "reset 后 services 归零（前置条件）", "svc=" . $svc0);
+...
+$svc = (int) $s->stats()["services"] - $svc0;   // 用增量
+```
+
+**好处是失败信息能区分原因**：如果前置条件不满足，报的是"reset 没清干净"；
+如果增量不对，报的是"分配算错了"。原来只会说"期望 2 实际 3"。
+
+### 复验
+
+```
+lint       通过（136 个源文件，全部套件已归位）
+verify     43 套件：42 通过 / 0 失败 / 1 跳过（mail 需 MySQL）
+```
