@@ -289,6 +289,74 @@ function caseState(): void
     check($s3state->getString("lastWinner") === "u1001", "字符串字段也恢复");
 }
 
+
+/**
+ * 脚本间调用：活动 A 能调活动 B 的入口，但**不是随便调**。
+ *
+ * 三件事必须成立：
+ *   1. 能传参、能拿返回值
+ *   2. 逻辑名由宿主映射到文件，脚本不知道路径
+ *   3. 循环调用（A→A）不会把进程拖死，而是第 8 层抛错
+ */
+function caseScriptCall(): void
+{
+    echo PHP_EOL . "[脚本间调用]" . PHP_EOL;
+
+    $mgr = new Manager();
+    $mgr->register("quest", __DIR__ . "/quest.php");
+    $mgr->register("peer", __DIR__ . "/quest.php");
+    $mgr->loadAll();
+
+    $s = $mgr->get("quest");
+    if ($s === null) {
+        check(false, "取到脚本");
+        return;
+    }
+
+    // ---- 1) 未授权：调用即抛错 ----
+    $ctx0 = new Context(new Player(), ["uid"], []);
+    $threw = false;
+    try {
+        $ctx0->callScript("peer", "ping", "x");
+    } catch (\RuntimeException $e) {
+        $threw = true;
+    }
+    check($threw, "未 bind callScript 时抛错");
+
+    // ---- 2) 授权后：能调、能传参、能拿返回值 ----
+    $ctx = new Context(new Player(), ["uid"], []);
+    $ctx->bind("callScript", function (string $t, string $e, string $a) use ($mgr): string|int|float|bool|null {
+        return $mgr->invoke($t, $e, $a);
+    });
+    $ctx->setArg("hello");
+    $r = $s->callWithContext("callPeer", $ctx, 1000);
+    check($r === "pong:hello", "A 调到 B、传参、拿到返回值", "r=" . var_export($r, true));
+
+    // 入参走 ctx->arg()，不占用 target 的业务字段
+    check($ctx->arg() === "hello", "入参存在 Context 上，不碰业务字段");
+
+    // ---- 3) 循环调用：第 8 层抛错，不会无限递归 ----
+    $ctx2 = new Context(new Player(), ["uid"], []);
+    $ctx2->bind("callScript", function (string $t, string $e, string $a) use ($mgr): string|int|float|bool|null {
+        return $mgr->invoke($t, $e, $a);
+    });
+    // self 指向自己，callPeer 调 callPeer 就是 A→A
+    $mgr->register("self", __DIR__ . "/quest.php");
+    $mgr->loadAll();
+    // 递归到第 8 层抛 RuntimeException，逐层包装后抛到最外层的 AOT 调用方
+    $blocked = false;
+    try {
+        $mgr->invoke("self", "loopCall", "x");
+    } catch (\RuntimeException $e) {
+        $blocked = strpos($e->getMessage(), "调用层级") !== false;
+    }
+    check($blocked, "循环调用在第 " . Manager::MAX_DEPTH . " 层被拦下（不拖死进程）");
+
+    // 深度计数要复位：一次失败的递归不能污染后续正常调用
+    $r2 = $mgr->invoke("peer", "ping", "after");
+    check($r2 === "pong:after", "递归失败后深度已复位，正常调用不受影响", "r=" . var_export($r2, true));
+}
+
 function main(): void
 {
     $dir = __DIR__;
@@ -372,6 +440,7 @@ function main(): void
     caseCaps();
     caseSandbox();
     caseState();
+    caseScriptCall();
 
     echo "DONE\n";
 }

@@ -119,35 +119,125 @@ wasm 的定位是“灰度换实现”，但**换的那一刻状态是不带过�
 
 ## 六、怎么用
 
+> **2026-11 更新**：这一节按当时的实现重写过。脚本层现在的能力面比早期版本宽得多
+> （定时器、发消息、读配置、脚本间调用、私有状态、执行预算），
+> 早先"只能改白名单字段"的说法已经过时。
+
+### 6.1 装配
+
 ```php
 use TSF\Script\Context;
 use TSF\Script\Manager;
 
 $mgr = new Manager();
 $mgr->register("quest", "/opt/scripts/quest.php");
+$mgr->register("activity", "/opt/scripts/activity.php");
 $mgr->loadAll();
 
-// 帧循环 / 定时器里每秒一次
-$mgr->watchAll();          // 有变更的自动重载
+// 帧循环 / 定时器里每秒一次：有变更的自动重载
+$mgr->watchAll();
 
 // 业务：受限视图（推荐）
 $ctx = new Context($player, ["uid", "level", "gold"], ["gold"]);
-$r = $mgr->get("quest")?->callWithContext("onQuest", $ctx);
-
-// 脚本出错不会崩：throw 返回 {ok:false,class,message}，Fatal 返回 {ok:false,fatal}
+$r = $mgr->get("quest")?->callWithContext("onQuest", $ctx, 1000);   // 1000ms 执行预算
 ```
 
-**脚本形态**：
+### 6.2 脚本能做的事
+
+| 类别 | 方法 | 说明 | 未授权时 |
+|:--|:--|:--|:--|
+| 字段 | `getInt` `getString` `setInt` `addInt` | 白名单字段，超出即报错 | 抛 `RuntimeException` |
+| 发奖 | `reward($amount, $reason)` | 宿主实现（走 Settle 还是直接加钱，业务定） | 抛错 |
+| 日志 | `log($msg)` | | **静默**（日志失败不该打挂玩法） |
+| 定时器 | `timer($ms, $entry)` | 到点回调用 `callWithContext($entry)` | 抛错 |
+| 发消息 | `send($target, $msgId, $data)` | `target` 解析交宿主（uid / `room:123` / 服务名） | 抛错 |
+| 配置 | `config($key, $default)` `configInt` | 活动参数、开关、价格表 | 返回默认值 |
+| 脚本间调用 | `callScript($target, $entry, $arg)` | 递归由宿主兜底（8 层） | 抛错 |
+| 私有状态 | `stateInt` `setStateInt` `addStateInt` `stateString` `stateBool` | **跨 reload 存活** | 返回默认值 |
+| 入参 | `arg()` | 脚本间调用传进来的字符串 | 空串 |
+
+能力由宿主授予：
+
+```php
+$ctx->bind("timer", function (int $ms, string $entry) use ($script): void {
+    // 到点后：$script->callWithContext($entry, $ctx)
+});
+$ctx->bind("send", function (string $target, int $msgId, string $data): bool {
+    return $gateway->push($target, $msgId, $data);
+});
+$ctx->bind("config", function (string $key): string {
+    return Config::getString("activity." . $key);
+});
+```
+
+**为什么必须显式授权**：`reward` / `send` / `timer` 都有副作用。静默成功等于
+"脚本能越过宿主自己做决策"，静默失败等于"活动悄悄不生效"——两者都比报错难查。
+
+### 6.3 一个完整的活动脚本
 
 ```php
 <?php
-return function ($ctx) {
-    $ctx->addInt("gold", 350);
-};
+return [
+    // 玩家达成条件：判断 → 挂号 → 通知 → 发奖
+    "onAchieve" => function ($ctx) {
+        if ($ctx->configInt("enabled") === 0) {
+            return 0;                          // 开关关了，什么都不做
+        }
+        $cnt = $ctx->addStateInt("issued", 1); // 跨 reload 的已发奖计数
+        if ($cnt > $ctx->configInt("daily_limit", 100)) {
+            $ctx->log("over limit: " . $cnt);
+            return 0;
+        }
+        $ctx->timer(30000, "onSettle");        // 30 秒后结算
+        $ctx->send("player:1001", 9001, "join");
+        $ctx->reward(350, "activity_daily");
+        return 1;
+    },
+
+    // 到点回调：可能调另一个脚本
+    "onSettle" => function ($ctx) {
+        return $ctx->callScript("mail", "sendReward", $ctx->arg());
+    },
+];
 ```
 
-**安全边界**：`Context` 只允许读写白名单字段，越权抛 `RuntimeException`。
-不是“静默失败”，是明确报错——脚本作者能立刻发现自己越界了。
+### 6.4 状态与生命周期
+
+| 事件 | 状态 | 代码 |
+|:--|:--|:--|
+| 同一 Script 多次调用 | 保留 | |
+| `reload()`（热更） | **保留** | 只换 `exports`，不碰 `state` |
+| 进程重启 / 新建 Script | **丢失** | 需要 `state()->export()` 落 Redis/文件，启动时 `import()` |
+
+`reload` 必然重置脚本里的 `static`（换的是代码，Lua 换 chunk 也一样），
+所以"要活下来"的东西必须放 `state`。
+
+### 6.5 安全边界
+
+| 机制 | 值 | 作用 |
+|:--|:--|:--|
+| 执行预算 | 默认 1000ms | **防永久卡死**（死循环会被 `zend_set_timeout` 打断）。注意是秒级，1 秒对游戏服仍是明显停顿——它防的是"整服停机"，不是"卡顿" |
+| 递归深度 | 8 层 | 脚本间调用成环时抛错，不拖死进程 |
+| 字段白名单 | 逐字段声明 | 越权读写直接报错，不静默 |
+| 错误隔离 | `{ok:false, class, message}` | 脚本 `throw` 不会把宿主带崩；Fatal 带文件名与行号 |
+
+**这些边界是"敢把脚本交给运营改"的前提**，不是可选项。
+
+### 6.6 和 Lua 方案对照
+
+| | C++ + Lua | TSF |
+|:--|:--|:--|
+| 引擎层 | C++（编译） | AOT PHP（编译） |
+| 逻辑层 | Lua（解释） | PHP 脚本（Zend 解释） |
+| 换逻辑 | 换 chunk | 改文件 + `watchAll()` 自动 reload |
+| 状态 | 宿主侧表 / `_ENV` | `Context` 的 state（跨 reload） |
+| 宿主 API | 注册 C 函数 | `bind($cap, $fn)` |
+| 崩溃隔离 | 进程 / `pcall` | `zend_try` + 结构化错误 |
+| 死循环保护 | debug hook | `zend_set_timeout`（秒级） |
+| 表达力 | 任意表 | 白名单字段 + 标量状态（**安全优先**） |
+
+最后一行是**设计取向**而不是缺陷：TSF 的脚本碰不到任意业务对象，
+所以复杂状态机仍应写在 AOT 里。这是拿"表达力"换"不会误改数据"。
 
 ## 七、什么时候还是该用 AOT
 
@@ -172,8 +262,8 @@ echo "extension=$PWD/modules/interp.so" > /tmp/myconf/interp.ini
 PHP_INI_SCAN_DIR='/tmp/myconf:/usr/local/php-8.5-zts/etc/conf.d' ./你的工程
 
 # 3. 跑回归
-tsf verify --only script    # 16 项
-tsf verify --only http      # 8 项
+tsf verify --only script    # script-test 52 项
+tsf verify --only http      # http-test
 ```
 
 **完整研究记录**（含每个实验的原始输出）在 `docs/research/hot-reload.md`。

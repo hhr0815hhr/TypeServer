@@ -11,6 +11,18 @@ return [
     // 这三件事在没有能力绑定之前，脚本一样都做不到。
     // 跨 reload 的累计：状态存在宿主侧，脚本重新 require 也不会清零。
     // 活动"已发奖名单""本轮计数"就是这类东西。
+    // 被别的脚本调用：读入参，回一个值
+    "ping" => function ($ctx) {
+        return "pong:" . $ctx->arg();
+    },
+    // 发起脚本间调用（真正的调用能力由宿主 bind 提供）
+    "callPeer" => function ($ctx) {
+        return $ctx->callScript("peer", "ping", $ctx->arg());
+    },
+    // 自己调自己：用来验证递归深度上限（宿主注册名 "self"）
+    "loopCall" => function ($ctx) {
+        return $ctx->callScript("self", "loopCall", $ctx->arg());
+    },
     "counter" => function ($ctx) {
         return $ctx->addStateInt("hits", 1);
     },
