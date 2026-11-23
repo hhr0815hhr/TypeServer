@@ -230,9 +230,71 @@ function benchThroughputCoro(int $n): void
         . "  实际处理 " . number_format($count) . " 条");
 }
 
+
+/**
+ * 帧编解码的纯成本（不含网络）。
+ *
+ * 目的：把 29 µs/条的"网络端"拆开。如果编解码只占 1–2 µs，那剩下 27 µs 就是
+ * Swoole 回调 + 系统调用 + 事件循环——属于框架边界，再怎么优化代码也动不了。
+ * **先知道能优化多少，再决定投不投。**
+ */
+function benchFrame(): void
+{
+    $frame = new \TSF\Protocol\Frame\HeaderFrame();
+    $body = str_repeat("x", 64);      // 常见的小包
+    $n = 200000;
+
+    // 1) encode
+    $t0 = hrtime(true);
+    for ($i = 0; $i < $n; $i++) {
+        $frame->encode(1001, $body, 0);
+    }
+    $enc = (hrtime(true) - $t0) / $n;
+    say("  encode（64B 载荷）  " . number_format($enc, 0) . " ns/次");
+
+    // 2) decode：真实场景是"一次读进来一批帧"，所以拼 100 帧一起解
+    $one = $frame->encode(1001, $body, 0);
+    $batch = str_repeat($one, 100);
+    $rounds = 5000;
+    $t0 = hrtime(true);
+    $buf = $batch;
+    $count = 0;
+    for ($r = 0; $r < $rounds; $r++) {
+        $buf = $batch;
+        while (true) {
+            $f = $frame->decode($buf);
+            if ($f === null) {
+                break;
+            }
+            $count++;
+            $buf = substr($buf, $f->consumed);   // ← feed() 里同样的写法
+        }
+    }
+    $total = (hrtime(true) - $t0) / $count;
+    $decodeOnly = (hrtime(true) - $t0) / $count;
+    say("  decode + 消费缓冲      " . number_format($decodeOnly, 0) . " ns/帧  （共 " . number_format($count) . " 帧）");
+
+    // 3) 单独看"每帧一次 substr 搬整个缓冲"的代价
+    $t0 = hrtime(true);
+    for ($i = 0; $i < $n; $i++) {
+        $tmp = substr($batch, 72);
+    }
+    $sub = (hrtime(true) - $t0) / $n;
+    say("  substr 搬剩余缓冲      " . number_format($sub, 0) . " ns/次（" . strlen($batch) . "B 缓冲）");
+
+    say("");
+    say("  参考：网络端实测 29,000 ns/条（29 µs）");
+    say("  编解码占比 ≈ " . number_format(($enc + $total) / 29000 * 100, 1) . "%");
+}
+
 function main(): void
 {
     $argv = $_SERVER["argv"] ?? [];
+    if (isset($argv[1]) && $argv[1] === "frame") {
+        say("== 帧编解码成本（不含网络）==");
+        benchFrame();
+        return;
+    }
     if (isset($argv[1]) && $argv[1] === "coro") {
         // 只跑协程对比：同一档位（深队列 10 万）分别测同步/协程
         say("== 协程 vs 同步：同一负载下的纯消息吞吐 ==");

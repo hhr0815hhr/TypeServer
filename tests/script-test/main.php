@@ -26,6 +26,94 @@ function check(bool $cond, string $name, string $detail = ""): void
     }
 }
 
+
+/**
+ * 副作用能力：脚本能不能"做事"，而不只是"改数字"。
+ *
+ * 这是热更能覆盖"活动玩法"还是只能覆盖"调数值"的分界线。
+ */
+final class RewardProbe
+{
+    public static int $amount = 0;
+
+    public static string $reason = "";
+
+    public static int $rewarded = 0;
+
+    public static array $logs = [];
+}
+
+function caseSideEffects(): void
+{
+    echo PHP_EOL . "[副作用能力]" . PHP_EOL;
+    $dir = __DIR__;
+    $mgr = new Manager();
+    $mgr->register("quest", $dir . "/quest.php");
+    $mgr->loadAll();
+    $s = $mgr->get("quest");
+    if ($s === null) {
+        check(false, "取到脚本");
+        return;
+    }
+
+    $p = new Player();
+
+    // 1) 未授权时脚本发奖 → 抛错（不能静默成功，也不能静默失败）
+    $ctx = new Context($p, ["uid", "gold"], ["gold"]);
+    $threw = false;
+    try {
+        $ctx->reward(100, "probe");
+    } catch (\RuntimeException $e) {
+        $threw = true;
+    }
+    check($threw, "未 bindReward 时发奖抛错");
+    check(!$ctx->canReward(), "canReward() 为假");
+
+    // 2) 授权后脚本能发奖，宿主拿到金额与理由
+    RewardProbe::$amount = 0;
+    RewardProbe::$reason = "";
+    RewardProbe::$logs = [];
+    $p2 = new Player();
+    $p2->gold = 100;                       // 低于 500 → 脚本会发奖
+    $ctx2 = new Context($p2, ["uid", "gold"], ["gold"]);
+    $ctx2->bindReward(function (int $amount, string $reason): bool {
+        RewardProbe::$amount = $amount;
+        RewardProbe::$reason = $reason;
+        RewardProbe::$rewarded++;
+        return true;
+    });
+    $ctx2->bindLog(function (string $msg): void {
+        RewardProbe::$logs[] = $msg;
+    });
+    $s->callWithContext("daily", $ctx2);
+    check(RewardProbe::$rewarded === 1, "脚本触发了一次发奖");
+    check(RewardProbe::$amount === 350, "金额正确（350）", "实际 " . RewardProbe::$amount);
+    check(RewardProbe::$reason === "daily_first_win", "理由正确", RewardProbe::$reason);
+    check(count(RewardProbe::$logs) === 1, "脚本写了一条日志");
+
+    // 3) 条件不满足时不发奖（脚本里的 if 是真的在跑）
+    RewardProbe::$rewarded = 0;
+    $p3 = new Player();
+    $p3->gold = 900;
+    $ctx3 = new Context($p3, ["uid", "gold"], ["gold"]);
+    $ctx3->bindReward(function (int $amount, string $reason): bool {
+        RewardProbe::$rewarded++;
+        return true;
+    });
+    $s->callWithContext("daily", $ctx3);
+    check(RewardProbe::$rewarded === 0, "gold>=500 时不发奖");
+
+    // 4) 日志未绑定时静默：不能因为"没人收日志"把活动打挂
+    $ctx4 = new Context(new Player(), ["uid", "gold"], ["gold"]);
+    $noThrow = true;
+    try {
+        $ctx4->log("nobody listens");
+    } catch (\Throwable $e) {
+        $noThrow = false;
+    }
+    check($noThrow, "未 bindLog 时 log 静默不抛错");
+}
+
 function main(): void
 {
     $dir = __DIR__;
@@ -104,6 +192,8 @@ function main(): void
             check(isset($r2["class"]) && $r2["class"] === "RuntimeException", "错误里带异常类名");
         }
     }
+
+    caseSideEffects();
 
     echo "DONE\n";
 }
