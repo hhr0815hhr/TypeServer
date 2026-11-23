@@ -134,13 +134,111 @@ $mgr->register("quest", "/opt/scripts/quest.php");
 $mgr->register("activity", "/opt/scripts/activity.php");
 $mgr->loadAll();
 
-// 帧循环 / 定时器里每秒一次：有变更的自动重载
-$mgr->watchAll();
+// 重载是**手动动作**，由 GM 命令触发（见 6.1.1）。默认不在任何热路径里。
 
 // 业务：受限视图（推荐）
 $ctx = new Context($player, ["uid", "level", "gold"], ["gold"]);
 $r = $mgr->get("quest")?->callWithContext("onQuest", $ctx, 1000);   // 1000ms 执行预算
 ```
+
+#### 6.1.1 为什么重载默认是手动的
+
+`Manager` 提供了三种重载方式，**没有一个会自动跑**：
+
+| 方法 | 语义 | 用在哪 |
+|:--|:--|:--|
+| `reload($name)` | 指定脚本**强制**重读（不看 mtime） | GM 命令 `script.reload` |
+| `reloadAll()` | 全部强制重读 | GM 命令 `script.reload-all` |
+| `watchAll()` | 扫一遍，**有变更的**才重载 | 开发期临时用，见下 |
+
+不把 `watchAll()` 挂到帧循环/每秒定时器上，理由不是性能（虽然每秒 N 次
+`stat` 确实会随着脚本数增长），而是**语义**：
+
+- **自动重载 = 改文件即刻生效。** 生产环境上，任何人、任何同步工具
+  （rsync / IDE 自动上传 / 容器挂载）动一下脚本目录，线上逻辑就换了——
+  没有确认、没有审计、出事也查不到是谁改的。
+- **手动重载可审计。** GM 命令天然带操作人、时间、目标，出问题能回溯。
+- **"改完立刻生效"在线上是个危险默认。** 改脚本的正确流程是：改 → 测试环境验证 →
+  GM 重载 → 观察指标。自动重载把这个流程压成"改"，中间两道全没了。
+
+GM 命令的参考实现。注意 **`Manager` 活在业务 Service 里**，而 GM 命令通常注册在
+另一个上下文——所以要经 `Scheduler::serviceOf()` 转发过去（`demo/battle` 的
+`config.reload` 就是这么写的，可以直接照抄结构）：
+
+```php
+// ① 业务 Service 里持有 Manager，并暴露一个方法给 GM 调
+final class QuestService extends Service
+{
+    private Manager $mgr;
+
+    /** @param string $name 空串表示全部 */
+    public function gmReload(string $name): array
+    {
+        if ($name === "") {
+            return ["ok" => true, "names" => $this->mgr->reloadAll()];
+        }
+        if (!$this->mgr->reload($name)) {
+            return ["ok" => false, "msg" => "不存在或加载失败: " . $name];
+        }
+        return ["ok" => true, "names" => [$name]];
+    }
+}
+
+// ② main.php 里注册 GM 命令，转发到那个 Service
+Registry::on("script.reload", function (array $args) use ($questAddr): Result {
+    $svc = Scheduler::instance()->serviceOf($questAddr);
+    if (!$svc instanceof QuestService) {
+        return Result::fail("quest 服务未就绪");
+    }
+    $name = isset($args[0]) ? (string) $args[0] : "";
+    $r = $svc->gmReload($name);
+    if (!isset($r["ok"]) || $r["ok"] !== true) {
+        return Result::fail(isset($r["msg"]) ? (string) $r["msg"] : "重载失败");
+    }
+    $names = isset($r["names"]) && is_array($r["names"]) ? $r["names"] : [];
+    return Result::ok(implode(", ", $names) === "" ? "（没有注册脚本）" : implode(", ", $names));
+}, "重载脚本：script.reload <name>；不带参数 = 全部");
+
+// ③ 别名（可选）：全部重载
+Registry::on("script.reload-all", function (array $args) use ($questAddr): Result {
+    $svc = Scheduler::instance()->serviceOf($questAddr);
+    if (!$svc instanceof QuestService) {
+        return Result::fail("quest 服务未就绪");
+    }
+    $r = $svc->gmReload("");
+    $names = isset($r["names"]) && is_array($r["names"]) ? $r["names"] : [];
+    return Result::ok(implode(", ", $names) === "" ? "（没有注册脚本）" : implode(", ", $names));
+}, "重载全部脚本");
+```
+
+为什么绕一圈转发、不直接 `$mgr->reload()`：`Manager` 的实例在业务 Service 的
+协程上下文里（脚本对象、`Context` 状态都归它管）。从 GM 的上下文直接调，
+等于跨 Service 操作别人的状态——`serviceOf()` + 转发才是框架认可的方式。
+
+调试期确实想"改完就生效"，可以自己挂一个**低频**定时器（5s 以上），
+并且**只在开发环境配置里开**：
+
+```php
+// onStart 里：开一个 5 秒间隔的定时器（interval 是"按毫秒投消息"，不是回调）
+if ($cfg->getBool("script.autoReload", false)) {   // 默认 false
+    $this->interval(5000, Msg::SCRIPT_WATCH);
+}
+
+// onMessage 里：
+if ($m->msgId === Msg::SCRIPT_WATCH) {
+    $changed = $mgr->watchAll();
+    if ($changed !== []) {
+        Logger::info("script auto reload", ["names" => $changed]);
+    }
+    return;
+}
+```
+
+（`every()` 收的是 cron 字符串，别和 `interval()` 混了：
+`every("0 5 * * *", ...)` 是每天 5 点，`interval(5000, ...)` 是每 5 秒。）
+
+关键在 `getBool("script.autoReload", false)` 这个**默认值 false**——
+配置项存在是为了让人显式打开，而不是让它悄悄生效。
 
 ### 6.2 脚本能做的事
 
@@ -229,7 +327,7 @@ return [
 |:--|:--|:--|
 | 引擎层 | C++（编译） | AOT PHP（编译） |
 | 逻辑层 | Lua（解释） | PHP 脚本（Zend 解释） |
-| 换逻辑 | 换 chunk | 改文件 + `watchAll()` 自动 reload |
+| 换逻辑 | 换 chunk | 改文件 + GM 命令 `script.reload`（手控，可审计） |
 | 状态 | 宿主侧表 / `_ENV` | `Context` 的 state（跨 reload） |
 | 宿主 API | 注册 C 函数 | `bind($cap, $fn)` |
 | 崩溃隔离 | 进程 / `pcall` | `zend_try` + 结构化错误 |

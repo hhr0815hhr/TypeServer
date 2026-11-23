@@ -63,6 +63,29 @@ cd /tmp
 tsf new hello
 ```
 
+生成时会**交互问你启用哪些可选功能**（db / room / aoi / redis …），
+直接回车就是一个都不用，以后改 `project.json` 也能加：
+
+```
+要启用哪些可选功能？（直接回车 = 都不用；以后改 project.json 也能加）
+
+   1) aoi        九宫格视野（无状态，格子坐标的纯函数）
+   2) db         数据库：连接管理（重连/事务）+ 基于 Attribute 的轻量仓储
+  ...
+  13) room       房间：状态机 + 成员表（含身份与席位，不含坐标）  [自动带上 fsm,frameloop]
+  ...
+
+  输入编号（逗号或空格分隔，如 1,5,9），回车跳过 >
+```
+
+非交互环境（CI、`< /dev/null`、管道）不会卡住，按"一个都不用"处理。
+脚本里想指定就直接给参数：
+
+```bash
+tsf new hello --packages=db,room     # 显式指定（依赖自动补齐）
+tsf new hello --no-packages          # 明确一个都不用
+```
+
 ```
   OK 工程已创建: /tmp/hello
 
