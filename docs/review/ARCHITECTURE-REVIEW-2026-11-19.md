@@ -3107,3 +3107,128 @@ lint 100 文件/10 包 → 137/16。
 
 上限仍是 6.5：AOT 类型系统那层认知负担消不掉（`08-aot-types.md` 的 13 条红线
 就是它的大小）。
+
+---
+
+## 四十四、全面复盘：冗余与待优化（2026-11-23）
+
+不凭印象，用数据扫。方法：统计规模 → 扫零调用的公开方法 → 找同类职责的重复实现 →
+查测试覆盖盲区。
+
+### 规模基线
+
+| 部分 | 文件 | 行数 | 备注 |
+|:--|--:|--:|:--|
+| 核心 `tsf/src` | 71 | 11,246 | |
+| 可选包 `tsf/pkg` | 66 | 11,636 | 16 个包，全部有引用 |
+| CLI `tsf/bin/tsf` | 1 | **2,385** | 16 个子命令挤在一个文件里 |
+| 测试 `tests` | 64 | 14,073 | 多于核心代码，密度健康 |
+
+扫出 **901 个 public 方法，其中 71 个零调用**。逐个看过之后，分成四类。
+
+### A. 真冗余（该删 / 该合并）
+
+**A1. 两个 Cron 实现 —— 最严重的一处**
+
+| | `tsf/src/Timer/Cron.php` | `tsf/pkg/schedule/src/Cron.php` |
+|:--|:--|:--|
+| 行数 | 202 | 216 |
+| 语法 | 5 字段（分时日月周） | 5 或 **6** 字段（带秒） |
+| 核心方法 | **算下次触发时间**（最多向后找 1461 天） | **判断当前是否匹配**（不做计算） |
+| 使用方 | `Scheduler`、`tests/timer-test` | `tests/schedule-test` |
+
+**同一件事的两套实现，取向还相反。** 业务要记两套规则："timer 的 cron 不支持秒，
+schedule 的支持"——这种不一致迟早有人踩。
+
+两者合计 418 行，合并后能省下约一半，而且行为能统一。
+
+**A2. `SessionManager` 的两个死方法（已删）**
+
+`touch()` 和 `countFrame()` 被 `touchFrame()` 取代（合并版少一次方法调用 + 一次数组查找），
+但旧方法留着。实测全仓库零调用。
+
+**真实风险**：下一个人很可能只调 `touch()`（以为"续期就够了"），
+结果 `frames` 不计数——丢帧统计永远是 0，而且没有任何报错。
+
+已删，并在原处留了一行说明"为什么不能留旧的"。
+
+**A3. demo 根目录的 9 个一次性脚本**
+
+```
+bp-run.sh  bp-test.php  fix-config.php  frame-test.php
+m1-run.sh  m1-test.php  proto-run.sh    proto-test.php
+ws-run.sh  ws-test.php
+```
+
+它们和 `demo-echo/`、`duel/` 这些真正的 demo 混在同一个目录层级。
+看名字像"某次迁移的验证脚本"，但没有任何说明。新人会以为它们是必跑的一环。
+
+建议：移进 `demo/_scripts/` 并加一个 README 说明各自验证什么，或者确认已被
+`tests/` 覆盖后直接删。
+
+**A4. 71 个零调用的公开方法里，约 20 个该收窄可见性**
+
+它们不是"没用"，而是**暴露了内部状态**，让 API 表面虚胖：
+
+| 类 | 方法 | 性质 |
+|:--|:--|:--|
+| `Scheduler` | `budget` `cluster` `currentAddr` `isSupervised` `supervisedAddr` `restartCounts` | 内部状态查询 |
+| `Link` | `socket` `pendingBytes` | 连接内部细节 |
+| `Ring` | `nodeForHash` `vnodes` | 实现细节 |
+| `Reader` | `readRows` `totalRows` | 中间态 |
+| `Metrics` | `defaultSlowUs` | 常量访问 |
+
+**A5. 名称重复的两个类（不算冗余，但容易误读）**
+
+`Reader`（`Config/Reader` 与 `Proto/Reader`）、`Response`（`Rpc/Response` 与
+`http/Response`）。职责确实不同，但同名类在同一框架里会让人 `use` 错。
+建议加注释区分，或改名（`ConfigTableReader` / `ProtoStreamReader`）。
+
+### B. 需要优化（风险，不是冗余）
+
+**B1. `aoi` 和 `frameloop` 没有测试 —— 最该补**
+
+16 个包里只有这两个没有对应测试。
+
+| 包 | 行数 | 为什么危险 |
+|:--|--:|:--|
+| `aoi` | 613（Grid 422） | 几何计算（格子、视野、邻居）。**算错不会崩，只会"视野里少一个人"** ——线上表现为"偶发看不到队友"，极难复现 |
+| `frameloop` | 139 | delta 计算 + `maxDeltaMs` 上限。卡顿后 delta 处理错会让实体瞬移穿墙 |
+
+共同点：**数学容易错 + 错了不崩**。这是最该有测试的一类代码，现在是空白。
+
+**B2. CLI 单文件 2,385 行**
+
+16 个子命令（new/build/serve/watch/migrate/lint/add/remove/test/verify/doctor/mem...）
+全在一个文件里，最长的函数超过 100 行。
+
+CLI 不参与 AOT 编译，拆成 `tsf/cli/*.php` 对产物零影响，纯粹是可维护性问题。
+
+**B3. `Context` 有 7 个方法零调用**
+
+`stateString` `setStateString` `stateBool` `setStateBool` `canRead` `readableFields`
+（还有 `setStateInt` 之外的两个）。
+
+**其中 4 个是我上一轮刚加的（§40），没有测试覆盖。** 这是我自己留下的缺口，
+列在这里而不是藏起来。
+
+### C. 观察（不必动）
+
+- **16 个包全部有真实引用**，没有整包死代码
+- `frameloop` 看似和 `Scheduler::tick` 重叠，实际有独立价值（battle / mmo-mini / duel
+  都在用），拆包理由成立
+- `demo-echo-nts` 与 `demo-echo` 几乎相同，但前者是"验证 NTS 能跑"的对照，留着有意义
+
+### 优先级建议
+
+| 优先级 | 事项 | 理由 |
+|:--|:--|:--|
+| **P0** | 补 `aoi` + `frameloop` 测试 | 唯一"算错了不报错"的模块，且完全无覆盖 |
+| **P0** | Cron 二选一 | 两套规则并存，业务迟早踩；合并省 200 行 |
+| P1 | 收窄 20 个内部方法的可见性 | 减少误用面，零行为风险 |
+| P1 | 补 `Context` 那 4 个新方法的测试 | 自己留下的缺口 |
+| P2 | 清理 demo 脚本 / 拆分 CLI | 纯可维护性 |
+
+**本轮已动手**：删 `SessionManager` 的死方法（A2，零风险，已回归通过）。
+
+其余各项都是结构性问题，改动面比"删两个方法"大得多，等确认后再动。
