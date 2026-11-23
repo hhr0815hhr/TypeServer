@@ -25,12 +25,23 @@ description: |
 
 # TSF 开发
 
-> **仓库**：`D:\hhr\TypeServer`（主仓库）+ `D:\hhr\TypeServer\tsf`（submodule → `hhr0815hhr/tsf`）
+> **先确认你在哪种形态里干活** —— 后面所有 `tsf` 命令的前缀不同，能查到的文档也不同：
 >
-> **文档在哪**：教程在 `docs/guide/`（14 篇，3310 行）；框架说明在 `tsf/README.md`
-> （约 520 行：安装 / 核心概念 / AOT 红线 13 条 / 去哪看更多）；
-> 开发全过程的实测数据在 `docs/archive/tsf-readme-full.md`（3856 行，**按需查，别通读**）。
-> **别重复读，按下面导航过去。**
+> | 形态 | tsf 在哪 | 命令 | 框架文档 |
+> |:--|:--|:--|:--|
+> | **独立工程**（`composer require` 装的） | `vendor/bin/tsf` | `./vendor/bin/tsf doctor` | 只有 `vendor/hhr0815hhr/tsf/README.md` |
+> | **框架仓库内**（改框架、跑 verify） | `<repo>/tsf/bin/tsf` | `tsf/bin/tsf doctor` | `docs/guide/`（14 篇） |
+>
+> **不要假设仓库在某个固定路径。** 在空目录、容器、别人的机器上从零开始时，
+> 走独立工程这条路：`references/setup.md` 里的 composer + 工具链安装。
+> 去找 "TypeServer 仓库" 是开发机的形态，不是使用者的形态。
+>
+> **本 skill 里带 `docs/guide/...` 的引用需要仓库形态。** 独立工程没有 `docs/`，替代入口：
+>
+> - `vendor/hhr0815hhr/tsf/README.md`（约 520 行：安装 / 核心概念 / AOT 红线）
+> - `tsf list`（可用包一览）+ `pkg/<name>/pkg.json` 的 `desc` / `hint`
+> - 本 skill 的 `references/`（error-codes / add-feature / gm / hot-reload …）
+> - 或直接看 GitHub：`https://github.com/hhr0815hhr/TypeServer/tree/main/docs/guide`
 
 ## 这个 skill 里有什么
 
@@ -102,11 +113,18 @@ tsf new game --no-packages             # 明确全不启用（CI 默认走这条
 
 ### 0.3 改的是框架还是业务？
 
-- 业务工程：直接改，`tsf build` 验
-- `tsf/` 下的框架代码：要先进 submodule 提交（`cd tsf && git commit && git push`），
+- **业务工程**：直接改，`tsf build` 验（这条和形态无关）
+- **仓库形态改框架**：先进 submodule 提交（`cd tsf && git commit && git push`），
   再回主仓库更新指针（`git add tsf && git commit`）—— **两步，漏一步别人拉不到**
+- **独立工程改框架**：没有 submodule。改 `vendor/hhr0815hhr/tsf/` 会被
+  `composer update` 冲掉——要长期改就 fork + `composer require` 指向自己的仓库；
+  只是临时验证，改完记得 `composer.lock` 里记的版本没变，别误以为改动生效了
 
 ## 1. 任务 → 去哪看
+
+> 下表里的 `docs/guide/...` 需要**仓库形态**。独立工程没有 `docs/`，
+> 把同样的路径换成 GitHub：
+> `https://github.com/hhr0815hhr/TypeServer/tree/main/docs/guide/`
 
 | 任务 | 主要参考 |
 |:--|:--|
