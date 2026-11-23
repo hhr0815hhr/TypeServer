@@ -16,15 +16,70 @@ use TSF\Script\Manager;
 
 $mgr = new Manager();
 $mgr->register("quest", "/opt/scripts/quest.php");
+$mgr->register("activity", "/opt/scripts/activity.php");
 $mgr->loadAll();
 
-// 帧循环 / 定时器里每秒一次
-$mgr->watchAll();          // 有变更的自动重载，返回重载了哪些
+// 重载是**手动动作**，由 GM 命令触发（三种方式，见下）
+// 不要把 watchAll() 挂到帧循环上
 
 // 业务：用受限视图（推荐）
 $ctx = new Context($player, ["uid", "level", "gold"], ["gold"]);
 $mgr->get("quest")?->callWithContext("onQuest", $ctx);
 ```
+
+**重载的三种方式（都不自动跑）**：
+
+| 方法 | 语义 | 用在哪 |
+|:--|:--|:--|
+| `$mgr->reload($name)` | 指定脚本**强制**重读（不看 mtime） | GM 命令 `script.reload <name>` |
+| `$mgr->reloadAll()` | 全部强制重读 | GM 命令 `script.reload-all` |
+| `$mgr->watchAll()` | 扫一遍、**有变更的**才重载 | 开发期临时用，需显式配开关 |
+
+**为什么不挂帧循环**：`watchAll` 每秒给每个脚本做一次 `stat`，脚本一多就是纯浪费；
+更重要的是语义——自动重载 = **改文件即刻生效**，生产上任何人/任何同步工具
+（rsync、IDE 自动上传、容器挂载）动一下目录，线上逻辑就换了，没有确认也没有审计。
+
+GM 命令不能直接碰 `$mgr`（它在业务 Service 里），要经 `Scheduler::serviceOf()`
+转发过去：
+
+```php
+// 业务 Service 里暴露方法
+public function gmReload(string $name): array
+{
+    if ($name === "") {
+        return ["ok" => true, "names" => $this->mgr->reloadAll()];
+    }
+    if (!$this->mgr->reload($name)) {
+        return ["ok" => false, "msg" => "不存在或加载失败: " . $name];
+    }
+    return ["ok" => true, "names" => [$name]];
+}
+
+// main.php 里注册 GM 命令（结构照 demo/battle 的 config.reload）
+Registry::on("script.reload", function (array $args) use ($questAddr): Result {
+    $svc = Scheduler::instance()->serviceOf($questAddr);
+    if (!$svc instanceof QuestService) {
+        return Result::fail("quest 服务未就绪");
+    }
+    $r = $svc->gmReload(isset($args[0]) ? (string) $args[0] : "");
+    if (!isset($r["ok"]) || $r["ok"] !== true) {
+        return Result::fail(isset($r["msg"]) ? (string) $r["msg"] : "重载失败");
+    }
+    return Result::ok(implode(", ", $r["names"]));
+}, "重载脚本：script.reload <name>；不带参数 = 全部");
+```
+
+调试期确实想"改完就生效"，用**低频**定时器 + 默认关闭的配置项：
+
+```php
+if ($cfg->getBool("script.autoReload", false)) {   // 默认 false
+    $this->interval(5000, Msg::SCRIPT_WATCH);
+}
+// onMessage 里：if ($m->msgId === Msg::SCRIPT_WATCH) { $mgr->watchAll(); }
+```
+
+注意 `interval(ms, msgId)` 是"按毫秒投消息"，**不是回调**；
+`every()` 收的是 cron 字符串，两者别混。
 
 **脚本形态**：
 

@@ -16,7 +16,9 @@ description: |
   pkg/http、登录服、中间件、TokenAuth、AOT 编译错误、php::Variant、cannot convert、
   mixed、TypeServer 仓库、submodule、性能基线、吞吐、bench、
   pkg/script、脚本热更、替 Lua、ext/interp、supervise、监督树、tsf mem、tsf-dev、
-  GM、gm 命令、GM 通道、配置热更、配置重载、FileLoader、crc32 判变更、Gm\Task。
+  GM、gm 命令、GM 通道、配置热更、配置重载、FileLoader、crc32 判变更、Gm\Task、
+  房卡房、房间用什么跑、一房一协程、协程还是线程、进程还是协程、Service 载体、
+  世界服、副本、场景容量、万人同屏、AOI 容量、分区。
 
   不适用：只问 TypePHP 语言本身（原生类型、tpc 构建链）—— 那用 typephp-refactor。
 ---
@@ -25,7 +27,7 @@ description: |
 
 > **仓库**：`D:\hhr\TypeServer`（主仓库）+ `D:\hhr\TypeServer\tsf`（submodule → `hhr0815hhr/tsf`）
 >
-> **文档在哪**：教程在 `docs/guide/`（13 篇，3094 行）；框架说明在 `tsf/README.md`
+> **文档在哪**：教程在 `docs/guide/`（14 篇，3310 行）；框架说明在 `tsf/README.md`
 > （约 520 行：安装 / 核心概念 / AOT 红线 13 条 / 去哪看更多）；
 > 开发全过程的实测数据在 `docs/archive/tsf-readme-full.md`（3856 行，**按需查，别通读**）。
 > **别重复读，按下面导航过去。**
@@ -38,6 +40,7 @@ description: |
 | `references/error-codes.md` | **编译 / 链接 / 运行期 / 环境的错误对照表**，按报错关键词搜（最常用） |
 | `references/add-feature.md` | 加接口 / 加玩法 / 加 pkg / 加定时任务 —— 四类场景的三步流程 + 验证命令 |
 | `references/perf-baseline.md` | 性能基线 + "假性能问题"清单 + 怎么测才可信 |
+| `references/scene-carrier.md` | **房间/副本/世界用什么载体跑**：Service / 协程 / worker 的分工，含容量数据 |
 | `references/hot-reload.md` | **脚本**热更的用法与坑（`pkg/script` + `ext/interp`） |
 | `references/config-reload.md` | **配置表**热更：默认手动、FileLoader、crc32、两条路的边界 |
 | `references/gm.md` | **GM 通道**：注册命令、同步/异步、Task 任务表、actor 边界、安全默认值 |
@@ -78,7 +81,7 @@ TSF_BIN=./vendor/bin/tsf bash scripts/preflight.sh .
 **顺手记下版本号。** 报错时带上这两个：
 
 ```bash
-./vendor/bin/tsf --version     # TSF 0.8.0
+./vendor/bin/tsf --version     # TSF 0.12.0
 tpc --version                  # TypePHP Compiler (AOT) v0.9.6
 ```
 
@@ -88,6 +91,14 @@ tpc --version                  # TypePHP Compiler (AOT) v0.9.6
 ### 0.2 是哪个工程？
 
 游戏服（`tsf new`，TCP/WS，端口 9001）还是登录服（`tsf new --login`，HTTP，端口 9101）。
+
+`tsf new` 会**交互问要启用哪些可选包**（db/room/aoi/redis…），回车 = 都不用。
+依赖自动补齐（选 `room` 会带上 `fsm`+`frameloop`）。非交互场景用参数：
+
+```bash
+tsf new game --packages=db,room,http   # 显式指定
+tsf new game --no-packages             # 明确全不启用（CI 默认走这条）
+```
 
 ### 0.3 改的是框架还是业务？
 
@@ -102,6 +113,7 @@ tpc --version                  # TypePHP Compiler (AOT) v0.9.6
 | 加 HTTP 接口、路由、中间件 | `docs/guide/11-http-api.md` |
 | 登录服怎么和网关对接（token） | `docs/guide/10-login-service.md` |
 | 加玩法（房间 / 帧循环 / 状态机 / AOI） | `docs/guide/03-gameplay.md` |
+| **房间/副本/世界该用什么载体跑**（Service / 协程 / 多 worker） | **`references/scene-carrier.md`** |
 | 用 db / redis / mail / schedule | `docs/guide/04-data.md` + `tsf/pkg/<name>/pkg.json` |
 | **脚本热更（替 Lua）** | `docs/guide/12-hot-reload.md`（先看这篇）+ `docs/research/hot-reload.md`（完整记录）+ `tsf/pkg/script/` |
 | **配置表热更（改数值/开关）** | `references/config-reload.md` |
@@ -113,26 +125,37 @@ tpc --version                  # TypePHP Compiler (AOT) v0.9.6
 
 ## 2. AOT 硬约束（违反必踩，全是实测过的）
 
-完整清单见 `typephp-refactor` skill 的 `references/restrictions.md`。最常踩的五条：
+完整清单见 `typephp-refactor` skill 的 `references/restrictions.md`。最常踩的八条：
 
 1. **不用 `mixed` 类型声明** —— `tsf lint` 会拦，给替代类型
 2. **不用运行时反射 / 容器** —— 依赖从构造函数显式传
 3. **回调形参个数必须精确匹配** —— 多一个少一个都静默失败（异常被事件循环吞掉）
 4. **闭包引用参数不回写** —— 输出参数改成返回值携带
 5. **属性访问不能直接喂给需要具体类型的表达式** —— 先落局部变量
+6. **`exit(n)` 的参数会被忽略，退出码恒为 0** —— 实测 `exit(1)`/`exit(3)`/`exit(77)`
+   编出来的产物全部返回 0。要"非 0 退出"必须用 `Bootstrap::exitWith($code)`
+   （内部走 SIGKILL）。**这条会让"进程崩了但 supervisor 以为正常退出"**，
+   而且不报错、不重启、不告警
+7. **`int / int` 是整数除法** —— PHP 里 `/` 永远返回 float，AOT 里 `5 / 20000` 得 0。
+   要小数必须写 `5.0 / 20000.0`。症状是"算出来的百分比、概率、比率全是 0"，
+   而代码看起来完全正确
+8. **同一个函数里别复用变量名** —— AOT 下变量类型由**首次赋值**决定：
+   `foreach ($a as $name)` 之后再用 `foreach ($b as $name => $x)` 会报
+   `Cannot assign value to variable $name of type php::String with type php::Var`。
+   不同用途换名字（`$blockName` / `$blockData`），别用 `$k` / `$name` / `$g` 这类通用名硬省
 
 ## 3. 改完必做
 
 ```bash
-tsf lint .        # 禁 mixed + 命名空间与目录一致，违反返回非 0
+tsf lint .        # 禁 mixed + 命名空间一致 + **测试必须进 verify（或有 skip-auto）**
 tsf build .       # 编译（约 1.9s）
 ```
 
 框架层改动（`tsf/` 下）还要跑：
 
 ```bash
-tsf verify                 # 全量回归（所有套件）
-tsf verify --only script   # 只跑某个套件（script / http / semantics / settle ...）
+tsf verify                 # 全量回归（43 个套件）
+tsf verify script          # 只跑某个套件（位置参数；--only=script 也认）
 tsf verify --list          # 列出有哪些套件
 ```
 
@@ -149,7 +172,7 @@ tsf verify --list          # 列出有哪些套件
 | **让登录服直接改游戏内状态** | 游戏服内存有副本，会被下次刷盘覆盖；应该写邮件/订单再由游戏服发放 |
 | **用第三方 Web 框架（Slim/FastRoute）** | 依赖反射，AOT 编不过；用 `pkg/http` |
 | **用 mtime 判配置变没变** | `filemtime` 只到秒；改等长值（12→45）连 size 都不变 → "改了不生效且无报错"。用 crc32（`FileLoader::hash`） |
-| **默认开自动轮询热更** | 生效时机不由任何人决定，还可能读到半成品。默认手动触发，见 `config-reload.md` |
+| **默认开自动轮询热更** | 生效时机不由任何人决定，还可能读到半成品，且生产上等于"改文件即刻生效"（无确认无审计）。用 GM 命令触发：`$mgr->reload($name)` / `reloadAll()`，见 `hot-reload.md` |
 | **GM 命令返回"处理中"** | 运维无法判断成败，重复操作会重复执行。同步给结果，异步给 task id + 可查 |
 | **GM 里用 `deliver()` 再读结果** | `deliver` 是入队（下一帧才处理），当场读不到。管理面直接调 Service 方法 |
 

@@ -40,6 +40,33 @@ tpc --version     # TypePHP Compiler (AOT) v0.9.6
 
 ---
 
+### `Cannot assign value to variable $x of type php::String with type php::Var`
+
+**症状**：一个函数里出现两个用同名变量的循环，编译报这个。报错行指向第二个循环，
+但代码看起来完全正常——"我明明只是换了个循环"。
+
+**真实原因**：**AOT 下变量类型由首次赋值决定，之后不能换**。
+`foreach ($list as $name)` 把 `$name` 定成 `string`；后面的
+`foreach ($map as $name => $v)` 里 key 是 `Var` → 冲突。同理 `$x` 先被赋
+`new Grid()` 后又在 `foreach` 里当 value，会报 `php::Object with php::Var`。
+
+**修法**：不同用途用**不同的变量名**。这是唯一可靠的做法，加类型转换没用。
+
+```php
+// ✗
+foreach ($snap->blocks() as $name) { ... }
+foreach ($done as $name => $block) { ... }      // 编译失败
+
+// ✓
+foreach ($snap->blocks() as $name) { ... }
+foreach ($done as $blockName => $blockData) { ... }
+```
+
+**为什么会反复踩**：`$k` / `$name` / `$block` / `$g` / `$v` 这类"通用名"，在同一个函数里
+很容易被下一个循环顺手复用。**名字具体一点反而更安全**（`$gridOne`、`$blockData`）。
+
+---
+
 ### `xxx.cc:41:32: error: cannot convert 'php::Variant' to 'php::Int' {aka 'long int'}`
 
 **症状**：报错是 **C++ 的文件和行号**（`.cc`），不是 PHP 行号。而且外层会先甩一句：
@@ -334,6 +361,60 @@ PHP Fatal error: Allowed memory size of 536870912 bytes exhausted
 不允许**执行**。
 
 **修法**：所有逻辑放进 `function main(): void { ... }`。
+
+---
+
+### `exit(1)` 之后退出码是 0（进程"崩了"但没人当回事）
+
+**症状**：代码里 `exit(1)`、`Bootstrap::fatal("配置错误")`，进程确实退出了，
+但 `echo $?` 是 **0**。后果：supervisor / k8s 认为"正常退出"，不重启、不告警；
+部署脚本看到 rc=0 以为迁移成功，继续启动一个没迁完的服务。
+
+**真实原因**：**AOT 产物会忽略 `exit()` 的参数，退出码恒为 0**（实测 tpc 0.9.6：
+`exit(1)` / `exit(3)` / `exit(77)` / `\exit(3)` 编出来的产物全部返回 0）。
+PHP 解释器下这是对的，只有编译版才暴露。
+
+**修法**：用 `Bootstrap::exitWith($code)`。非 0 时它走 SIGKILL，退出码变 137。
+
+```php
+// ✗ 退出码 0
+exit(1);
+
+// ✓ 退出码 137（监控侧能识别为异常）
+Bootstrap::exitWith(1);
+
+// 已经封装好的
+Bootstrap::fatal("配置缺失: db.dsn");   // 内部就是 exitWith(1)
+```
+
+**连带影响**：靠退出码传结果的测试（`exit(1)` 表示 FAIL、`exit(77)` 表示 SKIP）
+在 AOT 下全部失效。所以 `tsf test` 除了看退出码，还会解析输出里的 `FAIL` 行和
+`failed=N`——加自己的测试时，**判定要放在 run.sh 的 bash 层**（bash 的退出码是真实的）。
+
+---
+
+### 算出来的百分比 / 概率 / 比率全是 0
+
+**症状**：`$rate = $hits / $total;`，`$total` 是几千、`$hits` 是几十，结果打印出来
+`0` 或 `0.0000%`。代码在 PHP 里是好的。
+
+**真实原因**：**AOT 下 `int / int` 是整数除法**。PHP 解释器的 `/` 永远返回 float
+（`5 / 20000 = 0.00025`），AOT 编译成 C++ 的整数除法（`5 / 20000 = 0`）。
+
+**修法**：显式写 float。
+
+```php
+// ✗ 得 0
+$rate = $hits / $total;
+$pct  = $rate * 100;
+
+// ✓
+$rate = $hits / (float) $total;      // 或 $hits / 1.0 / $total
+$pct  = $rate * 100.0;
+```
+
+**同类**：`intdiv()` 本来就是整数除法，语义正确；危险的是 `/` 被当成浮点用。
+`number_format($x / $n, 2)` 这种"格式化参数里做除法"最容易漏。
 
 ---
 
