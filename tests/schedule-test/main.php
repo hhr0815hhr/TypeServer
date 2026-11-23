@@ -190,6 +190,78 @@ function caseCron(): void
     T::ok(Cron::parse("0 0 5 * * *") !== [], "合法表达式解析成功");
 }
 
+
+/**
+ * 与核心 `TSF\Timer\Cron` 对拍。
+ *
+ * 两个 Cron 实现并存（核心的算「下次触发」，包里的判「当前是否匹配」），
+ * 语法还差一个秒级字段。在合并之前先确认一件事：**对同一批 5 字段表达式，
+ * 两者算出来的触发时刻是不是同一批**。不一致就说明合并会改变线上行为。
+ *
+ * 方法：用核心的 next() 算未来 N 次触发，再用包里的 matches() 逐分钟验证——
+ * 所有 next() 给出的时刻必须 matches=true，而它们之间的时刻必须 matches=false。
+ */
+function caseCrossCheck(): void
+{
+    echo PHP_EOL . "== 与核心 Timer\\Cron 对拍 ==" . PHP_EOL;
+
+    $exprs = [
+        "* * * * *",
+        "0 5 * * *",
+        "*/15 * * * *",
+        "30 2 * * 0",
+        "0 0 1 * *",
+        "0 0 1 * 1",
+        "10-20/5 * * * *",
+        "0 9 * * 1-5",
+    ];
+
+    $base = 1764000000 - (1764000000 % 60);   // 对齐到整分钟
+
+    foreach ($exprs as $expr) {
+        // 核心：算 5 次触发
+        $hits = [];
+        $from = $base;
+        for ($i = 0; $i < 5; $i++) {
+            $next = \TSF\Timer\Cron::next((string) $expr, $from);
+            if ($next <= $from) {
+                $hits = [];
+                break;
+            }
+            $hits[] = $next;
+            $from = $next;
+        }
+
+        if ($hits === []) {
+            T::ok(false, "核心算出触发时刻: " . $expr);
+            continue;
+        }
+
+        // 包里：这些时刻必须匹配
+        $allMatch = true;
+        foreach ($hits as $t) {
+            if (!Cron::matches((string) $expr, $t)) {
+                $allMatch = false;
+            }
+        }
+        T::ok($allMatch, "核心算出的 " . count($hits) . " 个时刻包内全部匹配: " . $expr);
+
+        // 两个时刻之间的分钟必须不匹配（否则包里的判定更宽松）
+        $t0 = $hits[0];
+        $t1 = $hits[1];
+        $gap = intdiv($t1 - $t0, 60);
+        $clean = true;
+        if ($gap > 1 && $gap <= 1440) {
+            for ($m = 1; $m < $gap; $m++) {
+                if (Cron::matches((string) $expr, $t0 + $m * 60)) {
+                    $clean = false;
+                }
+            }
+        }
+        T::ok($clean, "触发间隙（" . $gap . " 分钟）内无额外匹配: " . $expr);
+    }
+}
+
 function main(): void
 {
     caseDaily();
@@ -198,4 +270,5 @@ function main(): void
     caseCron();
 
     echo PHP_EOL . "通过 " . T::$pass . " / 失败 " . T::$fail . PHP_EOL;
+    caseCrossCheck();
 }
