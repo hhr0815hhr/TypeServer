@@ -272,6 +272,25 @@ function caseState(): void
     $s->state()->setString("lastWinner", "u1001");
     check($s->state()->getString("lastWinner") === "u1001", "宿主写入的也能被脚本读到");
 
+    // ---- Context 侧的四种类型都要能用（string/bool 之前漏了测试）----
+    $ctxT = $mk();
+    $s->callWithContext("counter", $ctxT);          // 让 Script 把 state 挂上
+    $ctxT->setStateString("phase", "final");
+    check($ctxT->stateString("phase") === "final", "Context 能写读 string 状态");
+    check($ctxT->stateString("missing", "dft") === "dft", "未设置的 string 返回默认值");
+
+    $ctxT->setStateBool("claimed", true);
+    check($ctxT->stateBool("claimed") === true, "Context 能写读 bool 状态");
+    check($ctxT->stateBool("neverSet") === false, "未设置的 bool 默认为 false");
+
+    $ctxT->setStateInt("capped", 7);
+    check($ctxT->stateInt("capped") === 7, "Context 能写读 int 状态");
+    check($ctxT->stateInt("absent", 42) === 42, "未设置的 int 返回默认值");
+
+    // 状态是同一个对象：Context 写的，宿主 state() 立刻能读到（不能是副本）
+    check($s->state()->getString("phase") === "final", "Context 写入与宿主 state() 共享同一份");
+    check($s->state()->getBool("claimed") === true, "bool 也共享");
+
     // ---- 另一个 Script 是独立状态（不共享）----
     $mgr2 = new Manager();
     $mgr2->register("quest", __DIR__ . "/quest.php");
@@ -282,10 +301,13 @@ function caseState(): void
     }
 
     // ---- import/export：进程重启后恢复 ----
+    // 用"当前值"而不是写死的 3：前面新增的调用会让 hits 继续增长，
+    // 断死数字会在下次有人加一句调用时莫名其妙挂掉
+    $hitsNow = $s->state()->getInt("hits");
     $snapshot = $s->state()->export();
     $s3state = new \TSF\Script\State();
     $s3state->import($snapshot);
-    check($s3state->getInt("hits") === 3, "导出/导入可以恢复状态");
+    check($s3state->getInt("hits") === $hitsNow, "导出/导入可以恢复状态", "want=" . $hitsNow);
     check($s3state->getString("lastWinner") === "u1001", "字符串字段也恢复");
 }
 
