@@ -234,6 +234,61 @@ function caseSandbox(): void
     check(is_array($ok) && isset($ok["ok"]) && $ok["ok"] === false, "再次调用仍返回错误而不是崩溃进程");
 }
 
+
+/**
+ * 脚本私有状态：跨热更不丢。
+ *
+ * 热更 = 重新 require 一遍文件，脚本里的 `static` 必然重置（Lua 换 chunk 也一样）。
+ * 但"已发奖名单""本轮累计"必须活下来，所以状态要外置到宿主。
+ */
+function caseState(): void
+{
+    echo PHP_EOL . "[脚本私有状态]" . PHP_EOL;
+
+    $mgr = new Manager();
+    $mgr->register("quest", __DIR__ . "/quest.php");
+    $mgr->loadAll();
+    $s = $mgr->get("quest");
+    if ($s === null) {
+        check(false, "取到脚本");
+        return;
+    }
+
+    $mk = function (): Context {
+        return new Context(new Player(), ["uid"], []);
+    };
+
+    check($s->callWithContext("counter", $mk()) === 1, "第一次调用计数 1");
+    check($s->callWithContext("counter", $mk()) === 2, "第二次 2（跨调用累计）");
+
+    // ---- 关键：热更之后状态还在 ----
+    $before = $s->versions();
+    check($s->reload(), "reload 成功");
+    check($s->versions() === $before + 1, "版本号递增", "v=" . $s->versions());
+    check($s->callWithContext("counter", $mk()) === 3, "reload 后计数继续（3），没有清零");
+
+    // 宿主可以直接拿到状态做事（落盘 / 落库）
+    check($s->state()->getInt("hits") === 3, "state() 能导出当前值");
+    $s->state()->setString("lastWinner", "u1001");
+    check($s->state()->getString("lastWinner") === "u1001", "宿主写入的也能被脚本读到");
+
+    // ---- 另一个 Script 是独立状态（不共享）----
+    $mgr2 = new Manager();
+    $mgr2->register("quest", __DIR__ . "/quest.php");
+    $mgr2->loadAll();
+    $s2 = $mgr2->get("quest");
+    if ($s2 !== null) {
+        check($s2->callWithContext("counter", $mk()) === 1, "新实例从 1 开始（状态不跨进程）");
+    }
+
+    // ---- import/export：进程重启后恢复 ----
+    $snapshot = $s->state()->export();
+    $s3state = new \TSF\Script\State();
+    $s3state->import($snapshot);
+    check($s3state->getInt("hits") === 3, "导出/导入可以恢复状态");
+    check($s3state->getString("lastWinner") === "u1001", "字符串字段也恢复");
+}
+
 function main(): void
 {
     $dir = __DIR__;
@@ -316,6 +371,7 @@ function main(): void
     caseSideEffects();
     caseCaps();
     caseSandbox();
+    caseState();
 
     echo "DONE\n";
 }

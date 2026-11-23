@@ -9,6 +9,11 @@ return [
     // 这些**全部**不需要重启进程，改脚本 reload 就生效。
     // 玩法型入口：读配置 → 挂号回调 → 通知别人。
     // 这三件事在没有能力绑定之前，脚本一样都做不到。
+    // 跨 reload 的累计：状态存在宿主侧，脚本重新 require 也不会清零。
+    // 活动"已发奖名单""本轮计数"就是这类东西。
+    "counter" => function ($ctx) {
+        return $ctx->addStateInt("hits", 1);
+    },
     "activity" => function ($ctx) {
         if ($ctx->configInt("activity.enabled") === 0) {
             return 0;
