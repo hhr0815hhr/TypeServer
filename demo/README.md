@@ -143,3 +143,8 @@ php85 client.php 9101 tok-1001 aggressive --rejoin  # 手工：登录后直接�
 快照重建。
 
 **跨节点重连还没做**：连到另一个节点会回 `no-room`，要客户端保存 roomId 并连回原节点。
+
+## 验证脚本
+
+根目录下的 `*.sh` / `*-test.php` 是**手工验证工具**，不是跑 demo 的必经步骤。
+各自验证什么、什么时候用：见 [SCRIPTS.md](SCRIPTS.md)。

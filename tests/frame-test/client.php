@@ -1,6 +1,6 @@
 <?php
 
-// 拆包/粘包健壮性测试（修正版）
+// 拆包/粘包健壮性测试（从 demo/frame-test.php 归位到回归套件）
 //   1) 一帧拆成两次发（模拟 TCP 分段）
 //   2) 两帧合并一次发（模拟粘包）
 //   3) 非法帧头应被断开
@@ -8,8 +8,8 @@
 //
 // 注意：读回包必须"按帧长度精确读"，不能用"读一块再解一帧"——
 // 后者在服务端足够快、两帧一起到达时会把第二帧丢掉（曾经误判过）。
-require_once __DIR__ . "/../tsf/src/Protocol/Contract/FrameCodec.php";
-require_once __DIR__ . "/../tsf/src/Protocol/Frame/HeaderFrame.php";
+require_once __DIR__ . "/../../tsf/src/Protocol/Contract/FrameCodec.php";
+require_once __DIR__ . "/../../tsf/src/Protocol/Frame/HeaderFrame.php";
 
 use TSF\Protocol\Frame\HeaderFrame;
 
