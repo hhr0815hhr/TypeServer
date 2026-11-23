@@ -124,6 +124,25 @@ function main(): void
     T::ok($snap->get("room")["_v"] === 7, "room 块被迁移");
     T::ok($snap->get("game")["_v"] === 7, "game 块保持当前版本");
 
+    // 8b) 多块中有一块迁移失败 → 整份快照必须**原封不动**。
+    //
+    // 逐块 migrate 后立刻 put 的写法，会在"第二块拒绝"时留下半迁移状态：
+    // 第一块已经是新结构、第二块还是旧的。这种快照看起来合法，而且能被存回去，
+    // 下次启动就再也分不清哪些块升级过了。
+    $snapBad = new Snapshot("room", 1002);
+    $snapBad->put("ok", ["gold" => 5]);          // 可迁移：0 → 7
+    $snapBad->put("future", ["_v" => 42]);       // 比当前 7 新 → 拒绝
+    $threwPartial = false;
+    try {
+        $sc->migrateSnapshot($snapBad);
+    } catch (\RuntimeException $e) {
+        $threwPartial = true;
+    }
+    T::ok($threwPartial, "多块时某块拒绝会抛出来");
+    $okBlock = $snapBad->get("ok");
+    $okVer = isset($okBlock["_v"]) ? (int) $okBlock["_v"] : 0;
+    T::ok($okVer === 0, "失败时其它块未被改动（不存在半迁移）", "ok._v=" . $okVer);
+
     // 9) Restorer 集成：恢复前先迁移，业务看到的就是当前结构
     $store = new MemoryStore();
     $s1 = new Snapshot("room", 1);
