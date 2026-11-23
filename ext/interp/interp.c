@@ -164,14 +164,18 @@ PHP_FUNCTION(interp_invoke)
 {
     zval *fn;
     zval *obj;
+    zend_long timeout_ms = 0;
+    long long t_start = 0;
     zval  retval;
     zval  args[1];
     int   rc = FAILURE;
     int   bailed_out = 0;
 
-    ZEND_PARSE_PARAMETERS_START(2, 2)
+    ZEND_PARSE_PARAMETERS_START(2, 3)
         Z_PARAM_ZVAL(fn)
         Z_PARAM_ZVAL(obj)
+        Z_PARAM_OPTIONAL
+        Z_PARAM_LONG(timeout_ms)
     ZEND_PARSE_PARAMETERS_END();
 
     if (!zend_is_callable(fn, 0, NULL)) {
@@ -186,11 +190,32 @@ PHP_FUNCTION(interp_invoke)
      *   - throw  -> 可恢复，清掉异常继续跑
      *   - bailout -> 不可恢复，记录后让调用方知道"这一局坏了"
      */
+    /*
+     * 执行预算：脚本是热更进来的，运营也可能改。一个写错的 while 就能
+     * 把整个 worker 卡死（Coroutine::cancel 打不断纯 CPU 循环，实测见 §29）。
+     *
+     * zend_set_timeout 只接受**秒**。所以这是"防永久卡死"的兜底，不是
+     * "保证不卡顿"——1 秒的停顿对游戏服仍然明显，真要可控得靠脚本审计。
+     * 但没有这一层，一个死循环就是整服停机。
+     *
+     * PHP 8 的 VM 在每个 opcode 检查 vm_interrupt，所以纯 CPU 死循环也能打断，
+     * 走的是 bailout（由下面的 zend_catch 接住），不是普通异常。
+     */
+    if (timeout_ms > 0) {
+        zend_set_timeout((timeout_ms + 999) / 1000, 0);
+        t_start = (long long) time(NULL);
+    }
+
     zend_try {
         rc = call_user_function(NULL, NULL, fn, &retval, 1, args);
     } zend_catch {
         bailed_out = 1;
     } zend_end_try();
+
+    /* 恢复：不恢复的话，后续的 AOT 代码也会被同一个超时掐掉 */
+    if (timeout_ms > 0) {
+        zend_set_timeout(0, 0);
+    }
 
     zval_ptr_dtor(&args[0]);
 
@@ -204,6 +229,11 @@ PHP_FUNCTION(interp_invoke)
         array_init(return_value);
         add_assoc_bool(return_value, "ok", 0);
         add_assoc_string(return_value, "fatal", "script caused a bailout (fatal error / timeout / oom)");
+        /* 让调用方能把"超时"和"别的 fatal"分开处理：超时通常是脚本写错，
+         * 其余 fatal 可能意味着进程状态已经不可信 */
+        if (timeout_ms > 0 && t_start > 0 && ((long long) time(NULL) - t_start) * 1000 >= timeout_ms) {
+            add_assoc_bool(return_value, "timeout", 1);
+        }
         return;
     }
 

@@ -194,6 +194,46 @@ function caseCaps(): void
     check($got2 === [], "关闭后没有挂号任何回调");
 }
 
+
+/**
+ * 沙箱：死循环必须能被打断。
+ *
+ * 这是"敢不敢把脚本交给运营改"的分水岭。没有执行预算时，一个 `while (true)`
+ * 就足以让整个 worker 停止处理消息——所有玩家一起掉，而且日志里什么都没有
+ * （因为它没有崩，只是不再往后跑）。
+ */
+function caseSandbox(): void
+{
+    echo PHP_EOL . "[沙箱：执行预算]" . PHP_EOL;
+
+    $mgr = new Manager();
+    $mgr->register("loop", __DIR__ . "/loop.php");
+    $mgr->loadAll();
+    $s = $mgr->get("loop");
+    if ($s === null) {
+        check(false, "取到死循环脚本");
+        return;
+    }
+
+    $ctx = new Context(new Player(), ["uid"], []);
+    $t0 = microtime(true);
+    // 预算 1 秒（zend_set_timeout 只支持秒级）
+    $r = $s->callWithContext("main", $ctx, 1000);
+    $elapsed = microtime(true) - $t0;
+
+    $isErr = is_array($r) && isset($r["ok"]) && $r["ok"] === false;
+    check($isErr, "死循环被中断（返回结构化错误）", var_export($r, true));
+    check($elapsed < 3.0, "在预算附近返回，没有永久卡死", "elapsed=" . round($elapsed, 2) . "s");
+    if (is_array($r)) {
+        check(isset($r["timeout"]) && $r["timeout"] === true, "标记为 timeout（可与其它 fatal 区分）");
+    }
+
+    // 中断之后脚本管理器仍然可用：同一个死循环脚本再调一次，仍然是被预算打断，
+    // 而不是把进程带崩（预算参数必须带，否则这一行会真的卡住测试进程）
+    $ok = $s->callWithContext("main", new Context(new Player(), ["uid"], []), 1000);
+    check(is_array($ok) && isset($ok["ok"]) && $ok["ok"] === false, "再次调用仍返回错误而不是崩溃进程");
+}
+
 function main(): void
 {
     $dir = __DIR__;
@@ -275,6 +315,7 @@ function main(): void
 
     caseSideEffects();
     caseCaps();
+    caseSandbox();
 
     echo "DONE\n";
 }
