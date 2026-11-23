@@ -46,13 +46,14 @@ function main(): void
             $migrator->up();
             echo "  done" . PHP_EOL;
             echo "migrate ok" . PHP_EOL;
-            exit(0);
+            Bootstrap::exitWith(0);
         }
         $pending = $migrator->status();
         foreach ($pending as $name) {
             echo "  pending " . (string) $name . PHP_EOL;
         }
-        exit($pending === [] ? 0 : 1);
+        // 有 pending 时要让脚本看出来；exit(1) 在 AOT 下会被吞成 0
+        Bootstrap::exitWith($pending === [] ? 0 : 1);
     }
 
     $proto = ProtocolStack::fromConfig(

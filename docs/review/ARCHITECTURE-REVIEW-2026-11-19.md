@@ -3960,3 +3960,138 @@ $svc = (int) $s->stats()["services"] - $svc0;   // 用增量
 lint       通过（136 个源文件，全部套件已归位）
 verify     43 套件：42 通过 / 0 失败 / 1 跳过（mail 需 MySQL）
 ```
+
+---
+
+## 五十四、领域复盘（registry）：挖到 AOT 的退出码黑洞（2026-11-23）
+
+第五个领域。registry 管节点租约，错了会脑裂（两个节点都认为自己是 owner），
+所以先看它的互斥实现——结果那部分是对的，问题在别处。
+
+### registry 本体：三处 Lua 都是教科书写法
+
+| 动作 | 实现 | 注释里的判断 |
+|:--|:--|:--|
+| 取 | `SET key token NX PX ttl` | 原子，"两个节点同时 GET 到 nil 再都 SET"不会发生 |
+| 续 | Lua：值是我的才 `PEXPIRE` | **"续比取更危险：A 过期后 B 拿到，A 的续期会把别人的锁续上"** |
+| 放 | Lua：值是我的才 `DEL` | 同上 |
+
+"续和放比取更危险"这句判断很到位——取错了立刻能看出来（两边同时搬），
+续/放错了要等下一次事故才暴露。
+
+### 一个真 bug：release 的返回值漏了 `> 0`
+
+```php
+// 改前
+$out = ...EVAL LUA_RELEASE...;
+return is_int($out);          // ← 0 也返回 true
+
+// 改后（与 renew 的口径一致）
+return is_int($out) && $out > 0;
+```
+
+Lua 的 `DEL` 返回 0 表示**值不是我的**（租约已过期或被别人拿走），什么都没删。
+但 `is_int(0)` 是 true。后果：调用方以为"我释放了"，接着做善后
+（通知别的节点接管、删本地状态），而它早就不是 owner 了。
+
+测试只覆盖了 release 的**正向**（"释放成功"），负向一条都没有——所以一直没暴露。
+
+### 然后发现这个套件是"假绿"
+
+顺手看 `verify registry` 的输出：
+
+```
+PASS  registry       Redis 注册表+租约（38 项，无 Redis 则 SKIP）   2.2s
+```
+
+本机**没有 Redis**。直接跑产物：
+
+```
+SKIP 连不上 Redis（127.0.0.1:6379）—— 跳过而不是判失败
+```
+
+一条断言都没跑，verify 显示绿色 PASS。原因在 `run.sh` 第 28 行：
+
+```bash
+case "$OUT" in
+    *SKIP*) exit 0 ;;      # ← 环境没装不该判红
+esac
+```
+
+作者的注释写着"别假装测过（SKIP 字样会出现在 verify 的输出里）"——
+但**输出里有 SKIP 字样，判定仍然是 PASS**。看到绿条的人不会去翻中间那一行。
+
+改成 `exit 77`（verify 约定的 SKIP）后：
+
+```
+SKIP  registry       Redis 注册表+租约（38 项，无 Redis 则 SKIP）   2.0s
+```
+
+### 顺着"SKIP 为什么传不出去"，挖到真正的黑洞
+
+想给测试加 `exit(77)` 表达 SKIP，于是先验证 `exit` 在 AOT 产物里到底怎么工作：
+
+```php
+function main(): void { exit(77); }
+```
+
+编译、运行 → **退出码 0**。
+
+再试 `exit(1)`、`exit(3)`、`\exit(3)` → **全是 0**。
+
+**AOT 产物忽略 `exit()` 的参数，退出码恒为 0。**（TypePHP 0.9.x 实测）
+
+这解释了一批"说不通"的现象：
+
+| 位置 | 意图 | 实际 |
+|:--|:--|:--|
+| `Bootstrap::fatal()` | 注释写"以非 0 退出，**避免静默死掉**" | `exit(1)` → 退出码 0 → **正是静默死掉**：supervisor/k8s 认为正常退出，不重启、不告警 |
+| `demo/duel` 的 migrate 分支 | `exit($code)`，让部署脚本知道迁移成败 | 失败也返回 0 → 部署继续启动一个没迁完的服务 |
+| `demo/doudizhu` 的 migrate-status | 有 pending 时 `exit(1)` | 恒为 0 → 脚本无法判断"还有未应用的迁移" |
+| 所有测试的 `exit(1)` | 表达失败 | 恒为 0（好在 verify 走 run.sh 的 bash 退出码，不受影响） |
+
+**最讽刺的是 `Bootstrap::fatal()`**：它的注释明确写着"避免静默死掉"，
+而它自己是整条链路上最典型的静默死掉。
+
+### 修法：集中到一个 `exitWith()`
+
+```php
+public static function exitWith(int $code): void
+{
+    if ($code !== 0 && function_exists("posix_kill")) {
+        posix_kill((int) getmypid(), 9);   // SIGKILL → 退出码 137
+    }
+    exit($code);
+}
+```
+
+选 SIGKILL 而不是 SIGTERM：**SIGTERM 会被框架的优雅停机逻辑接住**，
+fatal 就变成了"优雅停机"——还是没达到目的。日志不会丢，因为 `Logger`
+是即时的 `file_put_contents(FILE_APPEND)`，调用 logger 时已经落盘。
+
+验证过：`posix_kill(getmypid(), 9)` 让进程真的以非 0 结束（bash 的 `if` 判为假）。
+
+配套改了 `demo/duel`、`demo/doudizhu` 的退出点；`tsf migrate` 另外加了一层
+**输出兜底**（正则认"失败 N 个"），因为它可能跑在别人的项目上，
+而别人不一定知道要用 `exitWith`。
+
+### 第三次"空检查"，这次是"SKIP 被当成 PASS"
+
+| 次数 | 空检查 | 表现 |
+|:--|:--|:--|
+| §49 | `tsf test` 只看退出码 | 输出 87 通过 / 2 失败，框架报"通过 2 / 失败 0" |
+| §53 | lint 的测试归位检查 | `glob` 扫空目录，永远通过 |
+| §54 | registry 的 SKIP | 打了一行 SKIP，但仍判 PASS |
+
+三者的共性是同一个：**"我知道这里有问题"的信号没有传递到判定层。**
+打印一行提示、写一个注释，都不等于判定逻辑知道。
+
+所以还是要回到那条规矩：**任何"应该能失败"的检查，写完先让它失败一次。**
+
+### 复验
+
+```
+verify   43 套件：41 通过 / 0 失败 / 2 跳过（mail 需 MySQL、registry 需 Redis）
+```
+
+跳过数从 1 变成 2，说明 registry 终于诚实地报告了"我没测"。

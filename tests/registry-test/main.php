@@ -82,7 +82,10 @@ function main(): void
     $probe = new Resp("127.0.0.1", 6379);
     if (!$probe->connect()) {
         echo "SKIP 连不上 Redis（127.0.0.1:6379）—— 跳过而不是判失败" . PHP_EOL;
-        return;
+        // 必须 exit(77)：这里是 main() 内部，`return` 只会结束函数，
+        // 进程仍然 exit 0，verify 就把它当 PASS —— 于是"一个用例都没跑"显示成绿色。
+        // 77 是 verify 约定的 SKIP 退出码。
+        exit(77);
     }
     cleanup($probe);
 
@@ -191,4 +194,21 @@ function main(): void
     $mid->close();
 
     echo PHP_EOL . "结果: " . T::$pass . " 通过 / " . T::$fail . " 失败" . PHP_EOL;
+
+    /*
+     * 退出码必须反映"到底测了没有"。
+     *
+     * 原来这里什么都不返回，进程 exit 0——于是**连不上 Redis、所有租约用例都跳过**
+     * 的时候，`tsf verify` 看到退出码 0 就报 PASS。套件描述里写着"无 Redis 则 SKIP"，
+     * 但显示出来的是绿色的 PASS：这是假绿，它让人相信 Redis 租约这块有保护。
+     *
+     *   有失败      → 1
+     *   一个都没跑  → 77（verify 约定的 SKIP）
+     */
+    if (T::$fail > 0) {
+        exit(1);
+    }
+    if (T::$pass === 0) {
+        exit(77);
+    }
 }

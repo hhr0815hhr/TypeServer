@@ -171,7 +171,9 @@ function main(): void
         $code = $cli === "migrate"
             ? runMigrate($db, $migrationsDir, $base)
             : printMigrateStatus($db, $migrationsDir);
-        exit($code);
+        // 不能直接 exit($code)：AOT 下退出码恒为 0，部署脚本会把"迁移失败"
+        // 当成成功继续启动（见 Bootstrap::exitWith 的说明）
+        Bootstrap::exitWith($code);
     }
 
     $records = new Repo(DuelRecord::class, $db);
