@@ -1,0 +1,2 @@
+接真 MySQL（packages: db, mail）。CI 与本地 verify 没有数据库实例，
+不是代码问题。手工验证时按 main.php 顶部注释里的 DSN 起一个库再跑。

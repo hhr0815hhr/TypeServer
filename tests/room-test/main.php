@@ -512,6 +512,13 @@ function caseReapIdle(): void
     echo PHP_EOL . "== 空闲宿主回收 ==" . PHP_EOL;
     Scheduler::reset();
     $s = Scheduler::instance();
+
+    // 先断言前置条件：reset 之后必须是 0 个服务。
+    // 不写这条的话，前面用例残留的 Service 会让后面的计数断言莫名失败，
+    // 而失败信息只会说"期望 2 实际 3"，看不出是 reset 没清干净还是分配算错了。
+    $svc0 = (int) $s->stats()["services"];
+    T::ok($svc0 === 0, "reset 后 services 归零（前置条件）", "svc=" . $svc0);
+
     $mgr = new RoomManager(RoomManager::MODE_SHARED, 50, 2);
 
     $ids = [];
@@ -519,8 +526,9 @@ function caseReapIdle(): void
         $ids[] = $mgr->create(4);
     }
     $s->tick();
-    $svc = (int) $s->stats()["services"];
-    T::ok($svc === 2, "3 间 / 每宿主 2 = 2 个宿主", "services=" . $svc);
+    // 用增量而不是绝对值：即使前置条件不满足，也能看出这一步自己加了几个人
+    $svc = (int) $s->stats()["services"] - $svc0;
+    T::ok($svc === 2, "3 间 / 每宿主 2 = 2 个宿主", "新增=" . $svc);
 
     foreach ($ids as $rid) {
         $mgr->destroy($rid);
@@ -529,6 +537,8 @@ function caseReapIdle(): void
 
     $reaped = $mgr->closeIdleHosts();
     T::ok($reaped === 2, "回收了 2 个空宿主", "n=" . $reaped);
+    $svcAfter = (int) $s->stats()["services"];
+    T::ok($svcAfter === $svc0, "回收后服务数回到初始值", "now=" . $svcAfter . " base=" . $svc0);
     T::ok($mgr->count() === 0, "管理器里已无房间记录", "count=" . $mgr->count());
 
     // 回收之后还能正常开房：hostAddr 必须被清 0，否则会把新房间投给已死的宿主

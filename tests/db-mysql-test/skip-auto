@@ -1,0 +1,3 @@
+接真 MySQL（严格模式/VARCHAR 长度/InnoDB 建表这些都只有 MySQL 能测）。
+verify 环境没有数据库实例，不是代码问题。
+手工验证：起一个 MySQL，按 main.php 顶部的 DSN 改 project.json 再跑。
