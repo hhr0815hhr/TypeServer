@@ -181,6 +181,22 @@ int main(int argc, char **argv) {
              * 早期版本在"缓冲区空了"就 break，导致内核里还有数据但再也不会有事件，
              * 连接随机卡死——表现为某些轮次吞吐腰斩（13k vs 35k），看起来像机器抖动。
              */
+#ifdef SEND_ONLY
+            /*
+             * 只发不收：配服务端的 drop 模式，测"读+拆包+回调"而不含回包路径。
+             * 仍然要 recv（ET 模式下不读干净就再也不会来事件），但读完丢弃、不计数，
+             * 也不用等回包——把 outstanding 清零后继续补窗口。
+             */
+            {
+                char tmp[8192];
+                while (recv(g[idx].fd, tmp, sizeof tmp, 0) > 0) {
+                    /* 丢弃 */
+                }
+            }
+            g[idx].outstanding = 0;
+            refill(idx);
+            continue;
+#endif
             for (;;) {
                 ssize_t r = recv(g[idx].fd, g[idx].buf + g[idx].buflen, sizeof g[idx].buf - g[idx].buflen, 0);
                 if (r > 0) {

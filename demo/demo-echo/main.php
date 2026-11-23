@@ -58,9 +58,37 @@ function main(): void
         Logger::warn("gateway disabled (benchmark mode only)");
         // TSF_ECHO_MODE=drop 只收不回：用来把"读+拆包"和"编码+写回"的成本分开。
         // 这是性能定位的减法实验，不是功能入口。
+        // 分帧采样：每 50 万帧打一次各段均值，用来定位 6.5 µs 的去向。
+        // 注意不能在这里用 Swoole\Timer：那会提前创建事件循环，导致
+        // "event-loop has already been created, unable to start Server"。
+        // 批量发送：pipeline 下把一次 feed 的回包合并成一次 write
+        if (Config::getBool("server.batch_send", false)) {
+            $server->enableBatchSend(true);
+        }
+        $profOn = Config::getBool("server.profile", false);
+        if ($profOn) {
+            \TSF\Transport\Server::setProfile(true);
+        }
         $echoMode = getenv("TSF_ECHO_MODE");
         $dropOnly = is_string($echoMode) && $echoMode === "drop";
-        $server->onFrame(function (int $fd, int $msgId, string $body, int $flags) use ($server, $dropOnly): void {
+        $server->onFrame(function (int $fd, int $msgId, string $body, int $flags) use ($server, $dropOnly, $profOn): void {
+            if ($profOn) {
+                static $seen = 0;
+                $seen++;
+                if ($seen % 500000 === 0) {
+                    $p = \TSF\Transport\Server::profileSnapshot();
+                    if ($p["n"] > 0) {
+                        fwrite(STDERR, sprintf(
+                            "PROFILE n=%d decode=%.0f substr=%.0f call=%.0f feed=%.0f (ns)\n",
+                            $p["n"],
+                            $p["decode_ns"],
+                            $p["substr_ns"],
+                            $p["call_ns"],
+                            $p["total_ns"]
+                        ));
+                    }
+                }
+            }
             if ($dropOnly) {
                 return;
             }
