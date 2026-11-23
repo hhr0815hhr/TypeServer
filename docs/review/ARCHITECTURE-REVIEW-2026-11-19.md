@@ -3520,3 +3520,111 @@ verify   24 / 0 / 0（新增 frame）
 
 **判断：留作纯重构任务，要做的话先给 CLI 补几个冒烟用例**
 （`tsf --version`、`tsf doctor`、`tsf build` 失败时的提示），再拆。
+
+---
+
+## 四十九、领域复盘（db）：一个静默数据污染 + 一个"假绿"机制（2026-11-23）
+
+领域复盘换了方法：不看"有没有调用"，看**出错时会不会静默出错**。
+第一个对象是 `pkg/db`（1717 行，最大的包，也是唯一管数据一致性的）。
+
+### 问题一：嵌套事务内层失败被吞 → 外层照常提交
+
+`transaction()` 的嵌套用"深度"而不是 SAVEPOINT，注释里的理由是：
+业务里"函数 A 开事务、A 里调了也会开事务的 B"语义上就该是一个事务。这个判断是对的。
+
+但它漏了一种写法——**很常见的一种**：
+
+```php
+$db->transaction(function ($db) {
+    $db->insert(甲);
+    try {
+        $db->transaction(function ($db) {
+            $db->insert(乙);
+            throw new RuntimeException("内层失败");
+        });
+    } catch (RuntimeException $e) {
+        $log->warn("内层失败，忽略");     // ← 业务吞掉，继续
+    }
+    // 外层正常结束 → commit
+});
+```
+
+内层抛异常时 `txDepth` 从 2 减到 1，异常抛出；外层业务把它吞掉，闭包正常返回；
+`txDepth === 1` → **commit**。结果：甲、乙都被提交。
+
+**内层失败 = 整个事务不可能有正确结果**，但代码照常提交了。而且是静默的：
+没有报错、没有日志，库里的数据就是脏的。
+
+### 修法：rollback-only 标记
+
+任何一层失败都给事务打标记，外层 commit 前检查：有标记就把 commit 降级成 rollback，
+再抛出来告诉调用方"你以为提交了，其实没有"。
+
+```php
+$failed = false;
+try {
+    $fn($this);
+} catch (\Throwable $e) {
+    $failed = true;
+    $err = $e;
+    $this->txRollbackOnly = true;    // 内层失败也打标记
+}
+
+if ($isOuter) {
+    if ($this->txRollbackOnly) {
+        $this->txRollbackOnly = false;
+        $pdo->rollBack();
+        $failed = true;               // 内层吞掉的异常，只能给补偿提示
+    } else {
+        $pdo->commit();
+    }
+}
+$this->txDepth--;
+if ($failed) { throw $err ?? new RuntimeException("...内层失败已被吞掉..."); }
+```
+
+**改的时候我自己先踩了一个坑**：第一版把 `throw` 写在 `try` 里，被自己的 `catch`
+接住，`txDepth` 减了两次，事务深度变负——之后**所有事务静默失效**。
+这类改动必须在同一个出口统一收尾（先收集失败、再统一处理），不能在中间抛。
+
+### 问题二：测试报了 FAIL，`tsf test` 报 PASS
+
+改完之后跑测试，`tsf test db` 显示 **"通过 2 / 失败 0"**。但直接跑二进制：
+
+```
+结果: 87 通过 / 2 失败
+```
+
+两个 FAIL 明明在输出里。原因是 `runOneTest()` 只判退出码（`$rc === 0 ? "PASS"`），
+而**大部分 `tests` 下的 main.php 结尾没有 `exit(非零)`**——测试自己报了 FAIL，
+进程仍然返回 0。
+
+**这是"假绿"，比没有测试更危险**：它会让人相信这块有保护。
+
+修法：判退出码之外，再解析一遍输出——出现 `FAIL` 行或 `failed=N`（N>0）也判失败。
+改完用一条临时失败断言验证过（`FAIL db-test ... 89 通过 / 1 失败`），确认真的能抓到。
+
+### 顺带：db 的两个套件从没进过回归
+
+`tests/db-test`（647 行）和 `tests/migrate-test`（324 行）都只有 main.php、没有 run.sh，
+`verify` 里也没有它们。加上问题二的假绿，等于**db 包长期在"看起来有测试"的状态下裸奔**。
+
+已补两个 `run.sh` 并接入：verify 24 → **26 个套件**。
+
+`db-mysql-test` / `db-pg-test` / `db-shards-test` 仍然不进 verify——它们要真实 MySQL /
+PostgreSQL / 多库实例，属于手工验证。
+
+### 复验
+
+```
+db-test        89 / 0（修前是 87 / 2）
+migrate        PASS
+verify         26 / 0 / 0
+```
+
+### 这条经验
+
+**领域复盘要看"出错时的行为"，不是"有没有被调用"。**
+§47 用调用计数盘点，结论是"只有 1 个死代码"；这次用"失败路径"盘点 db，
+立刻挖出一个会静默污染数据的问题——**它不是死代码，它在热路径上，而且测试也就差一条断言**。

@@ -331,6 +331,42 @@ function caseTx(): void
     });
     T::eq($repo->count(), 3, "嵌套事务提交后 3 行");
     T::eq($db->stats()["tx_depth"], 0, "事务深度归零");
+
+    // 嵌套的陷阱：内层失败、被外层业务**吞掉**之后继续执行。
+    //
+    // 嵌套用的是"深度"而不是 SAVEPOINT（业务里 A 调 B 语义上就该是一个事务），
+    // 那么内层失败时整个事务已经不可能有正确结果了——但异常被吞掉后，
+    // 外层并不知道，会照常 commit，把"内层之前成功的那半截"一起提交。
+    //
+    // 正确行为：内层失败等同于整个事务失败，外层 commit 必须变成 rollback。
+    $before = $repo->count();
+    try {
+        $db->transaction(function (Db $d) use ($repo): void {
+            $a = new Player();
+            $a->uid = 3005;
+            $a->hp = 5;
+            $a->name = "outer-before-inner-fail";
+            $repo->insert($a);
+
+            try {
+                $d->transaction(function (Db $d2) use ($repo): void {
+                    $b = new Player();
+                    $b->uid = 3006;
+                    $b->hp = 6;
+                    $b->name = "inner-fail";
+                    $repo->insert($b);
+                    throw new \RuntimeException("内层失败");
+                });
+            } catch (\RuntimeException $inner) {
+                // 业务把内层的失败吞掉了，继续往下走——这一步很常见
+            }
+        });
+    } catch (\RuntimeException $outer) {
+        // 外层也可能因此报错，两种都接受
+    }
+    T::eq($repo->count(), $before, "内层失败被吞掉后，外层不得提交（半截数据会污染库）");
+    T::ok($repo->find(3005) === null, "外层自己插的那条也不该留下");
+    T::eq($db->stats()["tx_depth"], 0, "出错后事务深度仍能归零");
 }
 
 /** 7. 批量插入与分批边界 */
