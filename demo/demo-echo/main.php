@@ -56,7 +56,14 @@ function main(): void
     // 生产不要关——那样就没有鉴权、限流和空闲回收了。
     if (!Config::getBool("server.gateway", true)) {
         Logger::warn("gateway disabled (benchmark mode only)");
-        $server->onFrame(function (int $fd, int $msgId, string $body, int $flags) use ($server): void {
+        // TSF_ECHO_MODE=drop 只收不回：用来把"读+拆包"和"编码+写回"的成本分开。
+        // 这是性能定位的减法实验，不是功能入口。
+        $echoMode = getenv("TSF_ECHO_MODE");
+        $dropOnly = is_string($echoMode) && $echoMode === "drop";
+        $server->onFrame(function (int $fd, int $msgId, string $body, int $flags) use ($server, $dropOnly): void {
+            if ($dropOnly) {
+                return;
+            }
             if ($msgId === Msg::ECHO_REQ) {
                 $server->sendFrame($fd, Msg::ECHO_RESP, $body);
             }

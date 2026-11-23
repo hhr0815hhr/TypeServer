@@ -17,6 +17,12 @@
 #include <time.h>
 #include <unistd.h>
 
+#ifndef WINDOW
+/* 在飞窗口。1 = closed-loop（收一帧发一帧，测 RTT）；
+ * >1 = pipelined（不等回包继续发，测吞吐）。
+ * 用 -DWINDOW=16 编译，两种口径共用同一份代码，避免"两套压测端不可比"。 */
+#define WINDOW 1
+#endif
 #define MAXC 512
 #ifndef BODY_SIZE
 #define BODY_SIZE 16
@@ -28,11 +34,12 @@
 
 typedef struct {
     int fd;
-    unsigned char buf[FRAME * 8 + 64];
+    unsigned char buf[FRAME * (WINDOW > 8 ? WINDOW * 4 : 8) + 64];
     int buflen;
     long long send_ns;
     unsigned long long sent;
     unsigned long long recv;
+    int outstanding;          /* 已发未回 */
 } conn_t;
 
 static conn_t g[MAXC];
@@ -79,6 +86,32 @@ static int add_conn(int ep, struct sockaddr_in *sa) {
     g[g_n].recv = 0;
     g_n++;
     return 0;
+}
+
+/*
+ * 把在飞窗口补满。**一次 send 拼多帧**：pipeline 模式下如果每帧一次 write，
+ * 省下的 syscall 又还回去了，测出来的就不是"服务端能力"而是"客户端 syscall 能力"。
+ */
+static void refill(int idx) {
+    if (g[idx].fd < 0) return;
+    unsigned char batch[FRAME * (WINDOW > 1 ? WINDOW : 1)];
+    int frames = 0;
+    while (g[idx].outstanding < WINDOW) {
+        long long nts = now_ns();
+        build_frame(batch + frames * FRAME, (long long) g[idx].recv + g[idx].outstanding, nts);
+        frames++;
+        g[idx].outstanding++;
+        g[idx].sent++;
+        if (g[idx].outstanding >= WINDOW) break;
+    }
+    if (frames == 0) return;
+    size_t bytes = (size_t) frames * FRAME;
+    ssize_t w = send(g[idx].fd, batch, bytes, MSG_NOSIGNAL);
+    if (w != (ssize_t) bytes) {
+        /* 短写或失败：保守处理——把没发出去的收回来，下次再补 */
+        g[idx].outstanding -= frames;
+        g[idx].sent -= (unsigned long long) frames;
+    }
 }
 
 static void pct(double *p50, double *p99, double *mx) {
@@ -128,15 +161,10 @@ int main(int argc, char **argv) {
     for (int i = 0; i < want; i++) add_conn(ep, &sa);
     usleep(500000); /* 建连 */
 
-    /* 每连接先发一条 */
-    unsigned char out[FRAME];
+    /* 每连接先把窗口填满（WINDOW=1 时等价于"先发一条"） */
     for (int i = 0; i < g_n; i++) {
-        long long ts = now_ns();
-        build_frame(out, i, ts);
-        if (send(g[i].fd, out, FRAME, MSG_NOSIGNAL) == FRAME) {
-            g[i].send_ns = ts;
-            g[i].sent++;
-        }
+        g[i].outstanding = 0;
+        refill(i);
     }
 
     long long t_end = now_ns() + (long long) secs * 1000000000LL;
@@ -177,17 +205,12 @@ int main(int argc, char **argv) {
                     int b = (int) (rtt / 1000 / BUCKET_US);
                     if (b >= 0 && b < MAX_BUCKET) g_hist[b]++;
                     g[idx].recv++;
+                    if (g[idx].outstanding > 0) g[idx].outstanding--;
                     memmove(g[idx].buf, g[idx].buf + FRAME, g[idx].buflen - FRAME);
                     g[idx].buflen -= FRAME;
-
-                    /* closed-loop：立刻发下一条 */
-                    long long nts = now_ns();
-                    build_frame(out, g[idx].recv, nts);
-                    if (send(g[idx].fd, out, FRAME, MSG_NOSIGNAL) == FRAME) {
-                        g[idx].send_ns = nts;
-                        g[idx].sent++;
-                    }
                 }
+                /* 一批读完再补窗口：把 N 次 write 合成一次 */
+                refill(idx);
             }
         }
 
