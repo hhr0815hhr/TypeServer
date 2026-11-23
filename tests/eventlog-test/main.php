@@ -12,6 +12,7 @@
  */
 
 use TSF\EventLog\EventLog;
+use TSF\EventLog\MergedLog;
 
 final class T
 {
@@ -349,6 +350,66 @@ function caseTrace(): void
     });
 }
 
+
+/**
+ * 多节点归并（MergedLog）。
+ *
+ * 这个类之前**零覆盖**：81 行的排序逻辑、内部字段 `_f` 的清理、`fromSeq` 的跨文件
+ * 语义，一条测试都没有。而它正是"对账两次跑结果不同"这类假警报的来源——
+ * 归并结果不确定，业务就没法信任对账。
+ *
+ * 这里钉三件事：
+ *   1. 归并顺序**确定**（同样输入，两次结果一样）
+ *   2. 内部字段 `_f` 不泄漏到返回结果里
+ *   3. `fromSeq` 是**每个文件各自的序号**，不是全局位置——
+ *      传大于某个文件总条数的值时，那个文件会被整个跳过。
+ *      这不是 bug，但很容易被误用成"增量对账"，所以要用断言写清楚。
+ */
+function caseMerged(): void
+{
+    echo PHP_EOL . "== 多节点归并 ==" . PHP_EOL;
+
+    $pa = tmpPath("merged_a");
+    $pb = tmpPath("merged_b");
+    $a = new EventLog($pa);
+    $b = new EventLog($pb);
+
+    // A 写 3 条，B 写 2 条。seq 各自从 1 开始（这正是跨节点不能直接用 fromSeq 的原因）
+    $a->append("u1", "coin", ["d" => 100]);
+    $a->append("u2", "coin", ["d" => 200]);
+    $a->append("u3", "coin", ["d" => 300]);
+    $b->append("u4", "coin", ["d" => 400]);
+    $b->append("u5", "coin", ["d" => 500]);
+
+    $m1 = MergedLog::replay([$a, $b]);
+    T::eq(count($m1), 5, "两个文件共 5 条");
+
+    $m2 = MergedLog::replay([$a, $b]);
+    $same = true;
+    foreach ($m1 as $i => $ev) {
+        if (!isset($m2[$i]) || $m2[$i]["id"] !== $ev["id"]) {
+            $same = false;
+        }
+    }
+    T::ok($same, "两次归并结果完全一致（确定性）");
+
+    $leak = false;
+    foreach ($m1 as $ev) {
+        if (array_key_exists("_f", $ev)) {
+            $leak = true;
+        }
+    }
+    T::ok(!$leak, "内部排序字段 _f 没有泄漏到返回结果");
+
+    // fromSeq 是"每个文件各自的 seq"：A 有 3 条，传 4 会把 A 全部过滤掉，
+    // 只剩 B 的 2 条。做增量对账时踩这个坑，会**静默漏掉一个节点的全部事件**。
+    $m3 = MergedLog::replay([$a, $b], 4);
+    T::eq(count($m3), 0, "fromSeq=4 时两个文件都被过滤（各自的 seq 都没到 4）");
+
+    $m4 = MergedLog::replay([$a, $b], 2);
+    T::eq(count($m4), 3, "fromSeq=2 只跳过各文件第 1 条（剩 3 条）");
+}
+
 function main(): void
 {
     caseBasic();
@@ -361,4 +422,5 @@ function main(): void
     caseTrace();
 
     echo PHP_EOL . "结果: " . T::$pass . " 通过 / " . T::$fail . " 失败" . PHP_EOL;
+    caseMerged();
 }
