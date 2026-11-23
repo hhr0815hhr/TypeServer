@@ -1,0 +1,8 @@
+{
+    "server": {
+        "gateway": false,
+        "auth": {"require": false},
+        "rate_per_sec": 1000000,
+        "rate_burst": 1000000
+    }
+}
