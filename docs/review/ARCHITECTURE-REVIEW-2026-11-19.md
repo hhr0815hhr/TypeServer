@@ -2440,3 +2440,71 @@ batch-send-test  8 连接 pipeline64 386k，丢包 0‰，无 bad frame，closed
 2. **Swoole 回调本身的固定成本**：这部分在框架控制之外。
 3. **真实业务路径未测**：以上都是 echo。房间服每帧要走 `deliver → onMessage`，
    那层的成本（Actor 调度约 870 ns）会叠加进来，需要单独一组基准。
+
+---
+
+## 三十六、批量写对真实业务路径的收益：+33%，但要显式接（2026-11-23）
+
+### 一个被 echo 基准掩盖的问题
+
+§35 的 +127% 是在 **echo 直连**下测的（`onFrame` 里直接 `sendFrame`）。
+但游戏服的每一帧都要走 Actor：`feed → deliver → tick → onMessage → sendFrame`。
+
+**回包发生在 `tick` 里，不在 `feed` 里**。而 `inFeed` 只覆盖 feed——
+也就是说：**批量写对真实业务路径一开始完全不生效**。
+
+这不是小疏漏：如果按 §35 的结论直接上线，房间服会发现自己一点没变快，
+然后怀疑"是不是这个优化没用"。
+
+### 补法：批窗口成对钩子
+
+`Scheduler` 加 `onBatchBegin` / `onBatchEnd`，`tick()` 的首尾各调一次；
+应用把它们接到 `Server::beginBatch()` / `endBatch()`：
+
+```php
+$sched->onBatchBegin(function () use ($server): void { $server->beginBatch(); });
+$sched->onBatchEnd(function () use ($server): void { $server->endBatch(); });   // 内部 flush
+```
+
+为什么用闭包注入而不是让 Scheduler 直接持有 Server：分层方向不能反
+（Service 不依赖 Transport）。
+
+### 三组数据（32 连接，WSL2 4 核，pipeline64）
+
+| 路径 | 批量关 | 批量开 | 提升 |
+|:--|--:|--:|--:|
+| echo 直连（`onFrame` 里回包） | 153,764 | **348,506** | +127% |
+| **Actor 路径（`deliver → tick → onMessage`）** | 166,943 | **222,746** | **+33%** |
+
+Actor 路径每帧：批量关 6.0 µs → 批量开 **4.5 µs**。
+框架侧开销（deliver + 调度 + `onMessage` + Message 分配）约 1.6 µs，
+这部分不受批量写影响——它是 Actor 模型的固有成本。
+
+### 结论：收益是真的，但比 echo 小得多
+
++127% 是"传输层上限"，+33% 才是**业务实际能拿到的**。
+两者差这么多，是因为 Actor 路径本身的固定成本稀释了合并收益。
+
+对外说数字时应该说 33%，不是 127%——后者会让业务方产生错误预期。
+
+### 接入检查清单
+
+- [ ] `server.batch_send = true`
+- [ ] `onBatchBegin` / `onBatchEnd` 都挂上（只挂 end 不够：没有 begin 就没有窗口）
+- [ ] 确认没有"发完立刻 close"的逻辑（`closeConn` 已兜底，但语义上仍应避免）
+- [ ] 纯问答型服务不要开（收益为零）
+
+### 复验
+
+```
+verify  18 / 0 / 0
+echo    直连 pipeline64  348,506
+actor   pipeline64       222,746（批量关 166,943）
+```
+
+### 下一个瓶颈
+
+Actor 路径的 4.5 µs 里，框架侧 1.6 µs 是**调度 + 消息对象分配**。
+再往下压就要动 `deliver` 的对象分配（每帧一个 `Message`），
+或让"单帧直达服务"跳过 mailbox——但那是**改变 Actor 语义**的事，
+不属于优化，属于重新设计。到这一步应该停下，把结论收口。

@@ -12,6 +12,29 @@ use TSF\Protocol\Msg;
 use TSF\Protocol\ProtocolStack;
 use TSF\Transport\ServerFactory;
 
+/**
+ * actor 模式的回包服务：验证真实业务路径（feed → deliver → tick → onMessage → send）。
+ *
+ * echo 直连测的是"传输层"，而游戏服的每一帧都要走 Actor：投递、调度、处理、回包。
+ * 这两个数字差多少，决定"批量写"对真实业务有没有用。
+ */
+final class EchoService extends \TSF\Service\Service
+{
+    private \TSF\Transport\Server $server;
+
+    public function __construct(\TSF\Transport\Server $server)
+    {
+        $this->server = $server;
+    }
+
+    public function onMessage(\TSF\Service\Message $m): void
+    {
+        // session 里带的是 fd（onFrame 侧塞进来的）
+        $body = is_string($m->data) ? $m->data : "";
+        $this->server->sendFrame($m->session, Msg::ECHO_RESP, $body);
+    }
+}
+
 function main(): void
 {
     $base = __DIR__;
@@ -71,6 +94,28 @@ function main(): void
         }
         $echoMode = getenv("TSF_ECHO_MODE");
         $dropOnly = is_string($echoMode) && $echoMode === "drop";
+        $actorMode = is_string($echoMode) && $echoMode === "actor";
+        if ($actorMode) {
+            // 真实业务路径：帧 → deliver → tick 里 onMessage → sendFrame。
+            // 批窗口钩子让 tick 期间的回包也合并（否则业务路径享受不到批量写）。
+            $sched = \TSF\Service\Scheduler::instance();
+            $echoAddr = $sched->spawnOf(function () use ($server): EchoService {
+                return new EchoService($server);
+            });
+            $sched->onBatchBegin(function () use ($server): void {
+                $server->beginBatch();
+            });
+            $sched->onBatchEnd(function () use ($server): void {
+                $server->endBatch();
+            });
+            $server->onFrame(function (int $fd, int $msgId, string $body, int $flags) use ($sched, $echoAddr): void {
+                $sched->deliver($echoAddr, $msgId, $body, $fd);
+            });
+            Logger::info("app ready (no gateway, actor mode)", ["host" => $host, "port" => $port]);
+            $server->start();
+            return;
+        }
+
         $server->onFrame(function (int $fd, int $msgId, string $body, int $flags) use ($server, $dropOnly, $profOn): void {
             if ($profOn) {
                 static $seen = 0;
