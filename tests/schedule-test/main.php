@@ -12,7 +12,7 @@
  * doudizhu 里的每日重置那类用法。
  */
 
-use TSF\Schedule\Cron;
+use TSF\Timer\Cron;
 use TSF\Schedule\Schedule;
 
 final class T
@@ -140,37 +140,37 @@ function caseCron(): void
 
     $t = mktime(5, 0, 0, 6, 15, 2026);
     if (is_int($t)) {
-        T::ok(Cron::matches("0 0 5 * * *", $t), "5:00:00 匹配「每天 5 点」");
-        T::ok(!Cron::matches("0 0 5 * * *", $t + 1), "5:00:01 不匹配");
-        T::ok(!Cron::matches("0 0 5 * * *", $t - 60), "4:59:00 不匹配");
+        T::ok(Cron::match("0 0 5 * * *", $t), "5:00:00 匹配「每天 5 点」");
+        T::ok(!Cron::match("0 0 5 * * *", $t + 1), "5:00:01 不匹配");
+        T::ok(!Cron::match("0 0 5 * * *", $t - 60), "4:59:00 不匹配");
     }
 
     // 每 5 秒
     if (is_int($t)) {
-        T::ok(Cron::matches("0/5 * * * * *", $t), "秒 0 匹配「每 5 秒」");
-        T::ok(!Cron::matches("0/5 * * * * *", $t + 1), "秒 1 不匹配");
-        T::ok(Cron::matches("0/5 * * * * *", $t + 5), "秒 5 匹配");
+        T::ok(Cron::match("0/5 * * * * *", $t), "秒 0 匹配「每 5 秒」");
+        T::ok(!Cron::match("0/5 * * * * *", $t + 1), "秒 1 不匹配");
+        T::ok(Cron::match("0/5 * * * * *", $t + 5), "秒 5 匹配");
     }
 
     // 5 段：秒默认 0
     if (is_int($t)) {
-        T::ok(Cron::matches("0 5 * * *", $t), "5 段「0 5 * * *」等价于 6 段");
-        T::ok(!Cron::matches("0 5 * * *", $t + 1), "5 段在 5:00:01 不匹配");
+        T::ok(Cron::match("0 5 * * *", $t), "5 段「0 5 * * *」等价于 6 段");
+        T::ok(!Cron::match("0 5 * * *", $t + 1), "5 段在 5:00:01 不匹配");
     }
 
     // 每月 1 号 0 点
     $first = mktime(0, 0, 0, 7, 1, 2026);
     if (is_int($first)) {
-        T::ok(Cron::matches("0 0 0 1 * *", $first), "7/1 0:00 匹配「每月 1 号」");
-        T::ok(!Cron::matches("0 0 0 1 * *", $first + 86400), "7/2 不匹配");
+        T::ok(Cron::match("0 0 0 1 * *", $first), "7/1 0:00 匹配「每月 1 号」");
+        T::ok(!Cron::match("0 0 0 1 * *", $first + 86400), "7/2 不匹配");
     }
 
     // 工作日 9 点（2026-06-15 是周一）
     $mon9 = mktime(9, 0, 0, 6, 15, 2026);
     $sun9 = mktime(9, 0, 0, 6, 21, 2026);
     if (is_int($mon9) && is_int($sun9)) {
-        T::ok(Cron::matches("0 0 9 * * 1-5", $mon9), "周一 9 点匹配工作日");
-        T::ok(!Cron::matches("0 0 9 * * 1-5", $sun9), "周日 9 点不匹配工作日");
+        T::ok(Cron::match("0 0 9 * * 1-5", $mon9), "周一 9 点匹配工作日");
+        T::ok(!Cron::match("0 0 9 * * 1-5", $sun9), "周日 9 点不匹配工作日");
     }
 
     // 日/周「或」关系：0 0 0 1 * 1 = 每月 1 号 或 每周一
@@ -178,16 +178,30 @@ function caseCron(): void
     $midMon = mktime(0, 0, 0, 6, 15, 2026);     // 周一但非 1 号
     $firstOther = mktime(0, 0, 0, 7, 1, 2026);  // 1 号但是周三
     if (is_int($firstMon) && is_int($midMon) && is_int($firstOther)) {
-        T::ok(Cron::matches("0 0 0 1 * 1", $firstMon), "1 号且周一 → 匹配");
-        T::ok(Cron::matches("0 0 0 1 * 1", $midMon), "周一但非 1 号 → 仍匹配（或关系）");
-        T::ok(Cron::matches("0 0 0 1 * 1", $firstOther), "1 号但非周一 → 仍匹配（或关系）");
+        T::ok(Cron::match("0 0 0 1 * 1", $firstMon), "1 号且周一 → 匹配");
+        T::ok(Cron::match("0 0 0 1 * 1", $midMon), "周一但非 1 号 → 仍匹配（或关系）");
+        T::ok(Cron::match("0 0 0 1 * 1", $firstOther), "1 号但非周一 → 仍匹配（或关系）");
     }
 
     // 非法表达式
-    T::ok(Cron::parse("0 0 5 *") === [], "4 段 → 非法");
-    T::ok(Cron::parse("99 0 5 * * *") === [], "秒 99 越界 → 非法");
-    T::ok(Cron::parse("0 0 5 * * 9") === [], "周 9 越界 → 非法");
-    T::ok(Cron::parse("0 0 5 * * *") !== [], "合法表达式解析成功");
+    // 核心的 parse() 对非法表达式抛异常（旧版包内实现是返回空数组）。
+    // 对调用方来说语义一致：都可以当成"非法"，但异常信息更具体。
+    $illegal = 0;
+    foreach (["0 0 5 *", "99 0 5 * * *", "0 0 5 * * 9"] as $bad) {
+        try {
+            Cron::parse((string) $bad);
+        } catch (\RuntimeException $e) {
+            $illegal++;
+        }
+    }
+    T::ok($illegal === 3, "三种非法表达式都抛异常", "n=" . $illegal);
+    $okParsed = true;
+    try {
+        Cron::parse("0 0 5 * * *");
+    } catch (\RuntimeException $e) {
+        $okParsed = false;
+    }
+    T::ok($okParsed, "合法表达式解析成功");
 }
 
 
@@ -240,7 +254,7 @@ function caseCrossCheck(): void
         // 包里：这些时刻必须匹配
         $allMatch = true;
         foreach ($hits as $t) {
-            if (!Cron::matches((string) $expr, $t)) {
+            if (!Cron::match((string) $expr, $t)) {
                 $allMatch = false;
             }
         }
@@ -253,7 +267,7 @@ function caseCrossCheck(): void
         $clean = true;
         if ($gap > 1 && $gap <= 1440) {
             for ($m = 1; $m < $gap; $m++) {
-                if (Cron::matches((string) $expr, $t0 + $m * 60)) {
+                if (Cron::match((string) $expr, $t0 + $m * 60)) {
                     $clean = false;
                 }
             }
