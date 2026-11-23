@@ -33,7 +33,7 @@ tsf doctor
 ```
 
 ```
-TSF 环境自检   tsf 0.7.0
+TSF 环境自检   tsf 0.11.0
 --------------------------------------------------------------
 
 必要项（缺一个 tsf build 就跑不起来）
@@ -72,7 +72,7 @@ tsf new hello
   php85 client.php       # 另开终端验证 echo
 ```
 
-生成 5 个文件，各有明确职责：
+生成的骨架（`ls` 实际顺序）：
 
 ```
 hello/
@@ -80,8 +80,13 @@ hello/
 ├── project.yml      构建配置（tsf 生成，不要手改）
 ├── main.php         入口：必须有全局 main()
 ├── client.php       测试客户端（php85 直接跑，不参与 AOT）
-└── config/tsf.json  运行时配置：端口、worker 数、日志级别
+├── config/tsf.json  运行时配置：端口、worker 数、日志级别
+├── src/             业务代码目录（`tsf new` 时就存在，可以是空的）
+└── var/             运行时产物：日志、快照、迁移记录（不要提交）
 ```
+
+`src/` 和 `var/` 也在 `tsf new` 时就建好了——前者放你后面写的 Service，
+后者是运行期目录，`.gitignore` 里已经排除。
 
 **`project.json` 和 `project.yml` 的关系是最容易搞错的一处**：前者是源码（要提交），
 后者是生成物——**`tsf new` 时就已产出，`tsf build` 每次覆盖**。改配置改 `project.json`，
@@ -96,13 +101,13 @@ tsf build .
 
 ```
 Build successful: hello
-  OK 产物: /tmp/hello/hello  (2567 KB)
+  OK 产物: /tmp/hello/hello  (3096 KB)
 ```
 
 这一步做三件事：把 PHP 翻成 C++、调 g++ 编译、链接出原生二进制。
 **2.5 MB 的二进制就是整个服务端**——没有 PHP 解释器、没有 VM。
 
-第一次是**全量**编译（本项目 63 个文件，明显更久），之后走增量。
+第一次是**全量**编译（新建工程 **68 个文件**，实测 **23.5 秒**），之后走增量。
 
 增量有多快？实测：改一行到编译完成 **1651 ms**（100 ms 轮询精度，含 63 文件重编 +
 增量链接）。所以别拿第一次的体感判断这个工具。
@@ -155,19 +160,19 @@ tsf lint
 ```
 
 ```
-  OK 结构检查通过：100 个源文件（核心 + 10 个包），无 mixed 类型、命名空间与目录一致
+  OK 结构检查通过：137 个源文件（核心 + 16 个包），无 mixed 类型、命名空间与目录一致
 ```
 
 ## 5. 下一步
 
 | 想做 | 看 |
 |:--|:--|
-| 写业务逻辑（Service、协议、调用） | [01-service.md](01-service.md) |
-| 做玩法（房间、帧循环、AOI） | [02-room.md](02-room.md) |
-| 存档与数据库 | [03-data.md](03-data.md) |
-| 多进程 / 多节点 | [04-distributed.md](04-distributed.md) |
-| 不停服改逻辑 | [06-hotreload.md](06-hotreload.md) |
-| 编译报错看不懂 | [07-pitfalls.md](07-pitfalls.md) |
+| 写业务逻辑（Service、协议、调用） | [02-service.md](02-service.md) |
+| 做玩法（房间、帧循环、AOI） | [03-gameplay.md](03-gameplay.md) |
+| 存档与数据库 | [04-data.md](04-data.md) |
+| 多进程 / 多节点 | [05-distributed.md](05-distributed.md) |
+| 不停服改逻辑 | [12-hot-reload.md](12-hot-reload.md) |
+| 编译报错看不懂 | [08-aot-types.md](08-aot-types.md) |
 
 ## 一个提醒
 
@@ -175,5 +180,5 @@ tsf lint
 不存在——必须重编。`tsf watch` 把重编做到 2 秒内是它的上限，也是这套方案的代价。
 
 如果你需要「线上不停服改一行逻辑」，那是另一条轨道（`pkg/script` 热更），
-见 [06-hotreload.md](06-hotreload.md)。**不要在开发期就为它设计**，
+见 [12-hot-reload.md](12-hot-reload.md)。**不要在开发期就为它设计**，
 先用 `tsf watch` 把业务写完。

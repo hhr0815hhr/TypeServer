@@ -74,7 +74,7 @@ php85 client.php 9001          # 3) 另开终端验证
 
 ```bash
 bash scripts/ci-preflight.sh   # 先看环境（缺什么、缺在哪、怎么补）
-tsf verify                     # 18 个套件
+tsf verify                     # 19 个套件（含文档链接检查）
 ```
 
 ```
