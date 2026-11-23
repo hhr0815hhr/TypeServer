@@ -496,6 +496,49 @@ function caseSharedScale(): void
     T::ok($us2 < $us1, "共享模式建模更快", "共享 " . $us2 . " vs 独占 " . $us1 . " µs");
 }
 
+
+/**
+ * 空闲宿主回收。
+ *
+ * `closeIdleHosts()` 之前是**零调用 + 零测试**：注释里写着"交给巡检定期调用更安全"，
+ * 但仓库里没有任何地方调它，demo 也没有。等于"提供了工具但没人知道要用"。
+ *
+ * 不回收的后果不是泄漏（`ensureHost()` 会复用 load 未满的宿主，上限是
+ * 峰值房间数 / maxRoomsPerHost），而是**峰值过后不缩容**——空宿主还在转定时器。
+ * 要不要回收取决于业务对这点开销的态度，但至少得有一条测试证明它真的能用。
+ */
+function caseReapIdle(): void
+{
+    echo PHP_EOL . "== 空闲宿主回收 ==" . PHP_EOL;
+    Scheduler::reset();
+    $s = Scheduler::instance();
+    $mgr = new RoomManager(RoomManager::MODE_SHARED, 50, 2);
+
+    $ids = [];
+    for ($i = 0; $i < 3; $i++) {
+        $ids[] = $mgr->create(4);
+    }
+    $s->tick();
+    $svc = (int) $s->stats()["services"];
+    T::ok($svc === 2, "3 间 / 每宿主 2 = 2 个宿主", "services=" . $svc);
+
+    foreach ($ids as $rid) {
+        $mgr->destroy($rid);
+    }
+    $s->tick();
+
+    $reaped = $mgr->closeIdleHosts();
+    T::ok($reaped === 2, "回收了 2 个空宿主", "n=" . $reaped);
+    T::ok($mgr->count() === 0, "管理器里已无房间记录", "count=" . $mgr->count());
+
+    // 回收之后还能正常开房：hostAddr 必须被清 0，否则会把新房间投给已死的宿主
+    $id2 = $mgr->create(4);
+    $s->tick();
+    T::ok($mgr->has($id2), "回收后再开房仍然可用");
+    $svc2 = (int) $s->stats()["services"];
+    T::ok($svc2 === 1, "只重建了 1 个宿主", "services=" . $svc2);
+}
+
 function main(): void
 {
     echo "== Room 生命周期与帧循环测试 ==" . PHP_EOL;
@@ -508,6 +551,7 @@ function main(): void
     caseTickPerf();
     caseShared();
     caseSharedScale();
+    caseReapIdle();
 
     echo PHP_EOL . "结果: " . T::$pass . " 通过 / " . T::$fail . " 失败" . PHP_EOL;
 }
