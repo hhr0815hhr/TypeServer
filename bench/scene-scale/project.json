@@ -1,0 +1,4 @@
+{
+  "name": "scene-scale",
+  "packages": ["aoi", "entity"]
+}
