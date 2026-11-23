@@ -114,6 +114,86 @@ function caseSideEffects(): void
     check($noThrow, "未 bindLog 时 log 静默不抛错");
 }
 
+
+/**
+ * 玩法能力：定时器 / 发消息 / 读配置。
+ *
+ * 对标 Lua 宿主注册的 C 函数面。没有这三样，脚本只能"改数字"，
+ * 一旦要"30 秒后结算""通知玩家""读活动参数"就得改 AOT 代码——那不叫热更。
+ */
+function caseCaps(): void
+{
+    echo PHP_EOL . "[玩法能力]" . PHP_EOL;
+
+    $mgr = new Manager();
+    $mgr->register("quest", __DIR__ . "/quest.php");
+    $mgr->loadAll();
+    $s = $mgr->get("quest");
+    if ($s === null) {
+        check(false, "取到脚本");
+        return;
+    }
+
+    // ---- 1) 未授权：调用即抛错 ----
+    $ctx = new Context(new Player(), ["uid"], []);
+    $threw = 0;
+    try {
+        $ctx->timer(1000, "x");
+    } catch (\RuntimeException $e) {
+        $threw++;
+    }
+    try {
+        $ctx->send("a", 1, "d");
+    } catch (\RuntimeException $e) {
+        $threw++;
+    }
+    check($threw === 2, "未绑定 timer/send 时抛错", "n=" . $threw);
+    check(!$ctx->canTimer() && !$ctx->canSend(), "can() 如实反映");
+    check($ctx->configInt("nope", 7) === 7, "未绑定 config 时返回默认值");
+
+    // ---- 2) 授权后：脚本能挂号、能发消息、能读配置 ----
+    $got = [];
+    $ctx2 = new Context(new Player(), ["uid"], []);
+    $ctx2->bind("timer", function (int $ms, string $entry) use (&$got): void {
+        $got[] = "timer:" . $ms . ":" . $entry;
+    });
+    $ctx2->bind("send", function (string $target, int $msgId, string $data) use (&$got): bool {
+        $got[] = "send:" . $target . ":" . $msgId . ":" . $data;
+        return true;
+    });
+    $ctx2->bind("config", function (string $key): string {
+        if ($key === "activity.enabled") {
+            return "1";
+        }
+        if ($key === "activity.reward") {
+            return "500";
+        }
+        return "";
+    });
+    $ctx2->bind("log", function (string $msg) use (&$got): void {
+        $got[] = "log:" . $msg;
+    });
+
+    $r = $s->callWithContext("activity", $ctx2);
+    check($r === 1, "activity 返回 1（开关打开）", "got=" . var_export($r, true));
+    check(in_array("timer:30000:onActivitySettle", $got, true), "脚本挂上了 30 秒后的回调", implode(" | ", $got));
+    check(in_array("send:player:1001:9001:join", $got, true), "脚本发出了消息");
+    check($ctx2->configInt("activity.reward") === 500, "脚本读到配置数值");
+
+    // ---- 3) 开关关掉时什么都不做 ----
+    $got2 = [];
+    $ctx3 = new Context(new Player(), ["uid"], []);
+    $ctx3->bind("timer", function (int $ms, string $entry) use (&$got2): void {
+        $got2[] = "timer";
+    });
+    $ctx3->bind("config", function (string $key): string {
+        return "0";     // activity.enabled = 0
+    });
+    $r2 = $s->callWithContext("activity", $ctx3);
+    check($r2 === 0, "开关关闭时返回 0");
+    check($got2 === [], "关闭后没有挂号任何回调");
+}
+
 function main(): void
 {
     $dir = __DIR__;
@@ -194,6 +274,7 @@ function main(): void
     }
 
     caseSideEffects();
+    caseCaps();
 
     echo "DONE\n";
 }

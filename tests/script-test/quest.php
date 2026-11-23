@@ -7,6 +7,17 @@ return [
     },
     // 活动玩法的最小闭环：读状态 → 判断 → 发奖 → 记日志。
     // 这些**全部**不需要重启进程，改脚本 reload 就生效。
+    // 玩法型入口：读配置 → 挂号回调 → 通知别人。
+    // 这三件事在没有能力绑定之前，脚本一样都做不到。
+    "activity" => function ($ctx) {
+        if ($ctx->configInt("activity.enabled") === 0) {
+            return 0;
+        }
+        $ctx->timer(30000, "onActivitySettle");
+        $ctx->send("player:1001", 9001, "join");
+        $ctx->log("activity joined, reward=" . $ctx->config("activity.reward"));
+        return 1;
+    },
     "daily" => function ($ctx) {
         $gold = $ctx->getInt("gold");
         $ctx->log("daily start gold=" . (string) $gold);
