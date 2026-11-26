@@ -186,3 +186,30 @@ Swoole 给的是最小栈，收回池里跟真实业务协程的栈深度对不�
   自己换算时记得用墙钟取"现在"，再用差值加到 `nowMs()` 上
 - 断言落点要换算成墙钟校验（"是不是 3:00"），不要校验毫秒值是否整齐——
   后者是实现的偶然特征，换了基准会继续绿
+
+## OOM 前落 dump（v0.16.0）
+
+OOM 是 fatal error，`catch` 接不住、`register_shutdown_function` 不执行，
+进程直接以**退出码 137**（SIGKILL）消失，只在 stderr 留一行
+`Hard memory limit of N bytes exhausted ... in file on line`。
+supervisor 会把它当成"被外部杀死"，看不出是内存问题。
+
+所以只能提前动手：
+
+```php
+Scheduler::instance()->setMemoryPressure(80, 92);
+Scheduler::instance()->crashDir("/var/log/tsf/crash");
+```
+
+- 每 64 轮 tick 查一次占用率（摊薄后约 3 ns/轮）
+- 80% 记一条 warn（60 秒最多一条）
+- 92% 落一份 crash dump，**每进程只落一次**
+
+**别把 dump 阈值设到 98% 以上**——`CrashDump::save` 要 `json_encode`、要写文件，
+本身需要内存，设太晚就是"还没写出来就 OOM 了"。
+
+`memoryPressure()` 返回 `used` / `limit` / `pct` / 阈值 / 是否已 dump，接监控用。
+
+**一个容易踩的坑**：百分比是整数除法，占用小 + 上限大时会截断成 0%
+（实测 2 MB / 512 MB 显示 0%）。所以"阈值 80% 但永远不触发"可能是这个原因，
+设阈值前先用 `memoryPressure()` 看一眼实际 pct。

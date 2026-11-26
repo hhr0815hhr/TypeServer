@@ -2,6 +2,50 @@
 
 ---
 
+## v0.16.0（2026-11-26）
+
+OOM 前落 dump。这是运行时评估里最后一块：**进程吃满内存时，什么现场都记不下来**。
+
+### 实测（`bench/oom`）
+
+AOT 产物 OOM 时：
+
+| | 结果 |
+|:--|:--|
+| `catch (\Throwable)` | 接不住——OOM 是 fatal error，不是异常 |
+| `register_shutdown_function` | **不执行** |
+| 退出码 | **137**（SIGKILL），supervisor 会当成"被外部杀死" |
+| 留下的信息 | stderr 一行 `Hard memory limit of N bytes exhausted ... in file on line` |
+
+也就是说：crash dump 那套（`catch` + `CrashDump::save`）对 OOM 完全无效。
+等它发生就什么都记不到，**只能提前动手**。
+
+### 新增
+
+`Scheduler::setMemoryPressure(int $warnPct, int $dumpPct)`：
+
+- 每 64 轮 tick 查一次占用率（一次 `memory_get_usage` + 解析 ini 约 200 ns，
+  摊薄后可忽略）
+- 达到 `$dumpPct` 落一份 crash dump（每个进程**只落一次**——OOM 前只来得及一次）
+- 达到 `$warnPct` 记一条 warn，60 秒最多一条
+- `memory_limit` 为 `-1` 时视为无限制，不误报
+
+典型配置 `setMemoryPressure(80, 92)`。**别设到 98% 以上**——dump 本身也要内存。
+
+`memoryPressure()` 返回当前状态：`used` / `limit` / `pct` / 阈值 / 是否已 dump。
+
+### 回归
+
+`tests/mem-pressure-test`（8 项）：未开启时不落、超阈值落一次、重复 tick 不重复落、
+无限制时不误报。
+
+变异检查去掉"只落一次"的保护，`dump 文件数` 从 1 变成 4，"重复 tick 不会重复 dump" 变红。
+
+**测试里踩的一个坑**：一开始把阈值设成 1%/2%、`memory_limit` 保持 512M，
+结果 `pct` 恒为 0——进程只占约 2 MB，整数除法截断成 0%。改成 64M 上限才测出东西。
+
+---
+
 ## v0.15.1（2026-11-26）
 
 **cron 定时器不可用。** 任何 `every()` 注册的 cron 都会在错误的时刻触发，
