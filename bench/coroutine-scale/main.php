@@ -60,13 +60,21 @@ function reset_(): void
 }
 
 /** 建 N 个服务、各投一条消息，返回 [总耗时ms, tick耗时us, 基线RSS, 峰值RSS] */
-function runOnce(int $n, bool $coroutine): array
+function runOnce(int $n, bool $coroutine, int $warmN = 0): array
 {
     reset_();
     $s = Scheduler::instance();
     $s->setCoroutine($coroutine);
     // 条数预算放宽，让一个 tick 就能把消息全部分发出去
     $s->setBudget(100000);
+
+    // 预热栈池：在 spawn 之前做，否则第一轮创建服务时就会顺手把池填了，
+    // 冷热对比就失效了
+    $warmed = 0;
+    if ($warmN > 0) {
+        $warmed = $s->warmCoroutines($warmN);
+        Coroutine::sleep(0.02);
+    }
 
     $addrs = [];
     for ($i = 0; $i < $n; $i++) {
@@ -94,6 +102,7 @@ function runOnce(int $n, bool $coroutine): array
         // 同步模式：tick 已经跑完了，不用等
     }
     $totalMs = (hrtime(true) - $t0) / 1000000.0;
+    echo "    （预热 " . $warmed . " 个协程栈，" . $s->stats()["handled"] . " 条已处理）" . PHP_EOL;
     return [$totalMs, $tickUs, $rssBefore, $rssAfter];
 }
 
@@ -104,30 +113,21 @@ function main(): void
     // 必须在 Coroutine\run 里跑：dispatchAsync 用的是 swoole_coroutine_create，
     // 没有运行中的调度器时会直接失败（现象是 tick 返回 0、一条消息都没处理）
     \Swoole\Coroutine\run(function (): void {
-        echo "== 协程规模 ==" . PHP_EOL;
-        echo "  每次等待 " . WAIT_MS . " ms（模拟一次 redis/pdo 往返）" . PHP_EOL;
-
-        // ---- 同步对照：50 个串行 ----
-        $sync = runOnce(50, false);
-        echo PHP_EOL . "  [对照] 同步 50 个：总耗时 " . number_format($sync[0], 1) . " ms"
-            . "（预期 ≈ " . (50 * WAIT_MS) . " ms，串行）" . PHP_EOL;
-
-        // ---- 协程：逐级加倍 ----
-        echo PHP_EOL . "  [协程]" . PHP_EOL;
-        echo "  " . str_pad("并发数", 8) . str_pad("总耗时", 12) . str_pad("tick 分发", 12)
-            . str_pad("RSS 增量", 12) . "每协程" . PHP_EOL;
-        foreach ([100, 500, 1000, 2000, 5000] as $n) {
-            $r = runOnce($n, true);
-            $rssDelta = $r[3] - $r[2];
-            $per = intdiv($rssDelta * 1024, $n);
-            echo "  " . str_pad((string) $n, 8)
-                . str_pad(number_format($r[0], 1) . " ms", 12)
-                . str_pad($r[1] . " µs", 12)
-                . str_pad($rssDelta . " KB", 12)
-                . $per . " B" . PHP_EOL;
+        // 冷热必须**分进程**测：同一个进程里第一轮创建协程时就把栈池填了，
+        // 后面的轮次无论怎么写都是热的，对比就失去意义。用 WARM 环境变量控制
+        $warm = 0;
+        if (getenv("WARM") === "1") {
+            $warm = 5000;
         }
 
-        echo PHP_EOL . "  → 总耗时应该接近 " . WAIT_MS . " ms（并发），而不是 并发数 × " . WAIT_MS . " ms" . PHP_EOL;
-        echo "  → 每协程 RSS 是栈 + 对象本身；协程栈不在 PHP 堆里，memory_get_usage 看不到" . PHP_EOL;
+        echo "== 协程规模：" . ($warm > 0 ? "栈池预热后" : "冷启动（池空）") . " ==" . PHP_EOL;
+        echo "  5000 个服务各等 50 ms（模拟一次 redis/pdo 往返）" . PHP_EOL;
+
+        $r = runOnce(5000, true, $warm);
+        $per = $r[1] / 5000.0;
+        echo "  总耗时 " . number_format($r[0], 1) . " ms" . PHP_EOL;
+        echo "  tick 分发 " . number_format((float) $r[1]) . " µs（" . number_format($per, 2) . " µs/个）" . PHP_EOL;
+        echo "  RSS 增量 " . ($r[3] - $r[2]) . " KB" . PHP_EOL;
+        echo PHP_EOL . "  → 总耗时接近 50 ms 说明并发成立；分发成本 × 帧率就是容量上限" . PHP_EOL;
     });
 }

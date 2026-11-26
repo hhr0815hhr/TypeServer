@@ -149,6 +149,8 @@ Scheduler::instance()->register("config_watcher", function () use ($dir): Servic
 | `setTickBudget(int $ms)` | 单次 `tick()` 的总时间预算 | `0`=关；超了留到下一轮，不丢消息 |
 | `setMemGuard(int $perMsgMb, int $perServiceMb, string $action = "log")` | 单服务内存归因 | `0`=关；`action` 只能 `log`/`kill` |
 | `memByService(): array` | 地址 → 累计净增长 | 排障用；不是当前占用 |
+| `setCoroutine(bool $on)` | 协程化调度 | 需配 `Runtime::enableCoroutine` |
+| `warmCoroutines(int $n): int` | 预热协程栈池 | 启动时调一次；省 31% RSS |
 | `setWatchdog(int $ms, string $action = "log")` | 单条消息超时 | `action` 只能是 `log` 或 `kill` |
 
 ### Config

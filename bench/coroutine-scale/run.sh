@@ -1,11 +1,13 @@
 #!/bin/bash
-# 协程规模：几千个协程同时等 I/O 时的内存与延迟。
+# 协程规模：几千个协程同时等 I/O 时的内存与延迟，冷启动 vs 栈池预热。
 #
-# 两个容易测错的地方：
+# 三个容易测错的地方：
 #   1 协程栈是 C 层 mmap，**不在 PHP 堆里**，memory_get_usage 看不到——
 #      必须读 /proc/self/status 的 VmRSS，否则会得出"协程不要钱"的错误结论
 #   2 整个测试必须在 Coroutine\run 里跑。dispatchAsync 用 swoole_coroutine_create，
 #      没有运行中的调度器时会静默失败（tick 返回 0，一条消息都没处理）
+#   3 冷热必须**分进程**测。同一个进程里第一轮创建协程就把栈池填了，
+#      后面的轮次怎么写都是热的，对比失去意义。所以跑两次、用 WARM 区分
 set -u
 cd "$(dirname "$0")" || exit 1
 
@@ -23,4 +25,6 @@ if [ ! -x ./coroutine_scale ]; then
     exit 1
 fi
 
-./coroutine_scale
+WARM=0 ./coroutine_scale
+echo
+WARM=1 ./coroutine_scale
