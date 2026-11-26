@@ -145,6 +145,10 @@ Scheduler::instance()->register("config_watcher", function () use ($dir): Servic
 | `kill(int $addr): bool` | 销毁 | 幂等 |
 | `setMailboxLimit(int $n)` | 信箱上限 | 超了 `push` 返回 false |
 | `setBudget(int $n)` | 单次调度的消息预算 | 防止某个服务饿死别人 |
+| `setSlice(int $ms)` | 单服务单次调度的**时间**片 | `0`=关；只在消息边界生效 |
+| `setTickBudget(int $ms)` | 单次 `tick()` 的总时间预算 | `0`=关；超了留到下一轮，不丢消息 |
+| `setMemGuard(int $perMsgMb, int $perServiceMb, string $action = "log")` | 单服务内存归因 | `0`=关；`action` 只能 `log`/`kill` |
+| `memByService(): array` | 地址 → 累计净增长 | 排障用；不是当前占用 |
 | `setWatchdog(int $ms, string $action = "log")` | 单条消息超时 | `action` 只能是 `log` 或 `kill` |
 
 ### Config
@@ -256,6 +260,22 @@ final count=0    ← 服务确实被销毁
      它们都建立在 `interval` 上
 
    这个失效**没有任何报错**，表现为"定时器不触发"。排查时先确认调度器在被驱动。
+
+9. **`setBudget` 限条数，不限时间**。一个服务处理一条消息花 200 ms，照样跑完，
+   同一 tick 里其他几千个服务全部等它——这不是"慢"，是"全体停顿"。
+   `setSlice($ms)` 让它在**消息边界**让出（剩余消息排到队尾），
+   `setTickBudget($ms)` 保证单轮 tick 不超时（每 64 条检查一次，检查点在 `pop()` 之前，不丢消息）。
+
+   **两者都拦不住单条长消息**：一条消息自己跑 100 ms，slice 设 2 ms 也没用——
+   PHP 无法中断正在执行的代码。它们防的是"一个服务长期霸占"，不是"一件事做太久"。
+   协程模式下 slice 不生效（墙钟包含挂起等 I/O 的时间，会把"等 redis 30 ms"误判成慢），
+   那里该用 `setBudget` 限条数。回归见 `tests/slice-test`。
+
+10. **内存是共享的，但可以定位到服务**。所有 Service 在同一个 PHP 堆上，一个服务吃 500 MB，
+    整个 node 跟着死——没有 Erlang 的 per-process heap。
+    `setMemGuard(4, 128, "kill")` 会在 tick 边界量差值，单批超 4 MB 或累计超 128 MB 就处置。
+    它**只能抓数量级异常**：一次捞整张表、缓存不设上限。每次 1 KB 的缓慢增长抓不到。
+    `memByService()` 是累计净增长，不是当前占用。回归见 `tests/mem-attr-test`。
 
 ## 什么时候不该用它
 

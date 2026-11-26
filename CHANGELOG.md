@@ -2,6 +2,46 @@
 
 ---
 
+## 未发布（2026-11-26）
+
+来自"把能力面的短板补齐"这一轮（过程与实测见 `docs/ROADMAP-NO-GAP.md`）。
+不是 bug 修复，是三处**能用但缺一层**的地方补上，外加两条把约定变成门禁的 lint 规则。
+
+### 新增
+
+| 能力 | 之前 | 现在 |
+|:--|:--|:--|
+| **调度时间预算** | `setBudget()` 只限**消息条数**，一个服务处理一条 200 ms 的消息会拖垮整个 tick | `setSlice($ms)` 单服务超预算让出（只在消息边界）、`setTickBudget($ms)` 限制单轮 tick 总时长；`stats()` 多 `slice_hit` / `tick_over` |
+| **单服务内存归因** | 共享堆，一个服务吃 500 MB 整个 node 陪葬，且查不出是谁 | `setMemGuard($perMsgMb, $perServiceMb, "log" 或 "kill")` + `memByService()`；配额告警**每服务只报一次** |
+| **脚本灰度** | 热更只能全量切，切错只能切回来 | `Manager::registerAlt()` / `setGray()` / `pick()` / `callGray()`，按 uid 乘法散列分流，同一 uid 结果恒定 |
+| **重载广播** | `reload()` 只作用于本进程 | `Script\Broadcast`：RELOAD/ACK 协议 + 按 reqId 汇总，`missing`（没回）与 `failedNodes`（回了但失败）分开；**不依赖 Cluster**，接一个发送闭包 |
+| **lint 规则 6/7** | `tsf lint` 只查框架，业务 `scripts/` 完全没进检查 | `tsf lint <工程目录>` 额外检查 `scripts/`：不能定义 `class` / `function`（reload 第二次必然 Cannot redeclare）、只能引用 `TSF\Script` 命名空间 |
+
+### 实测与文档
+
+- `bench/script-cost`：脚本层 vs AOT 五组数字。"慢 10–50 倍"这个旧估算被推翻——
+  实测 5–12 倍，绝对值 0.5–3 µs。另有两条反直觉结论：**脚本调 AOT 方法比 AOT 自己调还快**
+  （0.58×），**白名单字段访问（410 ns）比方法调用（45 ns）贵 9 倍**。
+  见 `docs/guide/12-hot-reload.md` §5.1/§5.2。
+- `docs/ROADMAP-NO-GAP.md`：能力面的路线（与 `ROADMAP.md` 分工：那份管"能不能发布"）。
+  含两条旧结论的返工记录——**30 Hz 百人同屏"撑不住"是把入站吞吐当成了帧预算**，
+  正确口径下占 30 Hz 预算的 1.1%，真天花板是出站带宽。
+
+### 套件
+
+- 新增 `slice`（17 项）、`mem-attr`（18 项）；`script` 60 → 90 项。总数 57 → **59**。
+- 两处变异检查：slice 的预算检查挪回外层 → `handled=500` 不再提前返回；
+  memGuard 的"只报一次"改恒真 → `warn` 1 → 4。红的都是对准问题的那条断言。
+
+### 修掉的自身缺陷
+
+- `tests/script-test/run.sh` 用"可执行位"找编译产物，从 Windows 同步来的 `.php` 带执行位，
+  被当成产物执行（现象是 bash 在解释 PHP 源码）。改成按扩展名排除。
+- `PlayerView` 没有 `__set` 时，脚本写 `$v->level = 99` 只是 Deprecated、**静默创建动态属性**，
+  脚本以为写成功了。已加 `__set` 抛错并钉成断言。
+
+---
+
 ## v0.13.0（2026-11-26）
 
 来自一轮"按不可信输入能打到的面"做的审计，以及随后把距 1.0 的 P0 清单和大部分 P1 做完
