@@ -45,6 +45,9 @@
 
 # 无扩展名的脚本：只有这一个，漏了就整个 CLI 都没了
 !tsf/bin/tsf
+# 许可证同样没有扩展名。此前被上面的 `*` 挡住，`git add` 不加 -f 就进不去 ——
+# 于是 composer.json 写着 MIT，仓库根目录却一直没有 LICENSE（默认即「保留所有权利」）。
+!/LICENSE
 
 # ---- 依赖（composer install 可还原，不入库）----
 tsf/vendor/**

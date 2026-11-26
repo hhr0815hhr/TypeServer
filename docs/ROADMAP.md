@@ -1,7 +1,57 @@
 # 路线图
 
-> 更新：2026-11-18（v0.8.0 发布后）
+> 更新：2026-11-26（v0.13.0 发布后）
 > 来源：会话中讨论的未完成事项。做完一项就勾掉，别让它散落在对话里。
+
+## P0 通往 1.0（审计后新增，见 ARCHITECTURE-REVIEW §58）
+
+这六项不做完不叫 1.0。**2026-11-26 全部完成**，每项都钉了回归并做过反向验证。
+用法见 `docs/guide/13-production.md`。
+
+- [x] **服务 id 回收** —— 已完成（2026-11-25）。**回绕**而不是空闲表：id 仍单调递增，到顶绕回 1，
+      跳过活着的和 5 秒内刚死的。空闲表会让低号 id 被反复复用，别处存的旧地址很快指向新服务（ABA）。
+      回绕下一个 id 要隔一整轮地址空间才会被复用。`tests/id-recycle` 含真的绕一轮（53 项）。
+- [x] **统一的优雅停机** —— 已完成（2026-11-25）。挂在 Swoole 的 `WorkerStop` 上：实测它在正常退出和
+      窗口到期强退两条路径下都会触发，而 worker 里接管不了 SIGTERM。顺序：停机钩子 → 停定时器 →
+      排空（有预算）→ 逆创建顺序逐个 `onStop`（单个抛异常不影响别的）→ 收尾钩子 → 冲缓冲。
+      `max_wait_time` 可配，设 0 时空闲进程 20 多毫秒退出且流程完整。`tests/shutdown-guard`（16 项）。
+- [x] **集群断链自动重连** —— 已完成（2026-11-25）。`Cluster::watchPeer()` 登记，指数退避（0.5s 起翻倍封顶
+      15s，带抖动，稳定过的链路断了从头算）；两端同时互拨按节点号裁决只留一条；TCP 拨号改非阻塞
+      （对不可达地址单次 poll 从 2,001ms 降到 0.8ms）。`tests/cluster-reconnect`（30 项）。
+      **没做的**：注册表成员变更 → `watchPeer()` 的联动（谁该 watch 仍由业务决定，核心不依赖可选包）。
+- [x] **LICENSE / SECURITY.md / CONTRIBUTING** —— 已完成（2026-11-26，作者定 MIT，与 `composer.json` 一致）。
+      根目录与包根各一份 `LICENSE`；`SECURITY.md` 列了已知设计边界；`CONTRIBUTING.md` 把"先让它红一次再修 + 变异检查"写成了规矩。
+- [x] **日志轮转 + 保留份数** —— 已完成（2026-11-25）。单文件 64 MB × 5 份，多进程安全（`rename` + 锁文件）；
+      具名通道 `Logger::to()`，GM 审计默认落到独立的 `gm.log` 并带操作人字段（请求头 `x-gm-operator`，
+      自报、非鉴权）。`tests/log-rotate`（42 项，含两进程并发轮转）。
+- [x] **TLS / WSS** —— 已完成（2026-11-25）。`ssl_cert_file` + `ssl_key_file`，明文连接被握手拒绝；
+      只配一半按明文启动并记 error。集群内部仍是明文，不能上不可信网络。`tests/tls-guard`（16 项）。
+
+## P1 上线后很快会被要（审计后新增）
+
+2026-11-26 做完了下面带 [x] 的；每项的实测与反向验证见 ARCHITECTURE-REVIEW §60。
+
+- [x] **内置指标** —— 已完成。`tsf_scheduler_*` / `tsf_gateway_*` / `tsf_cluster_*` 自动导出（登记统计提供者，导出时现取），
+      `rpc_*` 在事件点计数。`prom` 套件 34 → 51 项。
+- [x] **连接准入** —— 已完成。登录时限（未登录连接发心跳也留不住）、单连接失败上限、同一来源失败封禁、
+      未登录流量按来源限流。`admission` 套件 38 项。
+- [x] **Gateway 装配入口** —— 已完成。`Gateway::assemble()` 按 `server.*` 一次装好，`tsf new` 的模板和默认配置同步。
+- [x] **token 过期 / 作废** —— 已完成。签发带 `iat`；`revokeUid()` / `revokeAll()` / 密钥轮换宽限；2 段永不过期格式可关。
+      **作废是进程内状态**，多进程要全服生效得广播（没做）。
+- [x] **注册表成员 → `watchPeer` 联动** —— 已完成。`Discovery\Membership` + `LocalNode::afterBeat()`。`membership` 套件 38 项。
+- [x] **GM 一人一个 token** —— 已完成。`setOperators()`；操作人来自 token。`gm` 套件 39 → 55 项。
+- [x] **零散项** —— HTTP 405 + Allow、访问日志 info 级、`bearerToken()` 不再接受 query、`Gm\Task::gc()` 有人调了。
+- [x] **三个套件跑的是旧产物** —— 已完成。`gm-test` / `fd-test` / `settle-crash` 的 `run.sh` 此前不编译，
+      产物停在 11-16；现在都编译，并且 `tsf lint` 对"注册了但不编译"判红。
+- [x] **接真服务的套件进回归** —— 已完成（2026-11-25）。`registry / mail / db-mysql / db-shards / db-pg / redis`
+      六个此前只有 `skip-auto`、从未执行过的套件（共 153 项）现在跑在 docker 起的服务上；
+      `scripts/dev-redis.sh` / `dev-mysql.sh` / `dev-pg.sh`，缺服务时 exit 77。
+- [x] **文档漂移** —— README 曾写"19 个套件 / 671 项断言"，已对齐。
+- [ ] **CI** —— `verify` 只能手动触发，PR 上没有门禁。需要一台能跑 docker 的自托管 runner。
+- [ ] **token 作废跨进程生效** —— 把作废水位放到共享存储（`pkg/redis`），或通过 GM 广播到每个进程。
+- [ ] **节点号重复检测** —— 两个进程配成同一个节点号，注册表不拦；地址会指向错的进程。
+- [ ] **心跳时间戳依赖各机时钟** —— `lastSeen` 用墙钟；跨机房时钟偏差大会误判节点死亡。
+- [ ] **作废 `tests/db-pg-test` 里泄露过的数据库凭据**（已从源码移除，但还在 git 历史里）。
 
 ## P0 安全
 

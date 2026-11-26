@@ -70,33 +70,48 @@ php85 client.php 9001          # 3) 另开终端验证
 
 ---
 
-## 验证：一条命令跑完 671 项断言
+## 验证：一条命令跑完 57 个套件
 
 ```bash
 bash scripts/ci-preflight.sh   # 先看环境（缺什么、缺在哪、怎么补）
-tsf verify                     # 19 个套件（含文档链接检查）
+tsf verify                     # 57 个套件（含文档链接检查）
+
+# 依赖 Redis / MySQL / PostgreSQL 的套件缺服务时会标 SKIP；本机用 docker 起一个就都跑：
+bash scripts/dev-redis.sh && bash scripts/dev-mysql.sh && bash scripts/dev-pg.sh
 ```
 
 ```
-结果    套件             内容                                耗时
-PASS  semantics      AOT 语言语义差分（45 用例）                  17.5s
-PASS  swoole         Swoole 契约（6 项）                       9.3s
-PASS  settle         金币账本（115 项）                        23.1s
-PASS  settle-crash   账本崩溃重放（14 项）                       45.9s
-PASS  fd             fd/内存守卫（10 项）                       0.0s
-PASS  room           房间/成员/共享宿主（100 项）                  20.6s
-PASS  cluster        集群/房间归属（11 项）                      14.9s
-PASS  cluster-chan   集群通道/握手（TCP 11 项 + UDS 2000 往返）   16.7s
-PASS  registry       Redis 注册表+租约（38 项，无 Redis 则 SKIP） 20.9s
-PASS  handoff        状态交接（120 项：含版本落后调度）                  20.9s
-PASS  checkpoint     事件日志检查点（45 项：截断/等价/水位/增量/坏点被拒） 15.1s
-PASS  schema         状态版本迁移链（19 项：缺 _v/拒绝降级/恢复集成）      14.6s
-PASS  prom           Prometheus 导出（34 项：格式/名字/TYPE/来源限制）    20.8s
-PASS  rpc            RPC（56 项：调用/超时/并发/codec/版本协商/自愈）    17.3s
-PASS  drain          进程 drain（8 项）                        13.2s
-PASS  rejoin         断线重连（6 项）                            8.5s
-PASS  script         脚本热更（16 项）                          15.8s
-PASS  http           HTTP 接口（8 项）                         15.7s
+PASS  docs           文档链接有效性（36 条）                     0.0s
+PASS  semantics      AOT 语言语义差分（45 用例）                 14.2s
+PASS  swoole         Swoole 契约（10 项）                   9.7s
+PASS  frame          拆包/粘包/非法帧（4 项）                    5.2s
+PASS  gw-guard       网关守卫：handler 抛异常不丢帧、不逃逸（13 项）     30.0s
+PASS  feed-resume    积压续处理：一次灌 3000/12000 帧不催也回齐（10 项） 24.0s
+PASS  shutdown-guard 停机守卫：SIGTERM 后排空与 onStop（3 个场景，16 项）20.0s
+PASS  tls-guard      TLS/WSS：加密收发、拒绝明文、不配证书行为不变（16 项）  30.0s
+PASS  admission      连接准入：登录时限/失败封禁/来源限流/token 作废      27.4s
+PASS  membership     成员联动：注册表 → watchPeer（含换地址重启）      8.2s
+PASS  id-recycle     服务 id 回收：单调/回绕/宽限期 + 真绕一轮（53 项）   66.3s
+PASS  log-rotate     日志轮转/保留份数/gm 独立通道（含并发写入）          6.3s
+PASS  db             事务/嵌套/批量/Repo（sqlite 内存库）         13.8s
+PASS  settle-crash   账本崩溃重放（14 项）                      60.0s
+PASS  room           房间/成员/共享宿主（100 项）                 13.7s
+PASS  cluster        集群/房间归属（11 项）                     15.1s
+PASS  registry       Redis 注册表+租约（38 项，无 Redis 则 SKIP） 15.8s
+PASS  mail           邮件（过期/原子领取/未读，无 MySQL 则 SKIP）     19.2s
+PASS  db-mysql       db 接真 MySQL（严格模式/建表/迁移，无 MySQL 则 SKIP）18.9s
+PASS  db-pg          db 接真 PostgreSQL（方言差异/迁移/事务隔离，无 PG 则 SKIP）12.4s
+PASS  redis          pkg/redis（基本命令/nil/哈希/有序集合/重连/pipeline，无 Redis 则 SKIP）11.7s
+PASS  handoff        状态交接（120 项：含版本落后调度）               16.2s
+PASS  gm             GM 命令/权限/审计                       12.6s
+PASS  prom           Prometheus 导出（51 项：格式/名字/TYPE/来源限制/运行时指标）11.9s
+PASS  rpc            RPC（56 项：调用/超时/并发/codec/版本协商/自愈）  17.2s
+PASS  drain          进程 drain（8 项）                     13.7s
+PASS  rejoin         断线重连（6 项）                         9.0s
+PASS  script         脚本热更（加载/对象共享/越权/热更/异常）            20.2s
+PASS  http           HTTP 接口（路由/中间件/鉴权/限流）             0.9s
+……
+通过 57 / 失败 0 / 跳过 0
 ```
 
 **另有 `tsf test`：发现式跑 `tests/*/main.php`**（不维护清单），
@@ -148,6 +163,9 @@ spike/               一次性技术验证，只保留结论文档入仓库
 | 想知道 | 看 | 状态 |
 |:--|:--|:--|
 | **想上手写东西** | **`docs/guide/`** | **使用教程，按顺序读** |
+| 准备上线：停机、日志、TLS、集群自愈 | `docs/guide/13-production.md` | 使用教程 |
+| 怎么提 Issue / PR、规矩是什么 | `CONTRIBUTING.md` | 贡献指南 |
+| 什么算漏洞、怎么报 | `SECURITY.md` | 安全策略 |
 | 框架怎么用、编码约束 | `tsf/README.md` | 权威参考，按主题分节（4000 行） |
 | 每个任务做了什么、验收数字 | `docs/FRAMEWORK-TASK.md` | 权威任务表（M0–M7） |
 | 这一版有什么、边界在哪 | `CHANGELOG.md` | 按时间倒序 |
@@ -181,3 +199,12 @@ spike/               一次性技术验证，只保留结论文档入仓库
 5. **改配置要重启进程**，没有文件热重载（配置表有独立的热更机制，那是另一套）。
 
 完整的"能做什么/不能做什么"见 `CHANGELOG.md` 的「已知边界」。
+
+---
+
+## 许可证
+
+[MIT](LICENSE)。`composer require` 装下来的包里带同一份 `LICENSE`（`vendor/hhr0815hhr/tsf/LICENSE`）。
+
+提交 PR 之前请读 [CONTRIBUTING.md](CONTRIBUTING.md)：这个项目对"为什么这么做"的在意程度高于"多了什么功能"，
+而且修 bug 的 PR 要带一个**修复之前是红的**回归用例。安全问题请走 [SECURITY.md](SECURITY.md) 里的私密渠道。

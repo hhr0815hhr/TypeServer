@@ -13,6 +13,7 @@
 > 想看完整的成品 → [07-walkthrough.md](07-walkthrough.md)（能三人真打的斗地主）。
 > 写代码时反复报奇怪的运行时错误 → 先看 [08-aot-types.md](08-aot-types.md)。
 > 想知道「零件都好了怎么拼成一个业务」→ [09-assembly.md](09-assembly.md)。
+> 准备上线（停机、日志、TLS、集群自愈）→ [13-production.md](13-production.md)。
 > 想了解"为什么这么设计" → `docs/archive/tsf-readme-full.md`（开发全过程存档）。三者不重复。
 
 ## 分层图

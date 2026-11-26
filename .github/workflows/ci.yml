@@ -3,7 +3,7 @@ name: CI
 # 两个 job，跑在不同的 runner 上，这是被现实逼的：
 #
 #   lint   —— 结构检查 + PHP 语法。**托管 runner 就能跑**，每次 push 都跑。
-#   verify —— 全量验证（tsf verify，197 项断言）。**必须自托管**：
+#   verify —— 全量验证（tsf verify，全部套件）。**必须自托管**：
 #             AOT 编译器 tpc 在 ../typephp-src，不在本仓库；还要求 PHP 8.5 ZTS +
 #             Swoole + phpx，托管 runner 从零装要十几分钟且极易漂移。
 #
@@ -50,7 +50,7 @@ jobs:
   verify:
     name: 全量验证（自托管）
     # 自托管 runner 的标签是 self-hosted；这台机器上跑过 tsf verify 才算通过。
-    # 只在手动触发时跑：push 就全量验证会把 197 项断言的成本摊到每次提交上，
+    # 只在手动触发时跑：push 就全量验证会把全量验证的成本摊到每次提交上，
     # 而真正需要它的是"准备发布"和"改了核心之后"。
     runs-on: [self-hosted, tsf]
     if: github.event_name == 'workflow_dispatch'
@@ -68,5 +68,5 @@ jobs:
       - name: 前置检查
         run: bash scripts/ci-preflight.sh
 
-      - name: tsf verify（197 项断言）
+      - name: tsf verify（全部套件）
         run: ./tsf/bin/tsf verify

@@ -2,6 +2,82 @@
 
 ---
 
+## v0.13.0（2026-11-26）
+
+来自一轮"按不可信输入能打到的面"做的审计，以及随后把距 1.0 的 P0 清单和大部分 P1 做完
+（过程与实测见 `docs/review/ARCHITECTURE-REVIEW-2026-11-19.md` §56–§60）。
+用法说明在 `docs/guide/13-production.md`。
+
+### 修复
+
+| 问题 | 修之前 | 修之后 |
+|:--|:--|:--|
+| **进程收到 SIGTERM** | 等满 `max_wait_time` 被强杀，`Service::onStop` **一个都不执行**（`onStop` 只有 `kill()` 会调） | 排空 → 逆着创建顺序逐个 `onStop` → 收尾钩子，全部执行完才退出；单个 `onStop` 抛异常不影响别的服务 |
+| **服务 id 用尽** | 16,777,215 次 spawn 之后这个进程永久不能再建服务 | 单调递增、到顶回绕，带 5 秒最小宽限期；`stats()` 多 `ids_left` / `id_wraps` |
+| **集群断链后永久失联** | `dropLink()` 之后没有任何重连；对端重启一次，跨节点消息从此全部进 `drop` | `watchPeer()` 登记的对端按指数退避自动重连（0.5s 起翻倍封顶 15s，带抖动）；两端同时互拨按节点号裁决只留一条 |
+| **`Cluster::connect()` 同步阻塞** | 对端不可达时挡住整个 worker 最长 2 秒 | TCP 改非阻塞拨号；对不可达地址单次 `poll()` 从 2,001ms 降到 0.8ms |
+| **日志无上限** | 单文件无限追加，写满磁盘后所有日志**静默消失** | 单文件 64 MB × 5 份轮转（多进程安全） |
+| **没有 TLS / WSS** | 网关只有裸 TCP / 明文 WebSocket | `ssl_cert_file` + `ssl_key_file` 开启；明文连接被拒；只配一半按明文启动并记 error |
+| **GM 审计混在主日志里、无操作人** | 和运行日志同一个文件 | 独立文件 `gm.log`（独立级别阈值）；审计带 `op` 字段（请求头 `x-gm-operator`，自报、非鉴权） |
+| Gateway 的业务 handler 抛异常 | 同一次收包里排在后面的帧**静默丢失**；每抛一次往 stderr 刷一行 `PHP Fatal error`，不经 Logger、无计数 | 回一帧 `ERR`、连接不断、后续帧照常处理；记一行带 fd/uid/msgId 的 error；`stats()` 多一项 `handler_errors` |
+| 集群通道收到坏包 | 坏头堵在读缓冲队首后对端再发 25.6 万个合法包**无一被处理**，而 `hasPeer()` 仍为 true；读缓冲无界增长；每来一次新数据刷一行 Fatal | 立即废弃该链路并记一行 error；`stats()` 多一项 `bad_pkt`；断链现在记一行 warn（之前静默） |
+| 集群链路读写缓冲无上限 | 对端不读 / 发洪水时无界增长 | 读 8 MB、写 16 MB；写满后丢弃并返回 false（首次进入满状态记一次 warn） |
+| 单连接一次发超过 1000 帧 | 后面的帧要等这条连接**下次发来任何字节**才被处理 | 让位后 1ms 续处理；每轮仍限 1000 帧 |
+| **HTTP 同路径不同方法返回 404** | 分不清"方法用错了"和"接口不存在" | 405 + `Allow` 头；路径确实不存在仍是 404 |
+| **HTTP 访问日志是 debug 级** | 默认级别下一条访问日志都没有，"谁在刷接口"查不出来 | info 级，`App::accessLog(false)` 可关 |
+| **`Request::bearerToken()` 接受 `?token=`** | query 里的凭据会进访问日志、代理日志、浏览器历史 | 只认 `Authorization` 头 |
+| **`Gm\Task::gc()` 没有任何调用方** | 异步任务表在长跑进程里只涨不收 | GM 服务每分钟回收一次 |
+| **三个套件跑的是十天前的旧产物** | `gm-test` / `fd-test` / `settle-crash` 的 `run.sh` 不编译，产物停在 2026-11-16——每次"全量通过"它们验证的都是旧代码 | 三个都补上编译；`tsf lint` 新规则：注册的 `run.sh` 不编译就判红 |
+| `WsServer` 缺两项 Swoole 配置 | 默认每连接 2MB 输出缓冲、每回调一个 2MB 协程栈 | 与 `TcpServer` 对齐：64KB、`enable_coroutine=false` |
+| 集群握手 mac 比较 | `!==` | `hash_equals()` |
+
+### 新增
+
+- **停机**：`Server::onShutdown()`（服务停之前）、`Scheduler::onShutdown()`（所有服务停之后）、
+  `Server::setDrainMs()`、`TcpServer` 选项 `max_wait_time`、`Scheduler::shutdown()`（幂等）。
+  停机后投递被拒、不能再建服务、注册定时器返回 0。
+- **日志**：`Logger::setRotation()`、`Logger::initChannel()` / `Logger::to()`（具名通道，没建过则落回主日志）、
+  配置 `log.max_bytes` / `log.max_files` / `log.gm_file` / `log.gm_max_bytes` / `log.gm_max_files`。
+- **集群**：`Cluster::watchPeer()` / `forgetPeer()` / `peers()` / `setReconnect()` / `setConnectTimeout()`。
+- **TLS**：`Server::isSecure()`；`TcpServer` / `WsServer` 选项 `ssl_cert_file`、`ssl_key_file`。
+- **网关装配入口 `Gateway::assemble()`**：按 `server.*` 配置一次装好会话 / 鉴权 / 限流 / 准入。
+  新配置键：`login_timeout_sec`(30)、`login_fail_per_conn`(5)、`login_fail_per_ip`(10)、
+  `login_fail_window_sec`(60)、`login_ban_sec`(600)、`peer_rate_per_sec` / `peer_rate_burst`、`auth.allow_legacy`。
+  `tsf new` 生成的配置里带这些键。
+- **连接准入**（`Gateway`）：登录时限（未登录连接发心跳也留不住）、单连接登录失败上限、
+  同一来源 IP 的失败封禁、未登录流量按来源 IP 限流（重连拿不到新桶）。计数进 `stats()`。
+- **Token 作废**（`TokenAuth`）：签发格式改为 `uid.iat.exp.sig`（带签发时刻）；
+  `revokeUid()` / `revokeAll()` / `addPreviousSecret()`（密钥轮换宽限）/ `allowLegacy(false)`（停用永不过期的 2 段 token）。
+  3 段过渡格式仍可验。作废记录是**进程内**状态。
+- **成员联动 `Discovery\Membership`** + `LocalNode::afterBeat()`：注册表里活着的节点自动进 `watchPeer`，换地址重启后连新地址。
+- **GM 一人一个 token**：`Gm\Server::setOperators()` / `removeOperator()` / `setSharedToken()`；操作人 token 的指令审计里的操作人来自 token。
+- **内置指标**：`tsf_scheduler_*` / `tsf_gateway_*` / `tsf_cluster_*` 自动导出；`rpc_*` 在事件点计数；
+  `Metrics::provide()` 可登记自己的组件。`Prometheus::render()` 第三个参数可关。
+- `Transport\Server::peerOf(int $fd)`：连接的对端 IP（`TcpServer` / `WsServer` 实现）。
+- **许可证与治理**：根目录和包根各一份 `LICENSE`（MIT）、`SECURITY.md`、`CONTRIBUTING.md`；`composer.json` 补 `authors`。
+- 回归套件（**每个都做过反向验证：退回修复后必须变红**）：
+  `gw-guard`(13)、`cluster-guard`(18)、`feed-resume`(10)、`shutdown-guard`(16)、
+  `id-recycle`(53，含真的绕一轮 24 位地址空间)、`log-rotate`(42)、`cluster-reconnect`(30)、`tls-guard`(16)、
+  `admission`(38：token 作废 25 + 6 个服务端场景)、`membership`(38)。
+  既有套件扩充：`prom` 34 → 51（运行时指标），`gm` 39 → 55（一人一个 token），`http` +2（405）。
+- 接真服务的 6 个套件第一次进了回归（此前只有 `skip-auto`，从未执行）：`registry`(38)、
+  `mail`(27)、`db-mysql`(30)、`db-shards`(21)、`db-pg`(18)、`redis`(19)——共 153 项。
+  起服务的脚本：`scripts/dev-redis.sh`、`scripts/dev-mysql.sh`、`scripts/dev-pg.sh`；共用入口 `scripts/run-svc-test.sh`。
+- `swoole-contract` 补 4 项定时器契约：`Timer::after` 的回调**不传参数**（照 `tick` 写 `int $timerId` 会
+  `ArgumentCountError`）、`Timer::after(0)` 不合法。
+
+### 行为变化
+
+- `tsf lint` 现在也检查两件以前没人管的事：**注册了但不存在的脚本**（`mail` 曾是一条永远 SKIP 的空条目），
+  以及**注册了但不编译的脚本**（`gm-test` / `fd-test` / `settle-crash` 十天里跑的都是旧产物）。
+- 21 个套件的 `project.yml` 里的源文件路径从早已不存在的 `bench/<x>/main.php` 改为 `tests/<x>/main.php`。
+- `match` 套件的"单轮扫描 ≤5ms"改为 5 轮取最小值。单次计时测量被调度器抢占一次就会翻倍，
+  6 次里约 1 次误红；这是测量方法的变化，不是阈值放宽。
+- `scripts/dev-mysql.sh` 改为只绑 `127.0.0.1`（此前是 0.0.0.0，一个弱口令库在局域网上可达），
+  就绪探测改走 TCP（首次初始化时的临时实例不监听 TCP，原来的 socket 探测会假阳性）。
+- `tests/db-pg-test/main.php` 里硬编码的公网数据库地址与账号密码改为本机容器。**这组凭据已经进了 git 历史，
+  应当作废。**
+
 ## v0.12.0（2026-11-23）
 
 这一版来自一轮系统性复盘（过程与判断见 `docs/review/ARCHITECTURE-REVIEW-2026-11-19.md`

@@ -18,7 +18,9 @@ description: |
   pkg/script、脚本热更、替 Lua、ext/interp、supervise、监督树、tsf mem、tsf-dev、
   GM、gm 命令、GM 通道、配置热更、配置重载、FileLoader、crc32 判变更、Gm\Task、
   房卡房、房间用什么跑、一房一协程、协程还是线程、进程还是协程、Service 载体、
-  世界服、副本、场景容量、万人同屏、AOI 容量、分区。
+  世界服、副本、场景容量、万人同屏、AOI 容量、分区、
+  优雅停机、SIGTERM、onStop 不执行、日志轮转、日志写满、gm 审计日志、TLS、WSS、ssl_cert_file、
+  断线重连、watchPeer、节点失联、服务 id 用尽、本地服务 id 用尽、id 回绕、dev-redis、dev-mysql。
 
   不适用：只问 TypePHP 语言本身（原生类型、tpc 构建链）—— 那用 typephp-refactor。
 ---
@@ -55,6 +57,7 @@ description: |
 | `references/hot-reload.md` | **脚本**热更的用法与坑（`pkg/script` + `ext/interp`） |
 | `references/config-reload.md` | **配置表**热更：默认手动、FileLoader、crc32、两条路的边界 |
 | `references/gm.md` | **GM 通道**：注册命令、同步/异步、Task 任务表、actor 边界、安全默认值 |
+| `references/production.md` | **上线闭环**：优雅停机、日志轮转/通道、TLS、集群断线重连、服务 id 回绕；接真服务的套件怎么跑；AOT 新坑 |
 | `templates/handler.php` | HTTP handler 模板（参数校验 + 业务码约定） |
 | `templates/pkg.json` | 新建 pkg 的清单模板 |
 | `scripts/preflight.sh` | 一键自检：doctor + lint + 常见错误扫描 + build |
@@ -92,7 +95,7 @@ TSF_BIN=./vendor/bin/tsf bash scripts/preflight.sh .
 **顺手记下版本号。** 报错时带上这两个：
 
 ```bash
-./vendor/bin/tsf --version     # TSF 0.12.0
+./vendor/bin/tsf --version     # TSF 0.13.0
 tpc --version                  # TypePHP Compiler (AOT) v0.9.6
 ```
 
@@ -137,6 +140,8 @@ tsf new game --no-packages             # 明确全不启用（CI 默认走这条
 | **配置表热更（改数值/开关）** | `references/config-reload.md` |
 | **GM 命令 / 后台操作** | `references/gm.md`（含同步/异步怎么选） |
 | 分布式（RPC / 服务发现 / 分片 / 跨服 / 熔断） | `docs/guide/05-distributed.md` |
+| **准备上线：停机 / 日志轮转 / TLS / 集群自愈 / 服务 id 用尽** | **`references/production.md`** + `docs/guide/13-production.md` |
+| 跑接真 Redis / MySQL / PG 的套件 | `references/production.md`（docker 起服务） |
 | **编译报错 / 运行期异常 / 静默失败** | **`references/error-codes.md`** |
 | 类型契约（什么类型能编过） | `docs/guide/08-aot-types.md` + `typephp-refactor` skill |
 | 看进程内存（谁吃了 RSS） | `tsf mem [关键字]` |
