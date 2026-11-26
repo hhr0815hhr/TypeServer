@@ -258,7 +258,12 @@ function caseCronRegister(): void
     $tid = $s->every("*/5 * * * *", $addr, 9006);
     T::ok($tid > 0, "注册成功");
     $due = $s->timers()->nextDueAt();
-    T::ok($due > 0 && $due % 60000 === 0, "到期时刻落在整分钟", "due=" . $due);
+    // 断言落点要对齐整分钟，但**不能直接看 $due % 60000**：$due 是单调毫秒
+    // （hrtime 基准），它的绝对值跟纪元无关，整齐与否是旧实现（Unix 秒 × 1000）
+    // 的偶然特征。换算成墙钟再看才是真行为
+    $wallMs = (int) (microtime(true) * 1000.0) + ($due - Scheduler::nowMs());
+    $wallSec = intdiv($wallMs, 1000);
+    T::ok($wallSec % 60 === 0, "到期时刻落在整分钟", "墙钟 " . date("H:i:s", $wallSec));
     T::ok($due > Scheduler::nowMs(), "到期时刻在未来");
 
     $threw = false;
