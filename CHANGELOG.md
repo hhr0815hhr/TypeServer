@@ -2,6 +2,62 @@
 
 ---
 
+## v0.17.0（2026-11-26）
+
+`tsf new --layout=layered`：生成分层骨架，而不是一个单文件。
+
+### 为什么
+
+之前只有 flat 一种形态：164 行的 `main.php`，能跑，但不回答"2000 行之后往哪放"。
+结果每个人的 `src/` 都长得不一样——全塞 main.php、按功能平铺、或者抄了 demo
+但第二个领域进来时不知道往哪放。规范可以写文档，但**生成出来的形状比文档管用**。
+
+### 新增
+
+```
+tsf new mygame --layout=layered
+```
+
+生成 12 个模板文件：
+
+| 路径 | 内容 |
+|:--|:--|
+| `main.php` | 装配，约 130 行，只调函数 |
+| `src/Protocol/Cmd.php` | 网络 ID 与内部 ID 分开编号 |
+| `src/Protocol/EchoTask.php` | 内部消息载荷用对象而不是 array（array 表达不了成员类型） |
+| `src/Domain/Counter.php` | 纯逻辑，**不 import 任何东西** |
+| `src/App/EchoService.php` | Service 写法：状态在成员变量，不在静态属性 |
+| `src/Infra/README.md` | 这层该放什么（目录还不建，先讲清楚） |
+| `src/Support/README.md` | 同上 |
+| `tests/run.php` + `tests/unit/CounterTest.php` | 5 条 Domain 断言 |
+| `config/game/example.php` | 表驱动配置示例 |
+| `README.md` | 工程自己的四条规矩 + 加功能的固定顺序 |
+
+**默认仍是 flat**，老行为一字不变：不带 `--layout` 时还是那个 164 行的单文件。
+小服务就该用 flat——164 行能说清的事分四层是负担。
+
+### 实测
+
+生成后：
+
+| 动作 | 结果 |
+|:--|:--|
+| `tsf build .` | 编译 73 个文件通过 |
+| 起服务 + `php85 client.php` | `login ok uid=1001` → `resp msgId=1002` → **`OK: echo matched`** |
+| `php85 tests/run.php` | `PASS 5 项`，**不编译、不起服务** |
+
+最后一条是分层规则的直接回报：Domain 不依赖 TSF，所以它的测试不需要 AOT 编译。
+
+### 踩到的两个坑（都记在模板注释里）
+
+1. **`payload=raw` 时业务消息必须是 string**。第一版 Service 回 `["echo" => ...]`
+   直接报 `payload=raw 时业务消息必须是 string，收到 array`。改成回 `$reply`。
+2. **客户端模板断言"原样回显"**。中途试着回 JSON，链路是通的
+   （`body={"echo":"hello","handled":1}`）但 client 判 `FAIL: body mismatch`。
+   echo 示例就该回原文，不该秀结构化。
+
+---
+
 ## v0.16.0（2026-11-26）
 
 OOM 前落 dump。这是运行时评估里最后一块：**进程吃满内存时，什么现场都记不下来**。

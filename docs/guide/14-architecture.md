@@ -246,12 +246,35 @@ src/App/World/RankService.php
 
 新建一个工程时，按这个顺序做：
 
-1. `tsf new mygame` → 跑通 echo（确认工具链没问题）
-2. 把数值挪进 `config/game/`，`config/tsf.json` 里关掉 `auth.allow_legacy`
-3. 写第一个 `src/Domain/` 类，配一条 `tests/unit/` 断言
-4. 加 `src/App/` 的 Service，`main.php` 只加装配代码
-5. 上线前对照 [13-production.md](13-production.md) 过一遍：`setWatchdog`、
+1. `tsf new mygame --layout=layered` → 生成分层骨架，跑通 echo（确认工具链没问题）
+2. `php85 tests/run.php` → 跑 Domain 的单测（**不需要编译**，这是分层的第一个回报）
+3. 把数值挪进 `config/game/`，`config/tsf.json` 里关掉 `auth.allow_legacy`
+4. 写第一个 `src/Domain/` 类，配一条 `tests/unit/` 断言
+5. 加 `src/App/` 的 Service，`main.php` 只加装配代码
+6. 上线前对照 [13-production.md](13-production.md) 过一遍：`setWatchdog`、
    `setMemoryPressure`、`setSlice`、日志轮转、TLS
+
+### `--layout=layered` 生成什么
+
+```
+mygame/
+├── main.php                    装配（约 130 行，只调函数）
+├── config/{tsf.json, game/}
+├── src/Protocol/{Cmd, EchoTask}.php
+├── src/Domain/Counter.php      纯逻辑 + 5 条规则断言
+├── src/App/EchoService.php     Service 的写法（状态在成员变量）
+├── src/Infra/README.md         这一层该放什么（目录还没建，先讲清楚）
+├── src/Support/README.md
+├── tests/run.php
+├── tests/unit/CounterTest.php
+└── README.md                   工程自己的规矩清单
+```
+
+它**可编译、可跑通、单测能过**：`tsf build .` 之后起服务、跑 `php85 client.php`
+能看到 `OK: echo matched`；`php85 tests/run.php` 不编译就能跑 Domain 的断言。
+
+不带 `--layout`（默认 `flat`）时行为一字不变，仍是那个单文件 `main.php`。
+**小服务就该用 flat**：164 行能说清的事分四层是负担，分层是给 2000 行以上准备的。
 
 ---
 
