@@ -20,9 +20,13 @@ if ! "$TSF" build . > /tmp/script_test_build.log 2>&1; then
     exit 1
 fi
 
-# 找 build 产物（排除 run.sh 和源码）
+# 找 build 产物。排除源码与配置——从 Windows 同步过来的 .php 可能带执行位，
+# 只按"可执行"判断会把它当成产物执行（现象是 bash 在解释 PHP 源码）
 for f in *; do
-    if [ -x "$f" ] && [ "$f" != "run.sh" ]; then
+    case "$f" in
+        run.sh|*.php|*.json|*.yml|*.md) continue ;;
+    esac
+    if [ -x "$f" ]; then
         OUT="$f"
     fi
 done

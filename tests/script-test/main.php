@@ -1,7 +1,9 @@
 <?php
 
+use TSF\Script\Broadcast;
 use TSF\Script\Context;
 use TSF\Script\Manager;
+use TSF\Script\Script;
 
 /**
  * pkg/script 的回归测试。
@@ -15,6 +17,67 @@ final class Player
     public int $uid = 1001;
     public int $level = 10;
     public int $gold = 500;
+    public int $hp = 400;
+    public int $hpMax = 1000;
+    /** @var array<int, int> */
+    public array $buffs = [];
+}
+
+/**
+ * 类型化只读视图（L1 侧，AOT 编译）。
+ *
+ * 这是脚本表达力的关键：白名单只能"按字段"给，视图能"按语义"给——
+ * 脚本拿到的是一个能读全部状态、能调能力方法、但**没有写入口**的对象。
+ *
+ * 实测依据（bench/script-cost）：方法调用 45 ns/次，白名单字段访问 410 ns/次。
+ * 视图不只是表达力更好，它快 9 倍。
+ */
+final class PlayerView
+{
+    private Player $p;
+
+    public function __construct(Player $p)
+    {
+        $this->p = $p;
+    }
+
+    public function level(): int
+    {
+        return $this->p->level;
+    }
+
+    public function gold(): int
+    {
+        return $this->p->gold;
+    }
+
+    public function hpRatioPct(): int
+    {
+        return intdiv($this->p->hp * 100, $this->p->hpMax);
+    }
+
+    public function hasBuff(int $id): bool
+    {
+        return isset($this->p->buffs[$id]);
+    }
+
+    /** 能力方法：判断留在 AOT，规则（用不用、什么时候用）可以热更 */
+    public function canJoin(int $needLevel): bool
+    {
+        return $this->p->level >= $needLevel;
+    }
+
+    /**
+     * 显式拒绝一切写属性。
+     *
+     * 不加这个的话，脚本写 `$v->level = 99` 在 PHP 8.2+ 只是 Deprecated、
+     * 会**静默创建动态属性**——脚本以为写成功了，宿主状态其实没变。
+     * "写了但没用"比报错难查得多，必须在视图层就掐掉。
+     */
+    public function __set(string $name, string|array|object|int|float|bool|null $value): void
+    {
+        throw new \RuntimeException("PlayerView 是只读视图，不能写 " . $name);
+    }
 }
 
 function check(bool $cond, string $name, string $detail = ""): void
@@ -379,6 +442,229 @@ function caseScriptCall(): void
     check($r2 === "pong:after", "递归失败后深度已复位，正常调用不受影响", "r=" . var_export($r2, true));
 }
 
+/**
+ * 灰度：同一逻辑两个版本，按 uid 分流。
+ *
+ * 四条必须钉住：
+ *   1 注册了 alt 不等于启用（默认 0%，setGray 是显式动作）
+ *   2 同一 uid 结果恒定（分流必须是纯函数，否则同一个人每次调用走不同版本）
+ *   3 连续 uid 不能按段划分（`uid % 100` 会让 1001–1100 全进新逻辑）
+ *   4 reload 要连 alt 一起换（只换 base 会出现"灰度中的人继续跑旧代码"）
+ */
+function caseGray(): void
+{
+    $dir = __DIR__;
+    $mgr = new Manager();
+    $mgr->register("gray", $dir . "/gray_a.php");
+    $mgr->registerAlt("gray", 2, $dir . "/gray_b.php");
+    $mgr->register("plain", $dir . "/gray_a.php");
+    $failed = $mgr->loadAll();
+    check(count($failed) === 0, "灰度：base 与 alt 都能加载");
+
+    $p = new Player();
+    $ctx = new Context($p, ["uid"], []);
+
+    // 注册了 alt 但没设比例：必须走 base
+    $rDefault = $mgr->callGray("gray", 1001, "val", $ctx);
+    check($rDefault === 1, "灰度默认 0%：走 base", "实际 " . (string) $rDefault);
+
+    $mgr->setGray("gray", 100);
+    $rAll = $mgr->callGray("gray", 1001, "val", $ctx);
+    check($rAll === 2, "灰度 100%：走 alt", "实际 " . (string) $rAll);
+
+    $mgr->setGray("gray", 50);
+    $hit = 0;
+    $stable = true;
+    for ($i = 0; $i < 1000; $i++) {
+        $uid = 10000 + $i;
+        $a = $mgr->callGray("gray", $uid, "val", $ctx);
+        $b = $mgr->callGray("gray", $uid, "val", $ctx);
+        if ($a !== $b) {
+            $stable = false;
+        }
+        if ($a === 2) {
+            $hit++;
+        }
+    }
+    check($stable, "灰度：同一 uid 结果恒定");
+    check($hit > 400 && $hit < 600, "灰度 50%：1000 个 uid 里 400-600 命中", "命中 " . $hit);
+
+    // 连续 50 个 uid 必须两版都出现。
+    // 为什么是 50 不是 100：`uid % 100` 在 100 个连续 uid 上会覆盖全部 100 个桶，
+    // 两版都出现——那样这条断言就测不出"按段划分"。50 个才能暴露它
+    // （0–49 全落进 <50，seenBase 会是 false）。
+    $seenBase = false;
+    $seenAlt = false;
+    for ($i = 0; $i < 50; $i++) {
+        $v = $mgr->callGray("gray", 20000 + $i, "val", $ctx);
+        if ($v === 1) {
+            $seenBase = true;
+        }
+        if ($v === 2) {
+            $seenAlt = true;
+        }
+    }
+    check($seenBase && $seenAlt, "灰度：连续 50 个 uid 两版都有（不按段划分）");
+
+    // 没有 alt 的脚本：设了比例也不该出错
+    $rPlain = $mgr->callGray("plain", 1001, "val", $ctx);
+    check($rPlain === 1, "没有 alt 的脚本：灰度设置被忽略", "实际 " . (string) $rPlain);
+
+    // reload 要连 alt 一起换
+    $mgr->setGray("gray", 100);
+    check($mgr->reload("gray"), "reload 同时覆盖 base 与 alt");
+    $afterReload = $mgr->callGray("gray", 1001, "val", $ctx);
+    check($afterReload === 2, "reload 后灰度仍指向 alt", "实际 " . (string) $afterReload);
+}
+
+/**
+ * 模拟网络：把 send 闭包收到的消息存下来，测试里手工分发。
+ *
+ * 为什么不启真集群：广播的协议层（reqId / ack 汇总 / 缺失判定）与传输无关，
+ * 起两个进程只会让测试变慢、变脆。真集群那条路由 `cluster-guard` 覆盖。
+ */
+final class Wire
+{
+    /** @var array<int, int> */
+    public array $nodes = [];
+
+    /** @var array<int, int> */
+    public array $ids = [];
+
+    /** @var array<int, string> */
+    public array $payloads = [];
+
+    public function put(int $node, int $msgId, string $payload): void
+    {
+        $this->nodes[] = $node;
+        $this->ids[] = $msgId;
+        $this->payloads[] = $payload;
+    }
+}
+
+/**
+ * 重载广播：发出去 / 对方重载 / ack 汇总 / 缺失与失败要分开。
+ */
+function caseBroadcast(): void
+{
+    $dir = __DIR__;
+
+    // 两个"节点"各一份 Manager：模拟两台机器各自的脚本表
+    $mgrA = new Manager();
+    $mgrA->register("bcast", $dir . "/gray_a.php");
+    $mgrA->loadAll();
+
+    $mgrB = new Manager();
+    $mgrB->register("bcast", $dir . "/gray_a.php");
+    $mgrB->loadAll();
+
+    $wire = new Wire();
+    $bcastA = new Broadcast($mgrA, 1, function (int $node, int $msgId, string $payload) use ($wire): void {
+        $wire->put($node, $msgId, $payload);
+    });
+    $bcastB = new Broadcast($mgrB, 2, function (int $node, int $msgId, string $payload): void {
+    });
+
+    $before = 0;
+    $sB0 = $mgrB->get("bcast");
+    if ($sB0 instanceof Script) {
+        $before = $sB0->versions();
+    }
+
+    $reqId = $bcastA->request("bcast", [2], "r1");
+    check($reqId === "r1", "request 返回调用方给的 reqId");
+    check(count($wire->ids) === 1, "广播发出 1 条");
+    check($wire->ids[0] === Broadcast::MSG_RELOAD, "消息号是 RELOAD");
+    check($wire->nodes[0] === 2, "目标是节点 2");
+
+    // 节点 2 收到并重载
+    $ack = $bcastB->onMessage(Broadcast::MSG_RELOAD, $wire->payloads[0]);
+    check($ack !== "", "节点 2 回了 ack");
+
+    $after = 0;
+    $sB1 = $mgrB->get("bcast");
+    if ($sB1 instanceof Script) {
+        $after = $sB1->versions();
+    }
+    check($after === $before + 1, "节点 2 真的重载了", "versions " . $before . " -> " . $after);
+
+    // 节点 1 收 ack
+    $bcastA->onMessage(Broadcast::MSG_ACK, $ack);
+    $rep = $bcastA->report("r1");
+    check($rep["done"] === true, "全部 ack 后 done=true");
+    check($rep["missing"] === 0, "没有缺失节点");
+    check(count($rep["acked"]) === 1, "acked 里有 1 个节点");
+
+    // 两个目标只回一个：missing 必须是 1，done 必须是 false
+    $wire2 = new Wire();
+    $bcastA2 = new Broadcast($mgrA, 1, function (int $node, int $msgId, string $payload) use ($wire2): void {
+        $wire2->put($node, $msgId, $payload);
+    });
+    $bcastA2->request("bcast", [2, 3], "r2");
+    check(count($wire2->ids) === 2, "两个目标各发 1 条");
+
+    $ack2 = $bcastB->onMessage(Broadcast::MSG_RELOAD, $wire2->payloads[0]);
+    $bcastA2->onMessage(Broadcast::MSG_ACK, $ack2);
+    $rep2 = $bcastA2->report("r2");
+    check($rep2["missing"] === 1, "3 号没回，missing=1");
+    check($rep2["done"] === false, "未全部 ack，done=false");
+
+    // 3 号回了个失败 ack：要从 missing 挪到 failedNodes，不能混成一类
+    $failAck = "r2" . chr(31) . "3" . chr(31) . "0" . chr(31) . "0";
+    $bcastA2->onMessage(Broadcast::MSG_ACK, $failAck);
+    $rep3 = $bcastA2->report("r2");
+    check($rep3["missing"] === 0, "失败也计入 settled，missing=0");
+    check(count($rep3["failedNodes"]) === 1, "failedNodes 里有 1 个节点");
+    check($rep3["done"] === true, "全部有回音，done=true（失败也是结果）");
+
+    // 坏包不能崩、不能改状态
+    $bad = $bcastA2->onMessage(Broadcast::MSG_RELOAD, "no-separator");
+    check($bad === "", "坏 RELOAD 包返回空串");
+}
+
+/**
+ * 类型化视图：脚本能读全部状态、能调能力方法，但写不进去。
+ *
+ * 这条路要成立，必须同时满足三条：
+ *   1 方法能跨边界调到（interp 里 $v->level() 走的是 AOT 编译的方法）
+ *   2 值是对的（含 intdiv 这类 AOT 语义和 PHP 不同的地方）
+ *   3 没有写入口（属性 private + 没有 setter）
+ */
+function caseView(): void
+{
+    $dir = __DIR__;
+    $mgr = new Manager();
+    $mgr->register("view", $dir . "/view.php");
+    $failed = $mgr->loadAll();
+    check(count($failed) === 0, "View：脚本加载");
+
+    $s = $mgr->get("view");
+    if ($s === null) {
+        check(false, "View：按名取到脚本");
+        return;
+    }
+
+    $p = new Player();
+    $p->level = 50;
+    $p->gold = 500;
+    $p->hp = 400;
+    $p->hpMax = 1000;
+    $p->buffs = [7 => 1];
+
+    $v = new PlayerView($p);
+
+    // 50 * 1000 + 500 + 40 + 1
+    $r = $s->call("describe", $v);
+    check($r === 50541, "View：脚本读到全部状态且值正确", "实际 " . (string) $r);
+
+    $r2 = $s->call("canJoin", $v);
+    check($r2 === "yes", "View：能力方法在 AOT 侧判定", "实际 " . (string) $r2);
+
+    $r3 = $s->call("tryWrite", $v);
+    check($r3 === "blocked", "View：脚本写属性被拦下", "实际 " . (string) $r3);
+    check($p->level === 50, "View：被拦后宿主状态没变", "level=" . (string) $p->level);
+}
+
 function main(): void
 {
     $dir = __DIR__;
@@ -463,6 +749,9 @@ function main(): void
     caseSandbox();
     caseState();
     caseScriptCall();
+    caseGray();
+    caseBroadcast();
+    caseView();
 
     echo "DONE\n";
 }
