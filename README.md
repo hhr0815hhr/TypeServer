@@ -146,12 +146,13 @@ tools/repo-guard.py  提交前检查：抓「被 .gitignore 误挡的源码」
 spike/               一次性技术验证，只保留结论文档入仓库
 ```
 
-**`demo/` 是子模块，不在框架本体里**：示例（duel 完整对局、demo-echo 最小 echo）放在
-[tsf-demo](https://github.com/hhr0815hhr/tsf-demo) 独立仓库，克隆时用
-`git clone --recurse-submodules`，已克隆的仓库补 `git submodule update --init`。
+**`demo/` 是示例集**（battle 完整对局、idle 挂机、mmo-mini、sharded-world、duel、
+demo-echo），跟着主仓库走，不单独发布。`bench/` 不同——它是 `tsf verify` 的一部分，
+属于回归。
 
-`bench/` 不能同样处理——`tsf verify` 依赖它，拆出去验证就断了。两者的区别是：
-**`bench/` 是回归的一部分，`demo/` 是可以独立演进的产品示例**。
+组织一个真实工程该怎么分目录、分几层，看
+[14-architecture.md](docs/guide/14-architecture.md)；它对照的参考实现是
+`demo/battle/`（2038 行，五个源文件 + 一份装配）。
 
 ---
 
