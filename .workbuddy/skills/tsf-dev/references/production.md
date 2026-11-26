@@ -135,3 +135,12 @@ cluster-reconnect 9416–9419、tls-guard 9420/9421、admission 9422、membershi
 - 用 `memory_get_usage` 测协程内存 → 永远是 0，得读 `/proc/self/status` 的 VmRSS
 - 不在 `Coroutine\run` 里测 → `swoole_coroutine_create` 静默失败，`tick()` 返回 0，
   一条消息都没处理，而输出看不出异常
+
+## 冷启动 36 ms（2026-11-26 实测）
+
+空 main 的 AOT 产物，跑 20 次取中位 **36 ms**（区间 34.5–39 ms）。
+含动态链接 libphp.so、模块初始化、opcache 载入、运行时建立、退出清理；
+**不含**业务初始化（配置、连库、注册集群、预热）。
+
+对滚动重启的含义：1 万个进程顺序重启也在 6 分钟量级，可以连批重启，不必精细错峰。
+但要记住业务初始化通常比这 36 ms 大一个量级——真正决定重启窗口的是"连上 redis + 注册进集群"那几步。
