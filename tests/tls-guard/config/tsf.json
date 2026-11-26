@@ -1,0 +1,4 @@
+{
+    "app": {"name": "tls-guard"},
+    "log": {"level": "info", "stdout": true}
+}

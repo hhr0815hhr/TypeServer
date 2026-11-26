@@ -1,10 +1,10 @@
 # Swoole 契约测试
 
-验证框架对 Swoole 扩展的**三条关键假设**——都是注释里写了结论、但从没被验证过的。
+验证框架对 Swoole 扩展的**四组关键假设**——都是注释里写了结论、但从没被验证过的。
 
 ```bash
 bash run.sh
-# PASS 6 项 / FAIL 0 项
+# PASS 10 项 / FAIL 0 项
 ```
 
 只跑 `php85`（验的是扩展/内核行为：缓冲、flush、shutdown），和 AOT 无关。
@@ -53,6 +53,18 @@ drain 的最后一步就是 `shutdown()`。如果它把未刷出的帧丢掉，�
 
 `send()` 之后立刻 `shutdown()`，客户端仍收到那 13 字节。所以 drain 流程是安全的
 （这也和 `demo/duel/run-drain.sh` 里"老对局拿到 RESULT"的实测一致）。
+
+### 4. `Timer::after` 和 `Timer::tick` 的回调签名不一样 ✅
+
+| 调用 | 回调收到什么 | 写错会怎样 |
+|:--|:--|:--|
+| `Timer::tick(ms, fn)` | **定时器 id**（`function (int $timerId)`） | — |
+| `Timer::after(ms, fn)` | **什么都不传** | 声明了形参 → `ArgumentCountError`，回调不执行 |
+| `Timer::after(0, fn)` | — | 返回 false + `Timer must be greater than or equal to 1`，**不触发** |
+
+框架源码里此前只出现过 `tick`。`Server::resumeLater()` 照着它给 `after` 写了 `int $timerId`，
+在 AOT 产物里每轮续处理都抛一次 `ArgumentCountError`（2026-11-25，`tests/feed-resume` 的修复过程）。
+这组的四个子模式各跑一个独立进程，其中 `after-arg` **本来就应该崩**。
 
 ## 脚手架的三条规矩（上一版就死在这）
 

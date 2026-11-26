@@ -8,4 +8,4 @@ sources:
   - /data/TypeServer/tsf/ext/codec/php-src
   - /data/TypeServer/tsf/ext/codec/cpp-src
   - /data/TypeServer/tsf/pkg/eventlog/src
-  - /data/TypeServer/bench/eventlog-test/main.php
+  - /data/TypeServer/tests/eventlog-test/main.php

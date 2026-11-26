@@ -1,0 +1,9 @@
+{
+    "app": {
+        "name": "cluster-guard"
+    },
+    "log": {
+        "level": "info",
+        "stdout": true
+    }
+}

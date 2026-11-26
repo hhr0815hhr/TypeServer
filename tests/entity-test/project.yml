@@ -9,4 +9,4 @@ sources:
   - /data/TypeServer/tsf/ext/codec/cpp-src
   - /data/TypeServer/tsf/pkg/entity/src
   - /data/TypeServer/tsf/pkg/aoi/src
-  - /data/TypeServer/bench/entity-test/main.php
+  - /data/TypeServer/tests/entity-test/main.php

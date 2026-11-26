@@ -1,5 +1,5 @@
 #!/bin/bash
-# Swoole 契约测试：验证框架对扩展的三条假设。
+# Swoole 契约测试：验证框架对扩展的四组假设。
 #
 # 上一版失败在脚手架：端口复用 + pkill -f 匹配到自己。这一版的三条规矩：
 #   1. 每个 case 用**独立端口**，绝不复用（残留进程就影响不到下一轮）
@@ -109,6 +109,35 @@ if start_srv srv-shutdown "$PORT"; then
     fi
 else
     bad "shutdown 服务没起来"
+fi
+
+echo
+echo "=== 4. Timer::after / Timer::tick 的回调签名 ==="
+# 这一组不需要端口，也不起服务端：每个子模式一个独立进程。
+# after-arg 那个**本来就应该崩**——崩了才说明"after 不传参数"这条契约成立。
+OUT=$(php85 main.php timer after-noarg 2>&1)
+if [ "$OUT" = "FIRED" ]; then ok "after 的无参回调触发"; else bad "after 无参回调没触发：$OUT"; fi
+
+OUT=$(php85 main.php timer after-arg 2>&1)
+RC=$?
+if [ "$RC" -ne 0 ] && echo "$OUT" | grep -q "ArgumentCountError"; then
+    ok "after 的回调不传参数（声明形参 → ArgumentCountError，rc=$RC）"
+else
+    bad "after 带参回调居然没报错：rc=$RC $OUT"
+fi
+
+OUT=$(php85 main.php timer after-zero 2>&1)
+if echo "$OUT" | grep -q "RET=false" && ! echo "$OUT" | grep -q ZERO_FIRED; then
+    ok "after(0) 不合法：返回 false、不触发"
+else
+    bad "after(0) 的行为变了：$OUT"
+fi
+
+OUT=$(php85 main.php timer tick-arg 2>&1)
+if echo "$OUT" | grep -q "TICKS=3" && echo "$OUT" | grep -q "TICK id=[1-9]"; then
+    ok "tick 的回调收到定时器 id（触发 3 次）"
+else
+    bad "tick 带参回调异常：$OUT"
 fi
 
 echo

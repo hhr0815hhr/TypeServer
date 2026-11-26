@@ -7,5 +7,5 @@ sources:
   - /data/TypeServer/tsf/src
   - /data/TypeServer/tsf/ext/codec/php-src
   - /data/TypeServer/tsf/ext/codec/cpp-src
-  - /data/TypeServer/bench/config-test/gen
-  - /data/TypeServer/bench/config-test/main.php
+  - /data/TypeServer/tests/config-test/gen
+  - /data/TypeServer/tests/config-test/main.php

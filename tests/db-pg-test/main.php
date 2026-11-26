@@ -54,12 +54,36 @@ final class T
     }
 }
 
-const DSN = "pgsql:host=47.98.20.226;port=5432;dbname=tsf";
-const USER = "gss";
-const PASS = "gss123";
+// 只连本机的容器（bash scripts/dev-pg.sh）。
+// 这里曾经硬编码过一个公网地址的库和账号密码——提交进了 git 历史。
+// 测试不该依赖"某个人的数据库"：它会让套件在别人机器上必红（或者更糟，连上一个真库），
+// 也让凭据进仓库。要测 PG 方言，一个空的本地容器就够。
+const DSN = "pgsql:host=127.0.0.1;port=5432;dbname=tsf";
+const USER = "tsf";
+const PASS = 'CHANGE_ME';
+
+/**
+ * 没有可用的 PostgreSQL 就 SKIP（退出码 77）。
+ * 用端口探测而不是 try/catch：AOT 下 `catch (\Throwable)` 接不住 PDO 构造抛的异常（同 mail-test）。
+ */
+function requirePg(string $host, int $port, float $timeout = 0.3): void
+{
+    $errno = 0;
+    $errstr = "";
+    $s = @stream_socket_client("tcp://" . $host . ":" . $port, $errno, $errstr, $timeout);
+    if ($s === false) {
+        echo "SKIP 需要可用的 PostgreSQL（" . $host . ":" . $port . "）" . PHP_EOL;
+        echo "     起一个：bash scripts/dev-pg.sh" . PHP_EOL;
+        exit(77);
+    }
+    if (is_resource($s)) {
+        fclose($s);
+    }
+}
 
 function main(): void
 {
+    requirePg("127.0.0.1", 5432);
     $db = new Db(DSN, USER, PASS);
 
     echo "== [1] 连接 ==" . PHP_EOL;

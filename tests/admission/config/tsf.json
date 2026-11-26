@@ -1,0 +1,29 @@
+{
+    "app": {
+        "name": "admission"
+    },
+    "log": {
+        "level": "info",
+        "stdout": true
+    },
+    "server": {
+        "heartbeat_sec": 60,
+        "rate_per_sec": 400,
+        "rate_burst": 400,
+        "peer_rate_per_sec": 20,
+        "peer_rate_burst": 20,
+        "login_timeout_sec": 2,
+        "login_fail_per_conn": 3,
+        "login_fail_per_ip": 7,
+        "login_fail_window_sec": 60,
+        "login_ban_sec": 3,
+        "auth": {
+            "require": true,
+            "secret": "adm-secret",
+            "allow_legacy": true,
+            "tokens": {
+                "tok-static": 9001
+            }
+        }
+    }
+}

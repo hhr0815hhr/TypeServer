@@ -1,2 +1,0 @@
-接真 Redis（注册表/租约/过期语义）。
-没有 Redis 时跳过；本地可用 docker run -p 6379:6379 redis 起一个再跑。

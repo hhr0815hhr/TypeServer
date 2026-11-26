@@ -1,0 +1,9 @@
+{
+    "app": {
+        "name": "feed-resume"
+    },
+    "log": {
+        "level": "info",
+        "stdout": true
+    }
+}

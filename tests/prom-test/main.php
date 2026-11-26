@@ -1,11 +1,17 @@
 <?php
 
+use TSF\Cluster\Cluster;
 use TSF\Http\App;
 use TSF\Http\IpFilter;
 use TSF\Http\MetricsRoute;
 use TSF\Http\Request;
 use TSF\Metrics\Metrics;
 use TSF\Metrics\Prometheus;
+use TSF\Rpc\Rpc;
+use TSF\Rpc\Router;
+use TSF\Service\Message;
+use TSF\Service\Scheduler;
+use TSF\Service\Service;
 
 /**
  * Prometheus 导出回归。
@@ -128,10 +134,79 @@ function main(): void
     $lan = new Request("GET", "/metrics", [], [], [], "", [], "192.168.2.94");
     T::ok($app2->router()->dispatch($lan)->status === 200, "内网来源 200");
 
-    // 10) 空指标表也不能渲染出非法内容
+    // 10) 空指标表也不能渲染出非法内容（关掉运行时指标：下面单独测它）
     Metrics::reset();
-    $empty = Prometheus::render(false);
+    $empty = Prometheus::render(false, "", false);
     T::ok($empty === "", "空表渲染为空串", "len=" . strlen($empty));
 
+    echo PHP_EOL . "== 运行时指标 ==" . PHP_EOL;
+    // 11) 框架自己的统计也要能被抓到。此前导出器只翻业务埋点：调度器处理了多少消息、
+    //     网关多少会话、集群断了多少次链路，全都只在 stats() 里，Prometheus 看不到
+    Metrics::reset();
+    Metrics::clearProviders();
+    Metrics::provide("tsf_demo", function (): array {
+        return ["handled" => 3, "max_tick_gap_us" => 7];
+    }, ["handled"]);
+    Metrics::provide("tsf_demo", function (): array {
+        return ["handled" => 5, "max_tick_gap_us" => 2];
+    }, ["handled"]);
+    $rt = Metrics::runtimeSnapshot();
+    T::ok(($rt["tsf_demo_handled"] ?? -1) === 8, "同前缀多个提供者相加（两个网关的总数）", "got=" . ($rt["tsf_demo_handled"] ?? -1));
+    $txt = Prometheus::render(false);
+    T::ok(has($txt, "# TYPE tsf_demo_handled counter\n"), "列进 counters 的按 counter 导出（可以 rate）");
+    T::ok(has($txt, "# TYPE tsf_demo_max_tick_gap_us gauge\n"), "没列的按 gauge 导出");
+    T::ok(has($txt, "tsf_demo_handled 8\n"), "值是相加之后的");
+    T::ok(has($txt, "# HELP tsf_demo_handled "), "有 HELP");
+    T::ok(countOf($txt, "# TYPE tsf_demo_handled ") === 1, "同名只声明一次（重复声明会让抓取端整批 400）");
+    T::ok(Prometheus::render(false, "", false) === "", "withRuntime=false 时不导出运行时指标");
+    Metrics::clearProviders();
+    Metrics::provide("bad prefix!", function (): array {
+        return ["x" => 1];
+    });
+    T::ok(has(Prometheus::render(false), "# TYPE bad_prefix_x gauge\n"), "前缀被规整成合法指标名");
+
+    // 12) 框架组件自己登记的
+    Metrics::clearProviders();
+    Metrics::reset();
+    $sched = Scheduler::instance();
+    $a = $sched->spawnOf(function (): RtIdle {
+        return new RtIdle();
+    });
+    $sched->deliverAs(0, $a, 1, "x");
+    $sched->tick();
+    $b = $sched->spawnOf(function (): RtIdle {
+        return new RtIdle();
+    });
+    $txt = Prometheus::render(false);
+    T::ok(has($txt, "# TYPE tsf_scheduler_handled counter\n"), "调度器：handled 是计数器");
+    T::ok(has($txt, "tsf_scheduler_handled 1\n"), "调度器：处理过的消息数对得上");
+    T::ok(has($txt, "tsf_scheduler_services 2\n"), "调度器：services 是当前服务数");
+    T::ok(has($txt, "tsf_scheduler_ids_left 16777213\n"), "调度器：还剩多少服务 id 可见（快用尽时能提前看到）");
+    T::ok(has($txt, "# TYPE tsf_scheduler_services gauge\n"), "调度器：services 是 gauge");
+    $sched->kill($a);
+    $sched->kill($b);
+
+    $cl = new Cluster(9, "/tmp/tsf_prom_rt.sock");
+    $txt = Prometheus::render(false);
+    T::ok(has($txt, "# TYPE tsf_cluster_reconnects counter\n"), "集群：重连次数是计数器");
+    T::ok(has($txt, "tsf_cluster_links 0\n"), "集群：当前链路数是 gauge");
+
+    // RPC 是推的：Router/Client 一个进程里可能有很多个实例，各自 inc 才不会漏
+    $router = new Router();
+    $msg = new Message(0, Rpc::MSG_REQ, $router->codec()->packRequest("no.such.method", ""));
+    $router->handle($msg);
+    $router->handle($msg);
+    $txt = Prometheus::render(false, "", false);
+    T::ok(has($txt, "rpc_unrouted 2\n"), "RPC：路由不到的调用被计数", substr_count($txt, "rpc_unrouted") > 0 ? "" : "缺失");
+    T::ok(has($txt, "# TYPE rpc_unrouted counter\n"), "RPC：按 counter 导出");
+
     echo PHP_EOL . "结果: " . T::$pass . " 通过 / " . T::$fail . " 失败" . PHP_EOL;
+}
+
+/** 什么都不做的服务 */
+final class RtIdle extends Service
+{
+    public function onMessage(Message $m): void
+    {
+    }
 }

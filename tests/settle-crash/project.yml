@@ -9,4 +9,4 @@ sources:
   - /data/TypeServer/tsf/ext/codec/cpp-src
   - /data/TypeServer/tsf/pkg/eventlog/src
   - /data/TypeServer/demo/duel/src
-  - /data/TypeServer/bench/settle-crash/main.php
+  - /data/TypeServer/tests/settle-crash/main.php

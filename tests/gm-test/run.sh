@@ -5,6 +5,15 @@ cd "$(dirname "$0")" || exit 1
 BIN=./gm_test
 TOKEN=s3cr3t-token-for-test
 PORT=19703
+ROOT=$(cd ../.. && pwd)
+
+# 必须每次都编译：这个套件曾经不编译，直接跑目录里的旧产物（2026-11-16 编的），
+# 于是十天里每次"全量通过"它验证的都是旧代码
+if ! php85 "$ROOT/tsf/bin/tsf" build . > /tmp/gm_test_build.log 2>&1; then
+    echo "FAIL 编译（日志 /tmp/gm_test_build.log）"
+    tail -5 /tmp/gm_test_build.log
+    exit 1
+fi
 
 pkill -9 -x gm_test 2>/dev/null
 $BIN > /tmp/gm_unit.log 2>&1

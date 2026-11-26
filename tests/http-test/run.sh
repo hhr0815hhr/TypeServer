@@ -70,9 +70,14 @@ echo "$BODY" | grep -q '"name":"alice"' && ok "路径参数 /hello/alice" || bad
 CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 "$B/nope")
 [ "$CODE" = "404" ] && ok "未知路径 404" || bad "未知路径" "得到 $CODE"
 
-# ---- 3. 同路径不同方法（当前实现返回 404，未做 405；记在 ROADMAP 里）----
-CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 -X DELETE "$B/hello/alice")
-[ "$CODE" = "404" ] && ok "同路径不同方法 404（405 未实现）" || bad "同路径不同方法" "得到 $CODE"
+# ---- 3. 同路径不同方法 → 405 + Allow（此前一律 404，客户端分不清"方法错了"和"接口不存在"）----
+R=$(curl -s -D - -o /dev/null --max-time 3 -X DELETE "$B/hello/alice")
+CODE=$(echo "$R" | head -1 | tr -d '\r' | awk '{print $2}')
+[ "$CODE" = "405" ] && ok "同路径不同方法 405" || bad "同路径不同方法" "得到 $CODE"
+echo "$R" | tr -d '\r' | grep -qi '^Allow: .*GET' && echo "$R" | tr -d '\r' | grep -qi '^Allow: .*POST' \
+    && ok "405 带 Allow: GET, POST" || bad "405 的 Allow 头" "$(echo "$R" | tr -d '\r' | grep -i '^allow')"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 -X DELETE "$B/nope")
+[ "$CODE" = "404" ] && ok "路径不存在的方法仍然是 404（不误报 405）" || bad "不存在的路径" "得到 $CODE"
 
 # ---- 4. CORS 预检 ----
 HEADERS=$(curl -s -D - -o /dev/null --max-time 3 -X OPTIONS "$B/hello/alice" \

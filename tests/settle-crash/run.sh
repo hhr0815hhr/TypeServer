@@ -12,6 +12,20 @@ DIR=/tmp/settle_crash
 PASS=0
 FAIL=0
 
+ROOT=$(cd ../.. && pwd)
+
+# 必须每次都编译：这个套件曾经不编译，直接跑目录里的旧产物（2026-11-16 编的），
+# 于是十天里每次"全量通过"它验证的都是旧代码
+if ! php85 "$ROOT/tsf/bin/tsf" build . > /tmp/settle_crash_build.log 2>&1; then
+    echo "FAIL 编译（日志 /tmp/settle_crash_build.log）"
+    tail -5 /tmp/settle_crash_build.log
+    exit 1
+fi
+if [ ! -x "$BIN" ]; then
+    echo "FAIL 没找到产物 $BIN"
+    exit 1
+fi
+
 check() {   # check <说明> <verify 输出行>
   local label="$1" line="$2"
   local events balance net gaps dup torn

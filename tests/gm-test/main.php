@@ -318,6 +318,118 @@ function runServe(int $seconds): void
     }
 }
 
+/** http() 认死了主端口；这一节用的是另一个端口上的独立实例 */
+function httpOn(int $port, Scheduler $s, string $body, array $headers): array
+{
+    $raw = "POST /gm HTTP/1.1\r\nHost: 127.0.0.1\r\n";
+    foreach ($headers as $k => $v) {
+        $raw .= $k . ": " . $v . "\r\n";
+    }
+    $raw .= "Content-Length: " . strlen($body) . "\r\nConnection: close\r\n\r\n" . $body;
+    $sock = @stream_socket_client("tcp://127.0.0.1:" . $port, $errno, $errstr, 1.0);
+    if ($sock === false) {
+        return [0, "connect failed: " . $errstr];
+    }
+    @fwrite($sock, $raw);
+    stream_set_blocking($sock, false);
+    $buf = "";
+    $deadline = Scheduler::nowMs() + 500;
+    while (Scheduler::nowMs() < $deadline) {
+        $s->tick();
+        $chunk = @fread($sock, 8192);
+        if ($chunk !== false && $chunk !== "") {
+            $buf .= $chunk;
+            continue;
+        }
+        if (feof($sock)) {
+            break;
+        }
+        usleep(300);
+    }
+    @fclose($sock);
+    $status = 0;
+    if (preg_match('/^HTTP\/1\.1 (\d+)/', $buf, $m) === 1) {
+        $status = (int) $m[1];
+    }
+    return [$status, ""];
+}
+
+/**
+ * 一人一个 token。此前 GM 通道只有一个共享 token，审计里的操作人靠请求头自报——
+ * 想赖就能赖，也没法只让某一个人失效。
+ */
+function caseOperators(): void
+{
+    echo "== [5b] 一人一个 token ==" . PHP_EOL;
+    Registry::clear();
+    Registry::on("op.ping", function (array $args): Result {
+        return Result::ok("{}");
+    });
+    $port = 19704;
+    $tokA = "tok-a-0123456789abcdef";
+    $tokB = "tok-b-0123456789abcdef";
+    $req = "{\"cmd\":\"op.ping\"}";
+
+    // 1) 共享 token 为空、又没有任何操作人 token：仍然拒绝启动
+    $srv = new Server("127.0.0.1", $port, "", 2);
+    $caught = "";
+    try {
+        $srv->onStart();
+    } catch (\RuntimeException $e) {
+        $caught = $e->getMessage();
+    }
+    T::ok($caught !== "", "没有共享 token 也没有操作人 token：拒绝启动");
+
+    // 2) 配了操作人 token 就能起，而且不需要共享 token
+    Scheduler::reset();
+    @unlink(LOG_FILE);
+    Logger::init("gm-test", LOG_FILE, Logger::DEBUG, false);
+    $s = Scheduler::instance();
+    // 先配好 token 再起：spawn 的时候会调 onStart，空 token 会在那里直接抛
+    $gm = new Server("127.0.0.1", $port, "", 2);
+    $gm->setOperators(["zhangsan" => $tokA, "lisi" => $tokB]);
+    $s->spawnOf(function () use ($gm): Server {
+        return $gm;
+    });
+    T::ok($gm->stats()["shared_token"] === 0, "没有共享 token");
+
+    [$st] = httpOn($port, $s, $req, ["X-GM-Token" => $tokA, "X-GM-Operator" => "lisi"]);
+    T::eq($st, 200, "zhangsan 的 token 能用");
+    T::has(logText(), "\"op\":\"zhangsan\"", "审计里的操作人来自 token");
+    T::ok(strpos(logText(), "\"op\":\"lisi\"") === false, "请求头自报的身份**不能**覆盖 token 的身份");
+
+    @unlink(LOG_FILE);
+    Logger::init("gm-test", LOG_FILE, Logger::DEBUG, false);
+    [$st] = httpOn($port, $s, $req, ["X-GM-Token" => $tokB]);
+    T::eq($st, 200, "lisi 的 token 能用");
+    T::has(logText(), "\"op\":\"lisi\"", "记的是 lisi");
+
+    [$st] = httpOn($port, $s, $req, ["X-GM-Token" => "tok-a-0123456789abcdee"]);
+    T::eq($st, 401, "token 差一个字符 401");
+
+    // 3) 摘掉一个人的 token
+    $n = $gm->removeOperator("lisi");
+    T::eq($n, 1, "摘掉了 lisi 的 token");
+    [$st] = httpOn($port, $s, $req, ["X-GM-Token" => $tokB]);
+    T::eq($st, 401, "lisi 的 token 立刻失效");
+    [$st] = httpOn($port, $s, $req, ["X-GM-Token" => $tokA]);
+    T::eq($st, 200, "zhangsan 不受影响");
+    T::eq(count($gm->operators()), 1, "只剩一个操作人");
+    T::eq($gm->stats()["operators"], 1, "stats 里能看到操作人 token 数");
+
+    // 4) 共享 token 和操作人 token 并存
+    $gm->setSharedToken("shared-0123456789abcdef");
+    @unlink(LOG_FILE);
+    Logger::init("gm-test", LOG_FILE, Logger::DEBUG, false);
+    [$st] = httpOn($port, $s, $req, ["X-GM-Token" => "shared-0123456789abcdef", "X-GM-Operator" => "wangwu"]);
+    T::eq($st, 200, "共享 token 仍然能用");
+    T::has(logText(), "\"op\":\"wangwu\"", "共享 token 的操作人仍按请求头记");
+    @unlink(LOG_FILE);
+    Logger::init("gm-test", LOG_FILE, Logger::DEBUG, false);
+    [$st] = httpOn($port, $s, $req, ["X-GM-Token" => $tokA, "X-GM-Operator" => "wangwu"]);
+    T::has(logText(), "\"op\":\"zhangsan\"", "并存的规则不变：操作人 token 的身份优先");
+}
+
 function main(): void
 {
     $args = $_SERVER["argv"] ?? [];
@@ -333,6 +445,7 @@ function main(): void
     caseDispatch($s);
     caseBadBody($s);
     caseAudit();
+    caseOperators();
 
     $r = $s->serviceOf($addr);
     if ($r instanceof Server) {

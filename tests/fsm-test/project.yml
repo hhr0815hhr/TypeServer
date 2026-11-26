@@ -8,4 +8,4 @@ sources:
   - /data/TypeServer/tsf/ext/codec/php-src
   - /data/TypeServer/tsf/ext/codec/cpp-src
   - /data/TypeServer/tsf/pkg/fsm/src
-  - /data/TypeServer/bench/fsm-test/main.php
+  - /data/TypeServer/tests/fsm-test/main.php

@@ -10,6 +10,7 @@
  *   php85 main.php cli-slow <port> <holdSec>
  *   php85 main.php srv-shutdown <port>
  *   php85 main.php cli-shutdown <port>
+ *   php85 main.php timer <after-noarg|after-arg|after-zero|tick-arg>
  *
  * 只跑 php85（验的是扩展/内核行为：缓冲、flush、shutdown），和 AOT 无关。
  */
@@ -161,6 +162,61 @@ function modeCliShutdown(array $argv): void
         . " final=" . (strpos($buf, "final") !== false ? "yes" : "no") . PHP_EOL;
 }
 
+/**
+ * 定时器回调契约（4 个子模式，各自独立进程跑——其中一个本来就该崩）：
+ *   timer-after-noarg   `Timer::after` 的无参回调能触发
+ *   timer-after-arg     `Timer::after` 的回调**收不到参数**：声明了形参会 ArgumentCountError
+ *   timer-after-zero    `Timer::after(0, ...)` 不合法：返回 false、定时器不触发
+ *   timer-tick-arg      `Timer::tick` 的回调**会收到**定时器 id
+ *
+ * 为什么要有这组：`Server::resumeLater()` 照着 `Timer::tick` 的写法给 `after` 的回调
+ * 声明了 `int $timerId`，又在 AOT 产物里实际踩了一次 `ArgumentCountError`
+ * （tests/feed-resume 的修复过程，2026-11-25）。`after` 和 `tick` 的回调签名不一样，
+ * 而框架源码里此前只出现过 `tick`——没有断言，下一个人还会照着写错。
+ */
+function modeTimer(array $argv): void
+{
+    $sub = (string) $argv[2];
+    if ($sub === "after-noarg") {
+        \Swoole\Timer::after(5, function (): void {
+            echo "FIRED\n";
+        });
+        \Swoole\Event::wait();
+        return;
+    }
+    if ($sub === "after-arg") {
+        \Swoole\Timer::after(5, function (int $timerId): void {
+            echo "FIRED timerId=$timerId\n";
+        });
+        \Swoole\Event::wait();
+        return;
+    }
+    if ($sub === "after-zero") {
+        $ret = @\Swoole\Timer::after(0, function (): void {
+            echo "ZERO_FIRED\n";
+        });
+        $last = error_get_last();
+        echo "RET=" . var_export($ret, true)
+            . " ERR=" . ($last === null ? "none" : $last["message"]) . PHP_EOL;
+        return;
+    }
+    if ($sub === "tick-arg") {
+        $n = 0;
+        \Swoole\Timer::tick(5, function (int $timerId) use (&$n): void {
+            $n++;
+            echo "TICK id=$timerId\n";
+            if ($n >= 3) {
+                \Swoole\Timer::clear($timerId);
+                \Swoole\Event::exit();
+            }
+        });
+        \Swoole\Event::wait();
+        echo "TICKS=$n\n";
+        return;
+    }
+    echo "unknown timer sub-mode: $sub\n";
+}
+
 function main(): void
 {
     $argv = $_SERVER["argv"];
@@ -171,6 +227,7 @@ function main(): void
     if ($mode === "cli-slow") { modeCliSlow($argv); return; }
     if ($mode === "srv-shutdown") { modeSrvShutdown($argv); return; }
     if ($mode === "cli-shutdown") { modeCliShutdown($argv); return; }
+    if ($mode === "timer") { modeTimer($argv); return; }
     echo "usage: main.php <mode> ..." . PHP_EOL;
 }
 

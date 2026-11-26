@@ -10,6 +10,9 @@
 #
 # 认证插件用 mysql_native_password：MySQL 8 默认 caching_sha2_password 在部分
 # 客户端/驱动组合下握手失败，测试没必要踩这个坑。
+#
+# 端口只绑 127.0.0.1：这是一个弱口令（CHANGE_ME）的测试库，不该出现在局域网上。
+# 早先写的是 `-p 52315:3306`（即 0.0.0.0），2026-11-25 改掉；用 reset 重建一次才生效。
 set -u
 
 NAME=tsf-mysql
@@ -39,14 +42,18 @@ else
     docker run -d --name "$NAME" \
         -e MYSQL_ROOT_PASSWORD="$PASS" \
         -e MYSQL_DATABASE="$DB" \
-        -p "$PORT:3306" \
+        -p "127.0.0.1:$PORT:3306" \
         mysql:8.0 --default-authentication-plugin=mysql_native_password >/dev/null \
         && echo "已创建 $NAME（首次初始化约 60s）"
 fi
 
 printf '等待就绪'
 for _ in $(seq 1 90); do
-    if docker exec "$NAME" mysqladmin ping -uroot -p"$PASS" --silent >/dev/null 2>&1; then
+    # 必须走 TCP（-h127.0.0.1）：首次初始化时镜像会先起一个 skip-networking 的临时实例，
+    # 随后重启成正式实例。默认的 ping 走 unix socket，在临时实例上就能通——
+    # 于是脚本宣布"就绪"、测试冲进去连库，正撞上重启（实测：Error while reading greeting packet）。
+    # 临时实例不监听 TCP，TCP 能连上才说明正式实例起来了。
+    if docker exec "$NAME" mysqladmin ping -h127.0.0.1 -uroot -p"$PASS" --silent >/dev/null 2>&1; then
         echo " —— 就绪（127.0.0.1:$PORT，库 $DB）"
         exit 0
     fi
