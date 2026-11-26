@@ -81,3 +81,30 @@ cluster-reconnect 9416–9419、tls-guard 9420/9421、admission 9422、membershi
    （实测 1000 ms），之前以为是它的问题，其实是产物没重编。
 7. **Python 改文件别写 `open(p, 'wb').write(表达式)`**：参数求值抛异常时文件已被截断。先把字节算出来再 open。
    Windows 版 python 的 `/tmp` 和 Git Bash 的 `/tmp` 也不是同一个目录。
+
+## 内存涨了怎么查（2026-11-26 补）
+
+按顺序，别跳：
+
+1. **先确认是不是"分配器保留"**。PHP 的 `zend_mm` 不把 chunk 还给 OS，所以
+   `memory_get_usage` 不降不等于泄漏。判据是**反复做同一件事，增量是否单调**——
+   跑 5 轮建/销毁，后两轮增量为 0 就是收敛；一直涨才是泄漏。
+2. **定位到服务**：`setMemGuard(4, 128, "log")` + `memByService()`。
+   抓得到"一条消息吃 20 MB"和"长期只涨不降"，抓不到"每次 1 KB 慢慢涨"。
+3. **怀疑定时器时看 `stats()["timer_wheel_items"]`**。这一项和 `timers` 的区别是：
+   `timers` 数有效定时器，`timer_wheel_items` 数时间轮里**所有**对象（含已取消待丢的）。
+   `timers=0` 而 `timer_wheel_items` 一直涨 = 死对象没被清。
+4. **v0.14.1 之前的版本有这个 bug**：`tick()` 用 `timers->size() > 0` 判断要不要调 `due()`，
+   服务批量销毁后 `size()` 归零，`due()` 停摆，时间轮里的 cancelled 对象永远留着。
+   现象是不报错、不崩溃、`timers` 显示 0，只有内存涨。
+
+### 排查方法（比任何结论都值钱）
+
+- **加对照组二分**：想确认"增长来自 A 还是 B"，就造一个"除了 A 以外全一样"的对照组。
+  `bench/lifecycle` 里 `Ticker` / `TickerNoTimer` 就是这么用的。
+- **分段归因**：在 spawn 后 / kill 后 / tick 后各测一次，看内存在哪一步涨。
+  某一阶段**恰好是 0** 往往就是最有力的线索。
+- **加自省，别继续读代码推断**。这次我改了一轮 `TimerHeap` 的 key 重排（那个确实也是问题，
+  但不是主因），白改的原因就是"读代码觉得应该是它"。给 `Timers` 加一行 `debugSizes()` 之后
+   一眼看到 `wheelItems 每轮 +2000`，五分钟定位。
+- **`gc_collect_cycles()` 排除成环垃圾**：回收 0 个 = 对象还被引用着，不是 GC 时机问题。
