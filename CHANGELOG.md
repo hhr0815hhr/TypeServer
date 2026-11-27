@@ -6,6 +6,15 @@
 
 ### 新增
 
+- **分布式锁 `TSF\Redis\Lock`**。`acquire / release / extend / owner`。释放与续期
+  都用 Lua **先比较 token 再操作**——`GET` 再 `DEL` 的两步之间锁可能已经过期被别人拿到，
+  那个 `DEL` 就删了别人的锁。不提供"等锁"：同步客户端上等待等于阻塞 worker
+  （一次 redis 调用就是一次 RTT），重试交给调用方的定时器。
+  顺带修了 `Client` 的一个接口缺陷：`cmd()` 刻意不收 `bool`，而 `rawCommand` 对 `SET`
+  返回 `true`，被吞成 `null`——"成功"和"连不上"没法区分（锁的第一版就死在这里，
+  加上了锁但 `acquire` 永远返回空 token）。新增 `cmdBool()`。
+  `tests/lock-test` 21 项（含"别人的 token 释放不了""过期者 release 返回 false
+  且没误删别人的锁"），缺 Redis 时 SKIP。
 - **分层骨架补上脚本层**。`tsf new --layout=layered --packages=script` 现在会生成
   `scripts/`（含 `levelup.php` 规则示例与 README）、`src/App/RuleService.php`（宿主：
   加载、调用、重载）和 `src/Domain/PlayerView.php`（只读视图），并在启动时自检一次，

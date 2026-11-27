@@ -1,0 +1,4 @@
+{
+    "name": "lock-test",
+    "packages": ["redis"]
+}
