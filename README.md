@@ -133,7 +133,8 @@ PASS  http           HTTP 接口（路由/中间件/鉴权/限流）            
 tsf/                 框架本体
   src/               15 个核心模块：Transport/Gateway/Protocol/Service/Rpc/Cluster/
                      Discovery/Shard/Breaker/Metrics/Gm/Config/Kernel/Timer/Proto
-  pkg/               9 个可选包：fsm entity frameloop room aoi match db snapshot eventlog script
+  pkg/               16 个可选包：db redis mail schedule room match fsm aoi
+                     entity snapshot frameloop eventlog script http handoff registry
   ext/codec/         原生帧编解码（C++，可关）
   tools/             config 导出、proto 生成（不进 AOT）
 bench/               功能断言与基准（tsf verify 依赖它，属于框架本体）
