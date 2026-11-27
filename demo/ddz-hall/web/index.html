@@ -264,6 +264,7 @@ const S = {
   counts: [0, 0, 0],
   phase: 0,       // 0 等人 1 等准备 2 叫分 3 出牌 4 结算
   turn: -1,
+  highestBid: 0,
   landlord: -1,
   owner: 0,
   level: 1,
@@ -425,7 +426,8 @@ function handle(msgId, body) {
   if (msgId === PUSH_BID) {
     const d = JSON.parse(body || "{}");
     S.turn = d.seat ?? -1;
-    logLine("轮到 " + (S.turn + 1) + " 号位叫分（当前最高 " + (d.highest || 0) + "）");
+    S.highestBid = d.highest || 0;
+    logLine("轮到 " + (S.turn + 1) + " 号位叫分（当前最高 " + S.highestBid + "）");
     renderRoom();
     return;
   }
@@ -574,9 +576,10 @@ function renderActions() {
       add("开始", "primary", () => send(START_REQ, ""), !allReady);
     }
   } else if (S.phase === 2 && myTurn) {
+    // 不叫永远可以点；叫分必须高于当前最高，低的直接禁用（点下去也只会收到报错）
     add("不叫", "", () => send(BID_REQ, JSON.stringify({ score: 0 })));
     for (const s of [1, 2, 3]) {
-      add(s + " 分", s === 3 ? "primary" : "", () => send(BID_REQ, JSON.stringify({ score: s })));
+      add(s + " 分", s === 3 ? "primary" : "", () => send(BID_REQ, JSON.stringify({ score: s })), s <= S.highestBid);
     }
   } else if (S.phase === 3 && myTurn) {
     add("出牌", "primary", doPlay, S.selected.size === 0);

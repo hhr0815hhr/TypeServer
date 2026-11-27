@@ -296,12 +296,16 @@ final class RoomService extends Service
         if ($seat < 0 || $this->phase !== self::P_BIDDING) {
             return;
         }
+
+        // bid() 返回"阶段是否结束"，false 有两种含义：叫分被拒，或叫成功但还没结束。
+        // 靠"轮次有没有推进"区分：被拒时状态完全不动，成功时会轮到下家。
+        $before = $this->game->bidTurn();
         $ended = $this->game->bid($seat, $t->score);
-        if (!$ended && $this->game->isBidding() && $this->game->bidTurn() !== $seat) {
-            // 没结束但轮次没推进，说明这次叫分被拒（低于当前最高分）
-            $this->gw->send($t->fd, Cmd::ERR_RESP, "叫分必须高于当前最高分");
+        if (!$ended && $this->game->isBidding() && $this->game->bidTurn() === $before) {
+            $this->gw->send($t->fd, Cmd::ERR_RESP, "叫分必须高于当前最高分（当前 " . $this->game->highestBid() . "）");
             return;
         }
+
         $this->gw->send($t->fd, Cmd::BID_RESP, (string) json_encode(["ok" => true, "bids" => $this->game->bids()]));
 
         if (!$ended) {
@@ -471,6 +475,16 @@ final class RoomService extends Service
             count($this->game->handOf(1)),
             count($this->game->handOf(2)),
         ];
+        // 叫分阶段也要给出"轮到谁"。之前这里只有 PLAYING 才给 currentTurn，
+        // 其余一律 -1 —— 而 deal() 是先 pushBid() 再 pushState()，
+        // 于是正确的叫分轮次被这条覆盖成 -1，前端永远不显示叫分按钮。
+        $turn = -1;
+        if ($this->phase === self::P_PLAYING) {
+            $turn = $this->game->currentTurn();
+        } elseif ($this->phase === self::P_BIDDING) {
+            $turn = $this->game->bidTurn();
+        }
+
         $json = json_encode([
             "event" => "state",
             "roomId" => $this->roomId,
@@ -481,7 +495,7 @@ final class RoomService extends Service
             "offline" => $this->offline,
             "counts" => $counts,
             "phase" => $this->phase,
-            "turn" => $this->phase === self::P_PLAYING ? $this->game->currentTurn() : -1,
+            "turn" => $turn,
             "landlord" => $this->game->landlord(),
             "multiplier" => $this->game->multiplier(),
         ]);

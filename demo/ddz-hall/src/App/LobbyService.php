@@ -123,10 +123,24 @@ final class LobbyService extends Service
             $this->err($t->fd, "房卡档位不存在");
             return;
         }
-        if (isset($this->uidRoom[$t->uid]) && $this->uidRoom[$t->uid] > 0) {
-            $this->err($t->fd, "你已经在房间里了");
-            return;
+        // 已经在别的房间：自动退掉再建。
+        //
+        // 早先是直接报"你已经在房间里了"，但断线重连的场景里，服务端还留着
+        // 30 秒的座位，用户这时点建房会撞上一条他已经看不见的旧房间，
+        // 而且没有任何操作能自己解开（前端没有"离开"按钮可用，因为页面重开过）。
+        $cur = $this->uidRoom[$t->uid] ?? 0;
+        if ($cur > 0 && isset($this->roomAddr[$cur])) {
+            $leave = new RoomTask();
+            $leave->op = RoomTask::OP_LEAVE;
+            $leave->uid = $t->uid;
+            $leave->fd = $t->fd;
+            Scheduler::instance()->deliverAs($this->addr(), $this->roomAddr[$cur], Cmd::SVC_ROOM, $leave);
+            if (isset($this->rooms[$cur]) && $this->rooms[$cur]->seated > 0) {
+                $this->rooms[$cur]->seated--;
+            }
         }
+        unset($this->uidRoom[$t->uid]);
+
         $left = $this->cards[$t->uid] ?? self::INIT_CARDS;
         if ($left < $price) {
             $this->err($t->fd, "房卡不足（需要 " . $price . " 张，你有 " . $left . " 张）");
