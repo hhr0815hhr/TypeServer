@@ -40,8 +40,18 @@ fi
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 ARCH="$(uname -m)"
 
-# 版本号：优先环境变量，其次 composer.json，最后 dev
+# 版本号 = **编译器自己的版本**，不是框架版本。
+#
+# 以前取 composer.json 的 version（那个文件没有），于是退化成 dev；
+# 发布时又借用了框架的 tag（v0.7.0），结果 release 页面上"v0.7.0"既是框架
+# 0.7.0 的源码、又是工具链资产，而框架早已 0.17.0 —— 看页面的人会以为
+# 最新版就是 0.7。现在直接问编译器，并建议独立的 tag 名。
+PHP_BIN="${PHP_BIN:-php}"
 VER="${TYPEPHP_VER:-}"
+if [ -z "$VER" ] && [ -f "$SRC/bin/tpc.php" ]; then
+    VER="$("$PHP_BIN" "$SRC/bin/tpc.php" --version 2>/dev/null \
+        | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -1 | tr -d 'v' || true)"
+fi
 if [ -z "$VER" ] && [ -f "$SRC/composer.json" ]; then
     VER="$(grep -oE '"[0-9]+\.[0-9]+\.[0-9]+"' "$SRC/composer.json" 2>/dev/null | head -1 | tr -d '"' || true)"
 fi
@@ -98,6 +108,11 @@ tar -czf "$TARBALL" -C "$WORK" "$NAME"
 SIZE="$(du -h "$TARBALL" | cut -f1)"
 echo
 echo "产物: $TARBALL  ($SIZE)"
+echo
+echo "发布（tag 用独立命名空间，不要占用框架的 vX.Y.Z）："
+echo "  gh release create toolchain-$VER \"$TARBALL\" \\"
+echo "     --title \"工具链 typephp $VER（不是框架版本）\" \\"
+echo "     --notes \"typephp 编译器 + phpx，配套 tsf 任意 vX.Y.Z 版本使用。\""
 echo
 echo "安装：解压后设两个环境变量"
 echo "  export TPC=<解压目录>/$NAME/typephp/bin/tpc.php"

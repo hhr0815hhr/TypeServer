@@ -1,5 +1,7 @@
 # TSF — TypePHP Server Framework
 
+[![CI](https://github.com/hhr0815hhr/TypeServer/actions/workflows/ci.yml/badge.svg)](https://github.com/hhr0815hhr/TypeServer/actions/workflows/ci.yml)
+
 用 TypePHP（AOT 编译）+ PHP 写游戏服务器，替代「C++ + Lua」。
 
 **当前版本 v0.8.0**（跟随 tsf v0.11.0）：分布式链路、账本检查点、状态迁移热更、可观测三件套（指标/崩溃取证/链路追踪）已就位。
@@ -29,7 +31,7 @@ composer require hhr0815hhr/tsf
 > 本仓库通过 git submodule 引用它。这样 `composer require` 只装框架本身，
 > 不会把 bench、tests、docs 一起拖下来。
 
-**第 2 步：工具链（约 42MB，解压 168MB）**
+**第 2 步：工具链（42MB，解压 172MB）**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/hhr0815hhr/TypeServer/main/scripts/install-toolchain.sh | bash
@@ -46,9 +48,12 @@ export TSF_PHP=php85
 **为什么是两步**：tsf 不是纯 PHP 框架 —— 它调用 typephp 编译器（`tpc`）把 PHP 编译成 C++。
 Composer 只能装 PHP 代码，装不了编译器本体和 C++ 后端（clang），所以工具链单独发。
 
-> 工具链还没正式发布。在那之前，可以自己打一个：
-> `scripts/package-toolchain.sh`（产物 42MB），然后用
-> `TSF_TOOLCHAIN_URL=file:///path/to/pkg.tar.gz bash scripts/install-toolchain.sh` 装。
+> 工具链的版本是**编译器的**（当前 typephp 0.9.6），与框架版本无关，发布在独立 tag
+> `toolchain-0.9.6` 下。同一份工具链配任意框架版本都行——编译器只在 PHP / swoole 的
+> ABI 变化时才需要动。以前它借用框架的 `v0.7.0` tag，release 页面看起来像"框架最新是 0.7"。
+>
+> 离线 / 内网 / tag 还没就绪时，可以自己打一个：`scripts/package-toolchain.sh`
+> （产物 42MB），再用 `TSF_TOOLCHAIN_URL=file:///path/to/pkg.tar.gz bash scripts/install-toolchain.sh` 装。
 
 ---
 

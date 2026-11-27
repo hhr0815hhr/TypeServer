@@ -80,6 +80,54 @@ php85 tsf/bin/tsf verify              # 全量；或者 php85 tsf/bin/tsf verify
 - **扩大依赖面的改动**（引入第三方库、新扩展）。运行期零依赖是刻意保持的。
 - **把调试 / 便利性开关做成默认开启**。安全相关的默认值必须安全，方便是次要的。
 
+## 发布
+
+**两套 tag，不要混**：
+
+| tag | 内容 | 版本号说的是什么 |
+|:--|:--|:--|
+| `vX.Y.Z` | 框架源码（composer 包 `hhr0815hhr/tsf`） | 框架版本，与 `composer.json` 的 `version` 一致 |
+| `toolchain-X.Y.Z` | 工具链二进制（tpc + libphpx） | **typephp 编译器版本**（当前 0.9.6） |
+
+为什么要分开：工具链只在 PHP / swoole 的 ABI 变化时才需要重发，同一份可以配多个框架版本。
+以前它借用框架的 `v0.7.0` tag，结果 release 页面上"最新是 0.7.0"，而框架已经 0.17——
+看到的人会以为该装 0.7。
+
+### 框架
+
+1. 改 `tsf/composer.json` 的 `version`
+2. 重算 `composer.lock` 的 content-hash（hash 覆盖 version 字段）：
+   在临时目录 `composer update --lock`，把结果回填
+3. `git tag -a vX.Y.Z -m "..."` 并推 main + tag
+4. 根仓库：测试 + 子模块指针一个提交，文档/许可证一个提交
+
+### 工具链
+
+```bash
+PHP_BIN=php85 bash scripts/package-toolchain.sh
+# 产物：dist/tsf-toolchain-linux-x86_64-<编译器版本>.tar.gz
+
+# **必须带 -R**：gh 按当前目录推断仓库，根仓库是 TypeServer，
+# 在那里执行会把 release 建到错误的仓库上（踩过一次）
+gh release create toolchain-0.9.6 dist/tsf-toolchain-linux-x86_64-0.9.6.tar.gz \
+  --title "工具链 typephp 0.9.6（不是框架版本）" \
+  --notes-file dist/notes.md \
+  -R hhr0815hhr/tsf
+```
+
+然后改 `scripts/install-toolchain.sh` 的默认 tag（`TSF_TOOLCHAIN_TAG`）。
+
+旧 `v0.7.0` release **不要删**（可能有人已在引用），把说明改成"这是工具链，
+不是框架版本"。注意 **gh 2.4 没有 `release edit` 子命令**，用 API：
+
+```bash
+gh api -X PATCH repos/hhr0815hhr/tsf/releases/<release-id> \
+  -F body=@dist/old-release-notes.md
+```
+
+（`releases/tags/<tag>` 在 gh 2.4 上会 404，用 id 才稳；id 从
+`gh api repos/hhr0815hhr/tsf/releases --jq '.[] | [.id,.tag_name] | @tsv'` 取。）
+
 ## 许可证
 
 提 PR 即表示你同意自己的贡献以 [MIT 许可证](LICENSE)授权。

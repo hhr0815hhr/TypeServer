@@ -33,7 +33,7 @@ composer require hhr0815hhr/tsf
 > **前提**：PHP 8.5 ZTS。8.4 及以下会被 composer 拒绝，NTS 版能装上但链接期会报一堆
 > 和代码无关的错误。先确认：`php -v`。
 
-### 第 2 步：工具链（约 42 MB，解压 168 MB）
+### 第 2 步：工具链（约 42 MB，解压 172 MB）
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/hhr0815hhr/TypeServer/main/scripts/install-toolchain.sh | bash
