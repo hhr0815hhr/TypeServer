@@ -91,6 +91,22 @@ $p = Pattern::analyze([
 ]);
 check($p !== null && $p->type === Pattern::PLANE_ONE && $p->length === 2, "飞机带两单");
 
+// 飞机带单：翅膀必须是单张，不能拿对子凑数
+$p = Pattern::analyze([
+    c(3, 0), c(3, 1), c(3, 2),
+    c(4, 0), c(4, 1), c(4, 2),
+    c(9, 0), c(9, 1),
+]);
+check($p === null, "333444+99 不是飞机带单（翅膀是对子）");
+
+// 飞机带一对：t=2 需要两对
+$p = Pattern::analyze([
+    c(3, 0), c(3, 1), c(3, 2),
+    c(4, 0), c(4, 1), c(4, 2),
+    c(9, 0), c(9, 1), c(10, 0), c(10, 1),
+]);
+check($p !== null && $p->type === Pattern::PLANE_PAIR && $p->length === 2, "飞机带两对");
+
 // ---------- 炸弹 / 王炸 ----------
 $p = Pattern::analyze([c(6, 0), c(6, 1), c(6, 2), c(6, 3)]);
 check($p !== null && $p->type === Pattern::BOMB && $p->mainRank === 6, "炸弹 6666");

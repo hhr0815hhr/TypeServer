@@ -24,4 +24,7 @@ final class LobbyTask
 
     /** @var int[] 出牌请求里的牌 id（op=5 时用） */
     public array $cards = [];
+
+    /** 叫分（op=7 时用），0 表示不叫 */
+    public int $score = 0;
 }

@@ -36,7 +36,8 @@ mt_srand(12345);
 $deck = Card::shuffle(Card::deck());
 
 $g = new Doudizhu();
-$g->start(0, $deck);
+$g->start($deck);
+$g->bid(0, 3);
 
 check(count($g->handOf(0)) === 20, "地主 20 张", "实际 " . count($g->handOf(0)));
 check(count($g->handOf(1)) === 17, "农民 17 张", "实际 " . count($g->handOf(1)));
@@ -75,7 +76,8 @@ check($g->toBeat() === null, "两家都过 → 清空待压牌型");
 // ---------- 压牌 ----------
 // 地主再出一张更大的，1 号位用更大的单张压
 $g2 = new Doudizhu();
-$g2->start(0, $deck);
+$g2->start($deck);
+$g2->bid(0, 3);
 // 直接构造：地主出 3（如果有），1 号位出更大的
 $cards0 = $g2->handOf(0);
 $lowest = $cards0[0];
@@ -98,7 +100,8 @@ if ($bigger >= 0) {
 
 // 出小牌压不了大牌
 $g3 = new Doudizhu();
-$g3->start(0, $deck);
+$g3->start($deck);
+$g3->bid(0, 3);
 $h0 = Card::sort($g3->handOf(0));
 $maxCard = $h0[count($h0) - 1];
 check($g3->play(0, [$maxCard]), "出最大的一张");
@@ -110,7 +113,8 @@ if (Card::rank($minCard) < Card::rank($maxCard)) {
 
 // ---------- 不合法牌型 ----------
 $g4 = new Doudizhu();
-$g4->start(0, $deck);
+$g4->start($deck);
+$g4->bid(0, 3);
 // 两张不同点数的牌不是对子
 $h = $g4->handOf(0);
 $diff = -1;
@@ -129,9 +133,10 @@ check(!$g4->play(0, [Card::JOKER_BIG, Card::JOKER_SMALL]) || true, "手上没有
 
 // ---------- 结算 ----------
 $g5 = new Doudizhu();
-$g5->start(0, $deck);
+$g5->start($deck);
+$g5->bid(0, 3);
 check(!$g5->isOver(), "开局未结束");
-check($g5->multiplier() === 1, "无炸弹时倍数 1");
+check($g5->multiplier() === 3, "叫 3 分、无炸弹时倍数 3");
 
 // 手动打完：把地主手牌一张张出掉（每轮先过两家）
 $guard = 0;
@@ -153,6 +158,40 @@ check($g5->isOver(), "有限步内能打完", "用了 " . $guard . " 步");
 $w = $g5->winnerSeat();
 check($w >= 0 && $w < 3, "有合法赢家", "座位 " . $w);
 check(count($g5->handOf($w)) === 0, "赢家手牌为空");
+
+// ---------- 叫分 ----------
+$g6 = new Doudizhu();
+$g6->start($deck);
+check($g6->isBidding(), "开局进入叫分阶段");
+check(count($g6->handOf(0)) === 17, "叫分前每人 17 张（底牌未发）");
+check($g6->bidTurn() === 0, "从 0 号位开始叫");
+
+check(!$g6->bid(0, 0), "0 分算不叫，继续");
+check($g6->bidTurn() === 1, "轮到 1 号位");
+check(!$g6->bid(1, 1), "1 分，继续");
+check($g6->bidTurn() === 2, "轮到 2 号位");
+check($g6->bid(2, 2), "2 分，三家叫完 → 结束");
+check($g6->landlord() === 2, "叫分最高的人当地主");
+check(count($g6->handOf(2)) === 20, "地主拿到底牌");
+check($g6->highestBid() === 2, "最高叫分 2");
+check($g6->multiplier() === 2, "倍数 = 叫分 2");
+
+// 三家都不叫 → 流局
+$g7 = new Doudizhu();
+$g7->start($deck);
+$g7->bid(0, 0);
+$g7->bid(1, 0);
+$ended = $g7->bid(2, 0);
+check($ended && $g7->isDraw(), "三家都不叫 → 流局");
+check($g7->landlord() < 0, "流局没有地主");
+
+// 叫分不能低于当前最高
+$g8 = new Doudizhu();
+$g8->start($deck);
+$g8->bid(0, 2);
+check(!$g8->bid(1, 1), "不能叫比当前最高更低的分");
+check($g8->bid(1, 3), "可以叫 3 分（叫 3 立即结束）");
+check($g8->landlord() === 1, "叫 3 分的人当地主");
 
 if ($failed === 0) {
     echo "  PASS  " . $passed . " 项" . PHP_EOL;

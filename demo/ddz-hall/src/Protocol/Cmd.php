@@ -23,6 +23,14 @@ final class Cmd
 
     public const PASS_REQ = 1011;
 
+    public const READY_REQ = 1013;
+
+    public const START_REQ = 1015;
+
+    public const BID_REQ = 1017;
+
+    public const AGAIN_REQ = 1019;
+
     // ---- 服务端 → 客户端（应答）----
     public const LIST_RESP = 1002;
 
@@ -34,14 +42,28 @@ final class Cmd
 
     public const PLAY_RESP = 1010;
 
-    // ---- 服务端 → 客户端（推送）----
-    public const PUSH_STATE = 1020;
+    public const READY_RESP = 1014;
 
-    public const PUSH_DEAL = 1021;
+    public const START_RESP = 1016;
 
-    public const PUSH_PLAY = 1022;
+    public const BID_RESP = 1018;
 
-    public const PUSH_OVER = 1023;
+    public const AGAIN_RESP = 1020;
+
+    // ---- 服务端 → 客户端（推送）。放 11xx，跟请求/应答的 10xx 分开 ----
+    public const PUSH_STATE = 1100;
+
+    public const PUSH_DEAL = 1101;
+
+    public const PUSH_PLAY = 1102;
+
+    public const PUSH_OVER = 1103;
+
+    /** 轮到谁叫分 */
+    public const PUSH_BID = 1104;
+
+    /** 叫分结束：谁当地主、底牌是什么 */
+    public const PUSH_BID_RESULT = 1105;
 
     // ---- 内部消息 ----
     public const SVC_LOBBY = 2001;

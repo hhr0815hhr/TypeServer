@@ -156,16 +156,18 @@ final class Pattern
             return self::of(self::PLANE, $c3[$t - 1], $t);
         }
 
-        // 飞机带单：t 组连续三张 + t 张单牌
-        if ($t >= 2 && $n === $t * 4 && self::consecutive($c3)) {
-            $rest = $n - $t * 3;
-            if ($rest === $t) {
-                return self::of(self::PLANE_ONE, $c3[$t - 1], $t);
-            }
+        // 飞机带单：t 组连续三张 + t 张**单牌**。
+        //
+        // 必须要求 c1 恰好有 t 个：只数"剩余张数够不够"会误判——333444 + 55
+        // 总牌数 8、t=2、剩余 2 张，数量上凑得出"两个单张"，但 55 是对子，
+        // 按规则不能拆成翅膀。这个误判会让"飞机带对"被当成"飞机带单"打出去
+        // （大小一样但牌型不同，后续比对全乱）。
+        if ($t >= 2 && $n === $t * 4 && count($c1) === $t && self::consecutive($c3)) {
+            return self::of(self::PLANE_ONE, $c3[$t - 1], $t);
         }
 
         // 飞机带对：t 组连续三张 + t 个对子
-        if ($t >= 2 && $n === $t * 5 && count($c2) === $t && self::consecutive($c3)) {
+        if ($t >= 2 && $n === $t * 5 && count($c2) === $t && count($c1) === 0 && self::consecutive($c3)) {
             return self::of(self::PLANE_PAIR, $c3[$t - 1], $t);
         }
 

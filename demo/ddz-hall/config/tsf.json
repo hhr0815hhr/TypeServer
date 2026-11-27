@@ -16,7 +16,7 @@
     "server": {
         "host": "0.0.0.0",
         "port": 9061,
-        "transport": "tcp",
+        "transport": "ws",
         "worker_num": 1,
         "max_conn": 200,
         "nodelay": true,

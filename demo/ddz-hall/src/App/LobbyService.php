@@ -79,6 +79,17 @@ final class LobbyService extends Service
             $this->relay($t, RoomTask::OP_PLAY);
         } elseif ($t->op === 6) {
             $this->relay($t, RoomTask::OP_PASS);
+        } elseif ($t->op === 7) {
+            $this->relay($t, RoomTask::OP_READY);
+        } elseif ($t->op === 8) {
+            $this->relay($t, RoomTask::OP_START);
+        } elseif ($t->op === 9) {
+            $this->relay($t, RoomTask::OP_BID);
+        } elseif ($t->op === 10) {
+            $this->relay($t, RoomTask::OP_AGAIN);
+        } elseif ($t->op === 11) {
+            // 断线：只转给房间，不清 uidRoom —— 座位要留着重连用
+            $this->relay($t, RoomTask::OP_DISCONNECT);
         }
     }
 
@@ -101,6 +112,7 @@ final class LobbyService extends Service
         $task->uid = $t->uid;
         $task->fd = $t->fd;
         $task->cards = $t->cards;
+        $task->score = $t->score;
         Scheduler::instance()->deliverAs($this->addr(), $this->roomAddr[$roomId], Cmd::SVC_ROOM, $task);
     }
 
@@ -125,8 +137,9 @@ final class LobbyService extends Service
         $roomId = $this->nextRoomId++;
         $gw = $this->gw;
         $lobbyAddr = $this->addr();
-        $addr = Scheduler::instance()->spawnOf(function () use ($gw, $roomId, $lobbyAddr): Service {
-            return new RoomService($gw, $roomId, $lobbyAddr);
+        $level = $t->level;
+        $addr = Scheduler::instance()->spawnOf(function () use ($gw, $roomId, $lobbyAddr, $level): Service {
+            return new RoomService($gw, $roomId, $lobbyAddr, $level);
         });
 
         $info = new RoomInfo();
@@ -160,8 +173,18 @@ final class LobbyService extends Service
             $this->err($t->fd, "房间不存在或已结束");
             return;
         }
-        if (isset($this->uidRoom[$t->uid]) && $this->uidRoom[$t->uid] > 0) {
-            $this->err($t->fd, "你已经在房间 " . $this->uidRoom[$t->uid] . " 里了");
+        // 已在房间里：如果就是这一间，当重连处理（转发即可，不重复计数）
+        $cur = $this->uidRoom[$t->uid] ?? 0;
+        if ($cur > 0) {
+            if ($cur === $roomId) {
+                $task = new RoomTask();
+                $task->op = RoomTask::OP_JOIN;
+                $task->uid = $t->uid;
+                $task->fd = $t->fd;
+                Scheduler::instance()->deliverAs($this->addr(), $this->roomAddr[$roomId], Cmd::SVC_ROOM, $task);
+                return;
+            }
+            $this->err($t->fd, "你已经在房间 " . $cur . " 里了");
             return;
         }
         $task = new RoomTask();

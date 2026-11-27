@@ -59,6 +59,12 @@ function main(): void
         return new LobbyService($gw);
     });
     registerHandlers($gw, $lobby);
+
+    // 断线：转给大厅，由它转给玩家所在的房间（座位保留 30 秒等重连）
+    $gw->onDisconnect(function (int $fd, int $uid) use ($lobby): void {
+        postLobby($lobby, 11, $fd, $uid, 0, 1, []);
+    });
+
     $gw->boot();
 
     Logger::info("ddz-hall ready", [
@@ -151,6 +157,33 @@ function registerHandlers(Gateway $gw, int $lobby): void
     $gw->on(Cmd::PASS_REQ, function (int $fd, int $uid, string|array|object $body) use ($lobby): void {
         postLobby($lobby, 6, $fd, $uid, 0, 1, []);
     });
+
+    // 准备
+    $gw->on(Cmd::READY_REQ, function (int $fd, int $uid, string|array|object $body) use ($lobby): void {
+        postLobby($lobby, 7, $fd, $uid, 0, 1, []);
+    });
+
+    // 房主开始
+    $gw->on(Cmd::START_REQ, function (int $fd, int $uid, string|array|object $body) use ($lobby): void {
+        postLobby($lobby, 8, $fd, $uid, 0, 1, []);
+    });
+
+    // 叫分：{"score": 0..3}
+    $gw->on(Cmd::BID_REQ, function (int $fd, int $uid, string|array|object $body) use ($lobby): void {
+        $score = 0;
+        if (is_string($body)) {
+            $d = json_decode($body, true);
+            if (is_array($d) && isset($d["score"])) {
+                $score = (int) $d["score"];
+            }
+        }
+        postLobby($lobby, 9, $fd, $uid, 0, 1, [], $score);
+    });
+
+    // 再来一局（房主）
+    $gw->on(Cmd::AGAIN_REQ, function (int $fd, int $uid, string|array|object $body) use ($lobby): void {
+        postLobby($lobby, 10, $fd, $uid, 0, 1, []);
+    });
 }
 
 /**
@@ -161,7 +194,7 @@ function registerHandlers(Gateway $gw, int $lobby): void
  *
  * @param int[] $cards
  */
-function postLobby(int $lobby, int $op, int $fd, int $uid, int $roomId, int $level, array $cards): void
+function postLobby(int $lobby, int $op, int $fd, int $uid, int $roomId, int $level, array $cards, int $score = 0): void
 {
     $t = new LobbyTask();
     $t->op = $op;
@@ -170,5 +203,6 @@ function postLobby(int $lobby, int $op, int $fd, int $uid, int $roomId, int $lev
     $t->roomId = $roomId;
     $t->level = $level;
     $t->cards = $cards;
+    $t->score = $score;
     Scheduler::instance()->deliverAs(0, $lobby, Cmd::SVC_LOBBY, $t);
 }
