@@ -28,7 +28,7 @@
 # 它必须入库：`tsf test` 靠它判断"这个用例依赖外部服务，别在自动集合里跑"，
 # 理由也写在文件里 —— 藏在 CI 配置里的跳过理由没人会看第二眼。
 !skip-auto
-# PHP 扩展的 configure 配方（ext/interp）
+# PHP 扩展的 configure 配方（历史上给 ext/interp 用，现留在 tsf 子模块；规则保留给以后可能进根仓库的扩展）
 !*.m4
 !*.md
 !*.sh
@@ -86,6 +86,7 @@ implementation-kit/lib/**
 # ---- 运行期数据 ----
 demo/*/var/**
 bench/*/var/**
+tests/*/var/**
 bench/*/build/**
 
 # wasm 验收 fixture 的构建产物（源码在版本控制里，产物现编）
@@ -106,23 +107,8 @@ tests/*/project.yml
 tests/*/*_test
 dist/
 
-# phpize 生成的构建文件（ext/interp）
-ext/interp/build/
-ext/interp/configure
-ext/interp/config.h*
-ext/interp/Makefile*
-ext/interp/*.lo
-ext/interp/*.la
-ext/interp/.libs/
-ext/interp/modules/
-ext/interp/autom4te.cache/
-ext/interp/run-tests.php
-ext/interp/ltmain.sh
-ext/interp/missing
-ext/interp/install-sh
-ext/interp/config.guess
-ext/interp/config.sub
-
+# phpize 生成的构建文件。interp 的源码自 2026-11-27 起在 tsf 子模块里（tsf/ext/interp），
+# 构建产物的忽略规则见 tsf/.gitignore；这里不再需要。
 # project.yml 由 `tsf build` 从 project.json 生成，不是源文件。
 # bench/ 下有几个历史遗留的已被跟踪，这里只挡新生成的产物。
 /demo/*/project.yml
