@@ -4,7 +4,65 @@
 
 ## 未发布
 
-（暂无。上一个版本是 v1.0.0-rc.1。）
+（暂无。上一个版本是 v1.0.0-rc.3。）
+
+---
+
+## v1.0.0-rc.3（2026-11-27）
+
+**CI 第一次在 GitHub 的托管 runner 上跑，67 个套件红了 9 个。** 这不是坏消息——
+每个红都是一个本地复现不了的真问题，而且顺着它们又挖出两个**红着也是绿的**套件。
+
+### 修复（框架）
+
+- **cron 的「单值带步长」**：`0/5 * * * * *` 应是"从第 0 秒到第 59 秒每 5 秒一次"，v0.12.0
+  合并 Cron 实现时丢了，变成"每分钟的第 0 秒"。**v0.12.0 — v1.0.0-rc.2 受影响。**
+  红了四天没人看见：`schedule-test` 的 run.sh 数的是 `  PASS  `，用例打的是 `  OK   `。
+
+### 回归套件自身的修复
+
+| 套件 | 问题 | 修法 |
+|:--|:--|:--|
+| `schedule` | run.sh 的计数模式与输出对不上，`passed=0 failed=0`、退出码 0 | 模式改成同时认 `PASS`/`OK`；另加两条 `next()` 断言钉住 `0/5` |
+| `eventlog` | 本机一直是红的：`tmpPath()` 只删日志不删高水位侧车，第二次跑序号就从 31 开始；FAIL 的计数模式多一个空格 | 侧车一起删；模式修正 |
+| `settle` / `watch` / `semantics` | tsf 的路径写死 `/data/TypeServer` | `ROOT=$(cd ../.. && pwd)` |
+| `proto` / `config` | 路径写死，且输出都过了 `\| head` / `\| tail`，命令全失败退出码也是 0——CI 上"通过"了 | 路径跟着仓库走；每步检查；FAIL 计数 |
+| `mail` | migrations 目录写死绝对路径 | `TSF_ROOT`（`run-svc-test.sh` 导出） |
+| `redis` / `lock` | CI 的 PHP 没装 phpredis | `ci-setup.sh` 装 phpredis 6.3.0 |
+| `config-check` | CI 的 PHP 没编 zip | `--enable-zip`；缺 ZipArchive 时 SKIP |
+| `clock` | 全量里偶发 4/5：落点换算压在整秒上，向下截断时差 1 毫秒就落进前一秒（`02:59:59`） | 取整到最近的秒。变异检查：经 run.sh 跑 25 次红 4 次，修后 60 次 0 红 |
+| `shard-router` | 全量里红过一次：`过期节点不发 sent=1`。过期判断用墙钟，WSL2 的墙钟会被反复校正（journal 里每 30 秒一条 `Clock change detected`，还有往回走的），睡 1.6 秒期间往回拨超过 0.6 秒节点就"还活着" | 睡满后没过期就再等，上限 4.5 秒。单独重跑 8 次本来就不红 |
+| `coroutine` | 只打一行 `判定: OK/FAIL`，run.sh 却去数 PASS/FAIL 行——恒为 `passed=0 failed=0`，**判定是 FAIL 时退出码也是 0** | 看判定行 |
+| `rpc` | 全量里红过一次：`setLegacyTtl(1)` 之后要立刻断言"此时被标记"，1 毫秒的预算被一次调度抖动吃掉就过期 | 有效期 200ms；过期改成轮询到消失（上限 2 秒） |
+| `script` | 全量里红过一次：`标记为 timeout`。**这是框架侧的判定问题**——`interp_invoke` 用 `time(NULL)` 相减判断"是不是超时"，墙钟在那 1 秒里往回拨就判不出来 | 改用进程 CPU 时间（`clock()`，与 `zend_set_timeout` 的 `ITIMER_PROF` 同口径，留 5% 容差）。改了 `ext/interp`，各机器要重编 |
+| `gm` | 全量里红过一次：`超大 body 413 → got=0`，没复现（进程内连发 300 次新旧代码都是 413）。按真实网络下的时序修：413 之后服务端直接 close，接收缓冲区里还有没读的 body 时内核发的是 RST，对端读不到响应 | 框架侧：`Gm\Server` 回完 413 先 `shutdown(SHUT_WR)`，把对端声明的 `Content-Length` 读完再 close |
+| `watch` | 原地修改 `main.php`，跑完不还原 | trap 还原 |
+
+- **25 个 run.sh 的 FAIL 计数模式**从 `  FAIL  `（两个空格）改成 `  FAIL `：29 个用例打的是
+  一个空格，之前的模式对它们永远数出 0。
+- **`tsf verify` 不再只认退出码**：输出里有行首 `FAIL`、或 `passed=N failed=M` 且 M>0、
+  或 `passed=0 failed=0`（一项都没执行），都判失败——汇总行里给出失败的断言行，
+  全文写到 `/tmp/tsf-verify-fail/<套件>.log`，CI 上传。
+- **`tsf lint` 新增一条**：注册的脚本和 `tests/` 下不能写死 `/data/TypeServer`、`/home/hhr`。
+- `scripts/check-hints.sh`、`scripts/ci-preflight.sh`（补 phpredis / zip / openpyxl 三项检查）同步。
+
+### 还没解决的
+
+- `settle-crash` 在 CI 上 `PASS 12 / FAIL 2`，本地 14/14。失败的是哪两轮要等下一次 CI 的
+  失败明细（verify 现在会把断言行打出来）。
+
+---
+
+## v1.0.0-rc.2（2026-11-27）
+
+发布 rc.1 几分钟后发的修复版，框架代码不变：
+
+- **修复 `tsf lint` 在单独安装的包里必然判红**。lint 的注册表三条规则只在 TypeServer
+  仓库里有意义；tsf 包被单独克隆或 `composer` 装出来时上一级没有 `tests/`，每个套件都被报成
+  "注册了不存在的脚本"。现在检测到这种情况就跳过这三条。
+  **tsf 仓库的 CI 第一次在 GitHub 上跑，第一个 job 就红在这里**——本地 tsf 是子模块，
+  上一级有 `tests/`，复现不了。变异检查：在 TypeServer 里把 `noBuild` 的跳过改成恒假，
+  三条规则照常判红。
 
 ---
 

@@ -39,17 +39,29 @@ bash scripts/ci-setup.sh            # 幂等安装，已装的步骤跳过
 bash scripts/ci-setup.sh --check    # 只检查，缺什么列什么，退出码 1
 ```
 
-它装四样东西，顺序固定：
+它装六样东西，顺序固定：
 
 1. **PHP 8.5.12 ZTS + `--enable-embed=shared`** —— 产出 `libphp.so`，AOT 产物要链它。
    同时把 `pdo_mysql` / `pdo_pgsql` / `pdo_sqlite` 直接编进核心，省掉本地那套
-   "单独补 pdo_pgsql.so、还得在完整源码树里 phpize" 的折腾。
+   "单独补 pdo_pgsql.so、还得在完整源码树里 phpize" 的折腾；`--enable-zip`
+   （`config-check` 套件用它手搓 xlsx，composer 装包也离不开）。
 2. **swoole 6.2.5，`--enable-swoole-thread`** —— 要求 PHP 是 ZTS。
-3. **typephp 工具链**（`scripts/install-toolchain.sh`，tag `toolchain-0.9.6`）——
+3. **phpredis 6.3.0** —— `pkg/redis` 直接 `new \Redis()`；缺了 `redis-test` / `lock-test` 必红。
+4. **typephp 工具链**（`scripts/install-toolchain.sh`，tag `toolchain-0.9.6`）——
    tpc 编译器 + `libphpx.so`。**版本号是编译器的，不是框架的**，两者解耦。
-4. **`ext/interp`** —— 脚本热更的运行时，`script-test` / `rule-hot` 都靠它。源码在 `tsf/ext/interp`。
+5. **`ext/interp`** —— 脚本热更的运行时，`script-test` / `rule-hot` 都靠它。源码在 `tsf/ext/interp`。
+6. **openpyxl** —— `config-test` 第 4、5 步要改 xlsx。
 
-`--check` 模式在本地 WSL 上应该全绿（环境一样）。
+`--check` 模式在本地 WSL 上应该全绿（环境一样）。六样各有探测，
+探测的是**能不能用**（`class_exists`、`php -m`、版本号比对），不是"文件在不在"。
+
+### 第一次在 GitHub 上跑的结果（2026-11-27）
+
+环境一次装成（约 25 分钟，全部六步都过），`verify` 跑了全部 67 个套件、0 跳过。
+9 个红的全是**本地复现不了**的问题：写死的仓库路径（CI 的检出目录不是 `/data/TypeServer`）、
+环境里缺 phpredis / zip / openpyxl，以及两个只在慢机器上才露头的套件。
+顺着它们还挖出两个"红着也是绿的"套件（`schedule`、`eventlog`，见 CHANGELOG 的 v1.0.0-rc.3）。
+教训与 §60.1 是同一条：**回归的可信度取决于它在多少种环境里跑过**。
 
 ### 两个不能改的路径
 
