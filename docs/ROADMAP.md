@@ -51,7 +51,11 @@
       六个此前只有 `skip-auto`、从未执行过的套件（共 153 项）现在跑在 docker 起的服务上；
       `scripts/dev-redis.sh` / `dev-mysql.sh` / `dev-pg.sh`，缺服务时 exit 77。
 - [x] **文档漂移** —— README 曾写"19 个套件 / 671 项断言"，已对齐。
-- [ ] **CI** —— `verify` 只能手动触发，PR 上没有门禁。需要一台能跑 docker 的自托管 runner。
+- [x] **CI** —— 已完成（2026-11-27）。**全部跑在 GitHub 托管 runner 上，不再需要自托管机器**。
+      `scripts/ci-setup.sh` 幂等装环境（PHP 8.5 ZTS + swoole + 工具链 + interp），
+      装好的约 600MB 打成 tar 走 `actions/cache`；数据库用 runner 自带的 docker 起，
+      六个需真库的套件不再 SKIP。见 `docs/CI-RUNNER.md`。
+      **tsf 仓库**另有一份包完整性 CI（lint / php -l / composer validate / 模板生成，3 分钟）。
 - [ ] **token 作废跨进程生效** —— 把作废水位放到共享存储（`pkg/redis`），或通过 GM 广播到每个进程。
 - [ ] **节点号重复检测** —— 两个进程配成同一个节点号，注册表不拦；地址会指向错的进程。
 - [ ] **心跳时间戳依赖各机时钟** —— `lastSeen` 用墙钟；跨机房时钟偏差大会误判节点死亡。
@@ -82,9 +86,8 @@
       测试自己的字符串替换写错（`+ 100` vs `"gold", 100`）。
       顺带确认了一个设计：CORS 要注册两次（`use` 管预检、`after` 管正常响应）。
 
-- [ ] **`ext/interp` 进 CI**
-      扩展编译没进流水线，clone 下来要手动 `phpize85`。
-      估算 半天。
+- [x] **`ext/interp` 进 CI** —— 已完成（2026-11-27）。`ci-setup.sh` 里 `phpize + make`，
+      产物在 `ext/interp/modules/interp.so`，套件用 `PHP_INI_SCAN_DIR` 直接指它。
 
 ## P2 运维能力（有真实流量前做）
 

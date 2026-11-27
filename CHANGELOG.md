@@ -2,6 +2,61 @@
 
 ---
 
+## 未发布
+
+### 新增
+
+- **分层骨架补上脚本层**。`tsf new --layout=layered --packages=script` 现在会生成
+  `scripts/`（含 `levelup.php` 规则示例与 README）、`src/App/RuleService.php`（宿主：
+  加载、调用、重载）和 `src/Domain/PlayerView.php`（只读视图），并在启动时自检一次，
+  日志里输出 `rule self-check ok`。此前分层骨架只到 Protocol/Domain/App，
+  脚本层没有落点，用户只能自己拼。
+- **`demo/rule-hot`**：脚本规则热更的完整例子。AOT 结算 + 脚本掉落判定 + 脚本活动副作用
+  + 灰度 30% 分流 + GM 重载/回滚 + 进程内成本对照（`bench.php`）。已注册为
+  `tsf verify rule-hot`（约 6 秒，缺 `ext/interp` 时 SKIP）。
+- **跨节点广播装配示例**（`demo/rule-hot/run-cluster.sh`）。两个独立进程用 `Cluster`
+  互连，验证三件事：只 `reload` 本机时另一个节点仍是旧规则（154 vs 230）；
+  广播后两边一致（229 = 229）；ack 以版本号前进为准。这是 `ROADMAP-NO-GAP.md`
+  里 P0-2 剩下的最后一项（`Broadcast` 接 `Cluster` 的可跑接线），已注册为
+  `tsf verify rule-hot-cluster`（约 3.4 秒）。
+
+- **脚本错误带位置**。`interp_invoke` 的异常返回新增 `file` / `line` / `trace`
+  （`getTraceAsString()` 原文）。此前只有 `class` + `message`，2000 行的脚本报一句
+  `business failed` 只能人肉翻。**需要重编 `ext/interp`**（`make` 即可，ABI 未变）。
+- **脚本单测入口**。`php85 tests/script/run.php`：不编译 AOT、不起服务。
+  原理是 `src/Domain/` 不依赖 TSF，原生 PHP 可直接当 stub 视图，脚本由
+  `interp.so` 加载（与线上同一份运行时）。骨架（`--packages=script`）与
+  `demo/rule-hot` 各带一份，`rule-hot` 里 7 项断言含「脚本与 AOT 逐字节一致」。
+
+### 变更
+
+- **CI 改为全托管 runner**，不再需要自托管机器。`verify` 从
+  `runs-on: [self-hosted, tsf]` + `if: workflow_dispatch` 改为 `ubuntu-24.04`，
+  push / PR 都跑。新增 `scripts/ci-setup.sh`（幂等装 PHP 8.5 ZTS + swoole +
+  typephp 工具链 + `ext/interp`，`--check` 只检查不装），装好的约 600MB 打成 tar
+  走 `actions/cache`。六个需要真库的套件改用 runner 自带的 docker 起服务，不再 SKIP。
+  见 `docs/CI-RUNNER.md`。
+- **工具链改用独立 tag `toolchain-<typephp版本>`**，不再借用框架的 `vX.Y.Z`。
+  以前 `v0.7.0` 既是框架 0.7.0 的源码、又是工具链资产，而框架已经 0.17——
+  看 release 页面的人会以为最新版是 0.7。现在资产发布在 `toolchain-0.9.6` 下，
+  版本号说的是编译器（typephp），与框架版本解耦。
+  `install-toolchain.sh` 默认 tag 同步切换（旧 `TSF_TOOLCHAIN_VERSION` 保留兼容，
+  新增 `TSF_TOOLCHAIN_DRY_RUN=1` 只打印解析结果），非 Linux 平台明确拒绝而不是
+  拼出一个 mingw 的包名；`package-toolchain.sh` 直接问 `tpc --version` 取版本，
+  并打印现成的 `gh release create` 命令。发布约定写进 `CONTRIBUTING.md`。
+- **tsf 仓库补上自己的 CI**（`tsf/.github/workflows/ci.yml`）：lint、全量 `php -l`、
+  `composer validate`、三种模板（flat / layered / layered+script）生成后逐文件语法检查、
+  占位符残留检查。约 3 分钟，不需要工具链。根仓库那份负责全量回归（套件在 `tests/`），
+  两份各管一段，互不引用。
+
+### 说明
+
+- 脚本层只在启用 `script` 包时生成。没这个包却铺出去会 `use` 到不存在的命名空间，
+  编译直接失败——比"少一层目录"难查得多。
+- 骨架 README 里的"脚本层"章节同样是条件生成的，避免让人去找不存在的 `scripts/`。
+
+---
+
 ## v0.17.0（2026-11-26）
 
 `tsf new --layout=layered`：生成分层骨架，而不是一个单文件。

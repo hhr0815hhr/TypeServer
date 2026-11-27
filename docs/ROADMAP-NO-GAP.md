@@ -132,9 +132,12 @@ $ctx = new Context($player, ["uid", "level", "gold"], ["gold"]);
 2. **lint 规则 6/7/8**（见第四节）。规则 7（`scripts/` 只能 `use TSF\Script\*`）
    是唯一能把"脚本不许直接抓 Service"从约定变成门禁的手段。
 
-3. **`Broadcast` 接 `Cluster` 的装配示例**。协议层已实现并测试，但"收到的包怎么从
-   `Cluster::poll()` 喂给 `Broadcast::onMessage()`、ack 怎么发回去"只有文档描述，
-   没有可跑的 demo。这条要在 `demo/duel` 或新 demo 里落一次，否则接线方式仍靠读源码。
+3. ~~**`Broadcast` 接 `Cluster` 的装配示例**~~ ✅ **已完成（2026-11-27）**。
+   落在 `demo/rule-hot/`：`ClusterPump`（每 10ms `poll()` → 分发 → `flush()`）+
+   `RaidService::enableCluster()`（把发送端闭包注入 `Broadcast`，pkg 仍零依赖）。
+   两个**独立进程**互连，实测三段：before 两边都 163 件；只 `reload` 本机 →
+   node1 230 / node2 **154**；广播后 229 = 229。
+   注册为 `tsf verify rule-hot-cluster`（3.4 秒，缺 interp 时 SKIP）。
 
 **验收标准**：
 
@@ -263,7 +266,7 @@ $ctx = new Context($player, ["uid", "level", "gold"], ["gold"]);
 |--:|:--|--:|:--|
 | 1 | **P0-3 脚本性能标定** ✅ | 1 天 | **已完成 2026-11-26**：`bench/script-cost` 四组数字进文档，替换"10–50×" |
 | 2 | **P0-1 时间预算** ✅ | 1–2 天 | **已完成 2026-11-26**：`slice-test` 17 项全绿，慢服务不再拖累快服务 |
-| 3 | P0-2 视图 + 灰度 + 广播 | 3–5 天 | **主体完成 2026-11-26**（`script-test` 90 项）；剩 timeout 快路径与 Cluster 装配示例 |
+| 3 | P0-2 视图 + 灰度 + 广播 | 3–5 天 | **完成 2026-11-27**：`script-test` 90 项 + `demo/rule-hot` 端到端（含跨节点广播）；剩 timeout 快路径（要改 C，优先级低） |
 | 4 | **lint 规则 6/7** ✅ | 1 天 | **已完成 2026-11-26**：`tsf lint <工程目录>` 生效，反例 3 条全命中、无参数行为不变 |
 | 5 | **P1-1 内存归因** ✅ | 2–3 天 | **已完成 2026-11-26**：`mem-attr-test` 18 项，变异检查确认告警只报一次 |
 | 6 | P1-2 边界带 | 3–5 天 | 只在做大世界时做 |
