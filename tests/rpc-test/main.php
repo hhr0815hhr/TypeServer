@@ -681,7 +681,10 @@ function caseVersion(): void
     if (!($c4 instanceof Client)) {
         throw new \RuntimeException("client 没起来");
     }
-    $c4->setLegacyTtl(1);              // 1ms 后就可以重新试探
+    // 标记的有效期给 200ms，而不是 1ms：要在标记生效期间断言 `isLegacy`，1ms 的预算在
+    // 一次调度抖动（drain 多跑几圈、机器被别的进程抢走 1ms）下就已经过期。
+    // 2026-11-27 全量回归里这条红过一次（单独重跑总是绿）。
+    $c4->setLegacyTtl(200);
 
     $got4 = "";
     $c4->call($up, "echo", "z", function (?string $r, string $e) use (&$got4): void {
@@ -692,7 +695,11 @@ function caseVersion(): void
     T::eq($got4, "new:z", "首次靠降级成功");
     T::ok($c4->isLegacy($node), "此时被标记为旧二进制");
 
-    usleep(3000);                       // 越过 TTL
+    // 等它过期：轮询到标记消失为止，上限 2 秒。行为是「标记会自动失效」，不是「正好 200ms 后失效」。
+    $wait0 = hrtime(true);
+    while ($c4->isLegacy($node) && (hrtime(true) - $wait0) / 1e6 < 2000) {
+        usleep(20000);
+    }
     T::ok(!$c4->isLegacy($node), "标记过期后自动失效");
 
     $got5 = "";

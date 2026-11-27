@@ -25,8 +25,8 @@ fi
 RESULT=$(./timer_test 2>&1)
 echo "$RESULT"
 
-PASS=$(echo "$RESULT" | grep -c '^  PASS  ')
-FAIL=$(echo "$RESULT" | grep -c '^  FAIL  ')
+PASS=$(echo "$RESULT" | grep -cE '^  (PASS|OK)  ')
+FAIL=$(echo "$RESULT" | grep -c '^  FAIL ')
 
 echo
 echo "passed=$PASS failed=$FAIL"

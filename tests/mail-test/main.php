@@ -73,7 +73,13 @@ function main(): void
     $db->exec("DROP TABLE IF EXISTS schema_migrations");
 
     echo "== [1] 迁移 ==" . PHP_EOL;
-    $mig = new Migrator($db, "/data/TypeServer/tsf/pkg/mail/migrations");
+    // 迁移目录跟着仓库走：run-svc-test.sh 导出 TSF_ROOT。此前写死 /data/TypeServer，
+    // 换一个检出路径（比如 CI runner 的 /home/runner/work/...）就找不到目录。
+    $tsfRoot = getenv("TSF_ROOT");
+    if ($tsfRoot === false || $tsfRoot === "") {
+        throw new \RuntimeException("mail-test 需要 TSF_ROOT（tsf 目录的绝对路径）；用 bash scripts/run-svc-test.sh mail-test mysql 来跑");
+    }
+    $mig = new Migrator($db, $tsfRoot . "/pkg/mail/migrations");
     $res = $mig->up();
     T::eq((string) count($res["executed"] ?? []), "1", "建表迁移执行了 1 条");
     if (count($res["failed"] ?? []) > 0) {

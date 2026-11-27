@@ -26,7 +26,7 @@ echo "$RESULT"
 # 口径要跟着输出走：这个套件打的是 "  OK  " 而不是 "  PASS  "，
 # 只数 PASS 会让 passed 永远是 0，输出看起来像"一项都没跑"
 PASS=$(echo "$RESULT" | grep -cE '^  (PASS|OK)  ')
-FAIL=$(echo "$RESULT" | grep -c '^  FAIL  ')
+FAIL=$(echo "$RESULT" | grep -c '^  FAIL ')
 
 echo
 echo "passed=$PASS failed=$FAIL"

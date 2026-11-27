@@ -7,7 +7,7 @@
 #
 #   bash scripts/check-hints.sh
 set -u
-TSF=/data/TypeServer/tsf/bin/tsf
+TSF="$(cd "$(dirname "$0")/../tsf" && pwd)/bin/tsf"
 PHP=php85
 DIR=/tmp/tsf-hint-check
 

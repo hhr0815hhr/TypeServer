@@ -19,6 +19,9 @@ if [ -z "$DIR_NAME" ] || [ "$#" -lt 2 ]; then
 fi
 cd "$(dirname "$0")/../tests/$DIR_NAME" || exit 1
 ROOT=$(cd ../.. && pwd)
+# 用例里要引用包内资源（如 mail 的 migrations 目录）的，从 TSF_ROOT 取；
+# 别在用例里写死仓库的绝对路径——CI runner 的检出路径不是 /data/TypeServer。
+export TSF_ROOT="$ROOT/tsf"
 BIN="./$(echo "$DIR_NAME" | tr '-' '_')"
 HOST=127.0.0.1
 

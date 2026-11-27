@@ -28,6 +28,14 @@ $root = dirname(__DIR__, 2);
 $tsf = $root . "/tsf";
 $php = PHP_BINARY;
 
+// ZipArchive 只在开发机的工具链里有。缺了是"环境没装"，按约定 SKIP（exit 77）而不是红：
+// 2026-11-27 CI 第一次在 GitHub 上跑，环境脚本没把 zip 编进 PHP，这个套件直接死在 makeXlsx 里，
+// 汇总行只留下一串调用栈。
+if (!class_exists("ZipArchive")) {
+    echo "SKIP 需要 zip 扩展（ZipArchive）；scripts/ci-setup.sh 编 PHP 时要带 --enable-zip" . PHP_EOL;
+    exit(77);
+}
+
 $pass = 0;
 $fail = 0;
 

@@ -23,11 +23,13 @@ fi
 RESULT=$(./coroutine_test 2>&1)
 echo "$RESULT"
 
-# 口径要跟着输出走：这个套件打的是 "  OK  " 而不是 "  PASS  "，
-# 只数 PASS 会让 passed 永远是 0，输出看起来像"一项都没跑"
-PASS=$(echo "$RESULT" | grep -cE '^  (PASS|OK)  ')
-FAIL=$(echo "$RESULT" | grep -c '^  FAIL  ')
-
-echo
-echo "passed=$PASS failed=$FAIL"
-[ "$FAIL" -eq 0 ] && exit 0 || exit 1
+# 这个套件不打逐条断言，只给一行判定："判定: OK ..." 或 "判定: FAIL ..."。
+# 以前这里也去数 PASS/FAIL 行，恒为 passed=0 failed=0；而退出码只看数出来的 FAIL，
+# 所以**判定是 FAIL 的时候退出码也是 0**。2026-11-27 verify 开始把 passed=0 failed=0
+# 判成失败，这才暴露出来。现在看判定行本身。
+if echo "$RESULT" | grep -qE '^判定: OK '; then
+  echo "判定: PASS（协程模式下慢调用不阻塞别的协程）"
+  exit 0
+fi
+echo "判定: FAIL（没有「判定: OK」：要么真有尖峰，要么产物没输出判定）"
+exit 1

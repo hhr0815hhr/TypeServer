@@ -8,8 +8,13 @@
 # 测试改的是**同一行里的一个字符**（大小不变、可能同秒），正是 mtime+size 判据会漏的情况。
 set -u
 cd "$(dirname "$0")" || exit 1
-TSF=/data/TypeServer/tsf/bin/tsf
+TSF="$(cd ../.. && pwd)/tsf/bin/tsf"
 LOG=/tmp/watch_test.log
+
+# 这个套件会**原地修改** main.php（测试改一个字符能否被发现）。跑完必须还原，
+# 否则每跑一次 verify 仓库就多一处未提交的改动。中途失败（exit 1）也要还原，所以用 trap。
+cp main.php /tmp/watch_test_main.php.bak
+trap 'cp /tmp/watch_test_main.php.bak main.php; kill -9 $WPID 2>/dev/null; pkill -9 -x watch_test 2>/dev/null' EXIT
 
 pkill -9 -x watch_test 2>/dev/null
 pkill -9 -f "tsf watch" 2>/dev/null
@@ -18,7 +23,7 @@ sleep 0.2
 reset_ver() {
 python3 - <<'PY'
 import re
-p = "/data/TypeServer/tests/watch-test/main.php"
+p = "main.php"   # run.sh 已经 cd 到本目录；写死仓库的绝对路径，换一台机器必然失败
 s = open(p).read()
 s = re.sub(r'boot version=\d+', 'boot version=1', s)
 open(p, "w").write(s)
@@ -53,7 +58,7 @@ run_case() {   # run_case <名字> <新版本号>
   python3 - "$ver" <<'PY'
 import re, sys
 v = sys.argv[1]
-p = "/data/TypeServer/tests/watch-test/main.php"
+p = "main.php"   # run.sh 已经 cd 到本目录；写死仓库的绝对路径，换一台机器必然失败
 s = open(p).read()
 s = re.sub(r'boot version=\d+', 'boot version=' + v, s)
 open(p, "w").write(s)
@@ -74,7 +79,7 @@ sleep 1.1
 T0=$(date +%s%3N)
 python3 - <<'PY'
 import re
-p = "/data/TypeServer/tests/watch-test/main.php"
+p = "main.php"   # run.sh 已经 cd 到本目录；写死仓库的绝对路径，换一台机器必然失败
 s = open(p).read()
 s = re.sub(r'boot version=\d+', 'boot version=3', s); open(p,"w").write(s)
 s = re.sub(r'boot version=\d+', 'boot version=4', s); open(p,"w").write(s)
@@ -87,7 +92,7 @@ echo
 echo "用例3：编译失败不重启，改好后自动恢复"
 python3 - <<'PY'
 import re
-p = "/data/TypeServer/tests/watch-test/main.php"
+p = "main.php"   # run.sh 已经 cd 到本目录；写死仓库的绝对路径，换一台机器必然失败
 s = open(p).read()
 s = re.sub(r'boot version=\d+', 'boot version=5', s)
 s = s.replace("function main(): void\n{", "function main(): void\n{\n    this_is_a_syntax_error(")
@@ -96,7 +101,7 @@ PY
 FAILED=0; wait_for "编译失败" 15000 && FAILED=1
 BAD=0; grep -q "boot version=5" $LOG && BAD=1
 python3 - <<'PY'
-p = "/data/TypeServer/tests/watch-test/main.php"
+p = "main.php"   # run.sh 已经 cd 到本目录；写死仓库的绝对路径，换一台机器必然失败
 s = open(p).read().replace("    this_is_a_syntax_error(", "    ")
 open(p, "w").write(s)
 PY

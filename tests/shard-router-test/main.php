@@ -270,15 +270,31 @@ function caseFailFast(): void
 
     T::eq($router2->nodeFor(1001), 1, "刚开始路由正常");
 
-    usleep(1600000);   // 睡 1.6 秒，稳稳超过 1 秒 TTL（1.3 秒时偶尔会踩在边界上）
-
+    // 先睡 1.6 秒（稳稳超过 1 秒 TTL），查一次；没过期就再等——而不是只查一次。
+    // 2026-11-27 实测：WSL2 的墙钟会被反复校正（journal 里每 30 秒一条 "Clock change detected"，
+    // 还有时间往回走的），而过期判断用的是墙钟——睡的这 1.6 秒里墙钟往回拨超过 0.6 秒，
+    // 节点看起来就还活着，这条断言偶发红（全量里红过一次，单独重跑 8 次都不红）。
+    // 这里断言的行为是「超过 TTL 之后不再向它发」，所以给一个上限（再等最多 4.5 秒）：
+    // 正常机器上第一次就满足；墙钟抖动时多等几轮。
+    usleep(1600000);
+    $stale = false;
     $err2 = "";
-    $sent2 = $router2->call(1001, "echo", "x", function (?string $r, string $e) use (&$err2): void {
-        $err2 = $e;
-    });
-    // 环还没重建（刷新间隔 100s），但节点已经过期 → 必须在发之前拦住
-    T::ok($sent2 === false || $err2 === "node-stale", "过期节点不发",
-        "sent=" . ($sent2 ? "1" : "0") . " err=" . $err2);
+    $sent2 = false;
+    $tries = 0;
+    do {
+        $tries++;
+        $err2 = "";
+        $sent2 = $router2->call(1001, "echo", "x", function (?string $r, string $e) use (&$err2): void {
+            $err2 = $e;
+        });
+        // 环还没重建（刷新间隔 100s），但节点已经过期 → 必须在发之前拦住
+        $stale = $sent2 === false || $err2 === "node-stale";
+        if (!$stale) {
+            usleep(500000);
+        }
+    } while (!$stale && $tries < 10);
+    T::ok($stale, "过期节点不发",
+        "sent=" . ($sent2 ? "1" : "0") . " err=" . $err2 . " 第 " . $tries . " 次才判过期");
 }
 
 /** 4. 节点变化后 uid 的归属会跟着变 */

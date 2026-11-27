@@ -70,6 +70,27 @@ else
     warn "pdo_pgsql" "缺它 db-pg 套件会 SKIP"
 fi
 
+# ---- 以下三项缺了不是 SKIP 而是直接红，所以用 bad ----
+# 2026-11-27 CI 第一次在 GitHub 上跑，redis-test / lock-test / config-check / config-test
+# 就是红在这里：环境脚本没装 phpredis、没编 zip，也没有 openpyxl
+if "$PHP_BIN" -r 'exit(class_exists("Redis") ? 0 : 1);' >/dev/null 2>&1; then
+    ok "phpredis" "$("$PHP_BIN" -r 'echo phpversion("redis");' 2>/dev/null)"
+else
+    bad "phpredis" "pkg/redis 直接 new \\Redis()，缺了 redis-test / lock-test 必红（见 scripts/ci-setup.sh）"
+fi
+
+if "$PHP_BIN" -r 'exit(class_exists("ZipArchive") ? 0 : 1);' >/dev/null 2>&1; then
+    ok "zip" "ZipArchive 可用"
+else
+    bad "zip" "config-check 套件用它搓 xlsx（configure 要带 --enable-zip）"
+fi
+
+if python3 -c "import openpyxl" >/dev/null 2>&1; then
+    ok "openpyxl" "config-test 第 4、5 步要用"
+else
+    bad "openpyxl" "config-test 会 SKIP（pip install openpyxl）"
+fi
+
 # ---- docker（六个套件要真库）----
 if command -v docker > /dev/null 2>&1 && docker info > /dev/null 2>&1; then
     ok "docker" "$(docker version --format '{{.Server.Version}}' 2>/dev/null)"

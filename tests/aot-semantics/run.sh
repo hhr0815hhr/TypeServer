@@ -12,7 +12,7 @@ PHP_OUT=/tmp/aot_sem_php.txt
 AOT_OUT=/tmp/aot_sem_aot.txt
 
 echo "=== 1. 构建 ==="
-if ! timeout 600 /data/TypeServer/tsf/bin/tsf build . > /tmp/aot_sem_build.log 2>&1; then
+if ! timeout 600 php85 "$(cd ../.. && pwd)/tsf/bin/tsf" build . > /tmp/aot_sem_build.log 2>&1; then
     echo "构建失败："
     grep -E "error:|Fatal" /tmp/aot_sem_build.log | head -5
     exit 1

@@ -64,7 +64,17 @@ function wallOf(int $dueMonoMs): int
     // 那点误差足够让"3:00"显示成"2:59:59"
     $delayMs = $dueMonoMs - Scheduler::nowMs();
     $wallMs = (int) (microtime(true) * 1000.0) + $delayMs;
-    return intdiv($wallMs, 1000);
+    // **取整到最近的秒，而不是向下截断。**
+    // 落点正好压在整秒上，而换算带着 ±1 毫秒的抖动。向下截断时负的那一侧落进前一秒：
+    // "03:00"变成"02:59:59"，断言红。
+    // 2026-11-27 实测：给 checkCron 加毫秒偏移探针，偏移只有 0、1、999 三种取值
+    // （999 = 差 1 毫秒到整点）。变异检查——把 +500 去掉、经由 run.sh 跑 25 次，红 4 次，
+    // 红的断言正是"每天 03:00（落点 02:59:59）"和"*/5 落在整 5 分（落点 17:14:59）"；
+    // 加回来之后同样方式跑 60 次，0 红。
+    // （直接反复执行同一个产物 300 次都不红，必须经由 run.sh 才复现——原因没查，
+    // 但红的那一侧是确定的。）
+    // cron 的粒度是分钟，这里断言的是"整分整点"，秒级取整才是要测的行为。
+    return intdiv($wallMs + 500, 1000);
 }
 
 function checkCron(string $expr, int $expHour, int $expMin, string $label): void

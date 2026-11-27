@@ -40,7 +40,7 @@ env:
   # 工具链的 tag 是独立命名空间（toolchain-<typephp版本>），不是框架版本
   TOOLCHAIN_TAG: "toolchain-0.9.6"
   # ci-setup.sh 的步骤变了就 +1，强制重建缓存
-  ENV_SALT: "1"
+  ENV_SALT: "2"
 
 jobs:
   lint:
@@ -159,10 +159,19 @@ jobs:
         run: |
           for f in /tmp/php-configure.log /tmp/php-make.log /tmp/php-install.log \
                    /tmp/swoole-configure.log /tmp/swoole-make.log \
+                   /tmp/redis-configure.log /tmp/redis-make.log /tmp/redis-install.log \
                    /tmp/interp-configure.log /tmp/interp-make.log; do
             [ -f "$f" ] || continue
             echo "===== $f ====="
             tail -40 "$f"
+          done
+          # 失败套件的完整输出：verify 在判定失败时写的（汇总行里只放得下几条断言）
+          for f in /tmp/tsf-verify-fail/*.log; do
+            [ -f "$f" ] || continue
+            echo "===== $f ====="
+            grep -n -E "FAIL|thrown|Fatal|error|Error|失败" "$f" | head -40
+            echo "--- 尾部 ---"
+            tail -15 "$f"
           done
 
       # 只上传关键日志：整个 repo 打 artifact 又慢又大，而排障需要的
@@ -181,6 +190,8 @@ jobs:
             /tmp/*_test*.log
             /tmp/rule_hot_server.log
             /tmp/rh_node*.log
+            /tmp/tsf-verify-fail/*.log
+            /tmp/redis-*.log
             demo/rule-hot/var/log/*.log
             tests/*/var/log/*.log
             var/log/*.log

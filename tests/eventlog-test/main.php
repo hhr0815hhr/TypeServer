@@ -43,6 +43,17 @@ function tmpPath(string $name): string
     if (file_exists($p)) {
         unlink($p);
     }
+    // 高水位侧车（<日志>.seq）也要删。只删日志不删侧车，下一次跑的时候 scan() 会从侧车
+    // 读出上次的序号（10、20、30……），新写的 10 条事件序号就是 31-40：
+    // `truncate(7)` 一条都截不掉、`lastSeq()` 是 40 —— 用例全红。
+    // 2026-11-27 之前这个套件在本机一直就是这样红的，而 run.sh 数 FAIL 的模式
+    // 与输出对不上（"  FAIL 两个空格" vs "  FAIL 一个空格"），failed 恒为 0，于是绿的。
+    if (file_exists($p . ".seq")) {
+        unlink($p . ".seq");
+    }
+    if (file_exists($p . ".seq.tmp")) {
+        unlink($p . ".seq.tmp");
+    }
     return $p;
 }
 

@@ -25,6 +25,7 @@
 #
 #   PHP_VERSION        默认 8.5.12（必须与 phpx 的 ABI 对齐：major.minor + ZTS）
 #   SWOOLE_VERSION     默认 6.2.5（--enable-swoole-thread 要求 ZTS）
+#   REDIS_VERSION      默认 6.3.0（phpredis，pkg/redis 直接 `new \Redis()`；首个明确配 8.5 的稳定版）
 #   TOOLCHAIN_TAG      默认 toolchain-0.9.6（typephp 编译器 + libphpx.so）
 #                      —— 独立 tag 命名空间，不是框架版本号
 #   PHP_PREFIX         默认 /usr/local/php-8.5-zts
@@ -33,6 +34,7 @@ set -euo pipefail
 
 PHP_VERSION="${PHP_VERSION:-8.5.12}"
 SWOOLE_VERSION="${SWOOLE_VERSION:-6.2.5}"
+REDIS_VERSION="${REDIS_VERSION:-6.3.0}"
 TOOLCHAIN_TAG="${TOOLCHAIN_TAG:-toolchain-0.9.6}"
 PREFIX="${PHP_PREFIX:-/usr/local/php-8.5-zts}"
 
@@ -62,7 +64,15 @@ php_ok() {
     [ -x "$PREFIX/bin/php" ] || return 1
     "$PREFIX/bin/php" -r 'exit(PHP_ZTS ? 0 : 1);' >/dev/null 2>&1 || return 1
     [ -f "$PREFIX/lib/libphp.so" ] || return 1
+    # zip：config-check 套件用它手搓 xlsx；composer 装包也离不开。
+    # 2026-11-27 CI 第一次跑时 configure 没带 --enable-zip，libzip-dev 装了却没编进去。
+    "$PREFIX/bin/php" -r 'exit(class_exists("ZipArchive") ? 0 : 1);' >/dev/null 2>&1 || return 1
     return 0
+}
+
+redis_ok() {
+    # 不能只看 .so 在不在：NTS 的 php-config 编出来的 .so 存在、但加载不上
+    "$PREFIX/bin/php" -r 'exit(class_exists("Redis") ? 0 : 1);' >/dev/null 2>&1
 }
 
 swoole_ok() {
@@ -114,6 +124,18 @@ if tpc_ok && phpx_ok; then
     ok "toolchain" "$TOOLCHAIN_TAG"
 else
     bad "toolchain" "$TOOLCHAIN_TAG（tpc + libphpx.so）"
+fi
+
+if redis_ok; then
+    ok "phpredis" "$REDIS_VERSION"
+else
+    bad "phpredis" "$REDIS_VERSION（pkg/redis 直接 new \\Redis()，缺了 redis-test / lock-test 必红）"
+fi
+
+if python3 -c "import openpyxl" > /dev/null 2>&1; then
+    ok "openpyxl" "config-test 第 4、5 步要用"
+else
+    bad "openpyxl" "缺了 config-test 会 SKIP（python3 -m pip install --user openpyxl）"
 fi
 
 if [ -x "$PREFIX/bin/php" ] && interp_ok; then
@@ -188,6 +210,7 @@ if ! php_ok; then
         --enable-sockets --enable-mbstring --enable-fileinfo \
         --with-sqlite3 --with-pdo-sqlite \
         --with-mysqli --with-pdo-mysql --with-pdo-pgsql \
+        --enable-zip \
         > /tmp/php-configure.log 2>&1
     make -j"$JOBS" > /tmp/php-make.log 2>&1
     $SUDO make install > /tmp/php-install.log 2>&1
@@ -225,6 +248,31 @@ else
     echo "== swoole 已就绪，跳过 =="
 fi
 
+# ---------------------------------------------------------------- phpredis
+
+if ! redis_ok; then
+    echo
+    echo "== phpredis $REDIS_VERSION =="
+    # 不用 pecl 命令：这里的 PHP 是 ./configure && make install 编的，没带 pear，直接拉源码包 phpize 编。
+    # pecl.php.net 偶发抽风，退到 GitHub release。
+    curl -fsSL "https://pecl.php.net/get/redis-$REDIS_VERSION.tgz" -o /tmp/redis.tgz \
+        || curl -fsSL "https://github.com/phpredis/phpredis/archive/refs/tags/$REDIS_VERSION.tar.gz" -o /tmp/redis.tgz
+    rm -rf "/tmp/redis-src-$REDIS_VERSION"
+    mkdir -p "/tmp/redis-src-$REDIS_VERSION"
+    tar -xzf /tmp/redis.tgz -C "/tmp/redis-src-$REDIS_VERSION" --strip-components=1
+    cd "/tmp/redis-src-$REDIS_VERSION"
+    "$PREFIX/bin/phpize" > /dev/null
+    ./configure --with-php-config="$PREFIX/bin/php-config" > /tmp/redis-configure.log 2>&1
+    make -j"$JOBS" > /tmp/redis-make.log 2>&1
+    $SUDO make install > /tmp/redis-install.log 2>&1
+    # 同 swoole：ini 必须写 $PREFIX/lib/php.ini（这一版 configure 没给 scan-dir）
+    printf 'extension=redis.so\n' | $SUDO tee -a "$PREFIX/lib/php.ini" > /dev/null
+    echo "  完成"
+else
+    echo
+    echo "== phpredis 已就绪，跳过 =="
+fi
+
 # ---------------------------------------------------------------- toolchain
 
 if ! tpc_ok || ! phpx_ok; then
@@ -250,6 +298,18 @@ if ! interp_ok; then
 else
     echo
     echo "== interp 已就绪，跳过 =="
+fi
+
+# ---------------------------------------------------------------- openpyxl
+
+# config-test 的第 4、5 步要用它改 xlsx。装在用户目录（--user），不碰系统 Python。
+# 24.04 的 pip 有 PEP 668 保护，要先试普通装法、不行再加 --break-system-packages。
+if ! python3 -c "import openpyxl" > /dev/null 2>&1; then
+    echo
+    echo "== openpyxl =="
+    python3 -m pip install --user openpyxl > /tmp/openpyxl-install.log 2>&1 \
+        || python3 -m pip install --user --break-system-packages openpyxl >> /tmp/openpyxl-install.log 2>&1
+    echo "  完成"
 fi
 
 # ---------------------------------------------------------------- 收尾
