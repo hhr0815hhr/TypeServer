@@ -64,6 +64,36 @@ ddz-hall/
     └── unit/{PatternTest,DoudizhuTest}.php
 ```
 
+## 网页端
+
+`web/index.html` 是单文件，原生 JS，**自己实现 TSF 帧编解码**（8 字节头，不到 20 行）——
+引一个协议库反而更重。
+
+页面由独立静态服务器托管（`run-web.sh` 里的 `python3 -m http.server`），
+游戏服只监听 WebSocket。所以前端里 `WS_PORT` 写死 9061，不能用 `location.host`。
+
+### 前端怎么验证（没有浏览器时）
+
+两个工具，都在 `tools/`：
+
+```bash
+node tools/ws-smoke.js      # 用 node 扮演浏览器：连接 → 登录 → 拉列表
+php85 tools/frame-check.php # 拿 JS 编出来的一帧给 PHP 解，确认格式一致
+```
+
+`ws-smoke.js` 里的 `buildFrame` / `drainFrames` 是从 `index.html` **原样抄**过来的，
+所以它能通就说明前端协议层是对的，剩下的只是 DOM 交互。
+
+实测输出：
+
+```
+连接 ws://127.0.0.1:9061/
+已连接，发登录帧
+PASS 登录成功 uid=1001
+PASS 收到房间列表，共 0 个
+OK 前端收发逻辑可用（帧编解码 / 登录 / 列表）
+```
+
 ## 几个设计决定，以及为什么
 
 **牌用 int 不用对象**。一副牌 54 张，每局频繁比较、排序、做频次统计。`int` 的数组操作
