@@ -159,6 +159,8 @@ scripts/check-doc-links.sh   文档里的相对链接是否都有效
 | | `mmo-mini` / `sharded-world` | 分片世界、跨服 |
 | **分层示范** | `ddz-hall` | `src/{Domain,App,Protocol,Infra}`，Domain 有 72 条单测 |
 
+每个 demo 目录下都有 README（怎么跑、看哪个文件、独有价值在哪）。
+
 `bench/` 不同——它是 `tsf verify` 的一部分，属于回归。
 
 组织一个真实工程该怎么分目录、分几层，看

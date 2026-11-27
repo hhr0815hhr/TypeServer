@@ -26,6 +26,33 @@ export TPC=~/.tsf/toolchain/typephp/bin/tpc.php
 export TSF_PHP=php85
 ```
 
+### 不想在本机装工具链：用 docker
+
+镜像里已经装好 PHP 8.5 ZTS + swoole + tpc 补丁 + phpx + composer，**PHP 的安装路径
+和本机方案完全一致**（`/usr/local/php-8.5-zts`），所以两种方式编出来的产物可以互换跑。
+
+```bash
+# 1) 打镜像（PHP 从源码编，约 25 分钟）
+cd tsf
+docker build -f docker/Dockerfile -t tsf:latest .
+
+# 2) 编译并运行仓库里的 demo（把整棵树挂进去，demo 用的是 tsf/ 子模块）
+cd ..
+docker run --rm -v "$PWD":/work -w /work/demo/battle tsf:latest \
+  php85 /work/tsf/bin/tsf build .
+docker run --rm -p 9002:9002 -v "$PWD":/work -w /work/demo/battle tsf:latest ./battle
+```
+
+**两个注意点**：
+
+- 镜像里**没有**把 `tsf` 和 `tpc` 放进 PATH，必须用完整路径调
+  （`php85 /work/tsf/bin/tsf` 或工程里的 `vendor/bin/tsf`）
+- 编译产物会带 `rpath=/usr/local/php-8.5-zts/lib`。容器里编的能在容器里跑，
+  宿主机上编的能在宿主机跑——**混用会报找不到 `libphpx.so`**
+
+构建期的四个坑（工具链脚本放错仓库、CMakeCache 指向打包机、composer 的 shebang、
+缺 `libgmp-dev`）和网络环境处理见 `tsf/docker/README.md`。
+
 不确定环境齐不齐，先跑自检：
 
 ```bash
