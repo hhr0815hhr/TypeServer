@@ -6,6 +6,13 @@
 
 ### 新增
 
+- **配置表校验器的负例测试** `tests/config-check-test`（7 项，0.4 秒）。
+  导出期那套校验（主键重复、引用不存在、字段重名、越界、未知类型、区间写反）
+  此前**一条都没被测过**——它保证别人不出错，自己错了却没人知道，而策划看到
+  “校验通过”就放心了。注意 `tests/config-test` 测的是**运行期** `Reader` 的
+  schema 校验，两者不是一回事。
+  测试用 ZipArchive 手搓最小 xlsx（workbook + rels + sheet1，inlineStr），
+  不依赖 PhpSpreadsheet，和工具链“不能因为依赖装不上而挂”的取舍一致。
 - **分布式锁 `TSF\Redis\Lock`**。`acquire / release / extend / owner`。释放与续期
   都用 Lua **先比较 token 再操作**——`GET` 再 `DEL` 的两步之间锁可能已经过期被别人拿到，
   那个 `DEL` 就删了别人的锁。不提供"等锁"：同步客户端上等待等于阻塞 worker
