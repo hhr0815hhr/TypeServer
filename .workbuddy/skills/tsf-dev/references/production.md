@@ -69,6 +69,8 @@ cluster-reconnect 9416–9419、tls-guard 9420/9421、admission 9422、membershi
 ### 这一轮新立的规矩
 
 - **`run.sh` 必须编译**。`tsf lint` 现在判红：注册的 `run.sh` 里没有 `build`（或 `run-svc-test.sh` / `tsf run` / `tsf watch`）。
+  解释执行、没有产物的套件必须在 `verifySuites()` 条目里显式写 `"noBuild" => "原因"`（2026-11-27 起不再认 `php85 main.php` 字面量）。
+  build 必须无条件执行：写在 `if [ ! -x 产物 ]` 里的 build 能过 lint，却在跑旧产物。
   `gm-test` / `fd-test` / `settle-crash` 曾十天里跑的都是 11-16 的旧产物，"全绿"对它们是空的。
 - 许可证是 MIT；根目录和 `tsf/`（包根）各一份 LICENSE，改许可证两处都要改。
 

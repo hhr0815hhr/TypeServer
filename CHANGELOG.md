@@ -4,7 +4,35 @@
 
 ## 未发布
 
+（暂无。上一个版本是 v1.0.0-rc.1。）
+
+---
+
+## v1.0.0-rc.1（2026-11-27）
+
+> **1.0 的第一个候选版。** 功能面与运行闭环都过了自定的 1.0 门槛（`ROADMAP.md` 的 P0 六项、
+> `ROADMAP-NO-GAP.md` 的 P0 三项全部完成），但以下三件事要在转正前完成，所以先发候选版：
+> 浸泡（这批代码几乎全部是两天内写的，最长长跑测试只有 30 秒，没有真实流量）、
+> API 稳定性分级（`@internal` / `@deprecated` 目前一个都没有）、两份 CI 在 GitHub 上跑绿。
+>
+> `composer require hhr0815hhr/tsf` 在 `minimum-stability: stable` 下**不会**装到它，
+> 要 `@rc` 或写成 `^1.0.0-RC1`——这是刻意的：候选版不进默认安装路径。
+
 ### 新增
+
+- **`ext/interp` 的源码移进 tsf 包**（`tsf/ext/interp/`，附 `build.sh`）。此前它只在
+  TypeServer 根仓库，`composer require` 拿到的包里**没有脚本热更的运行时**，而 README 把
+  `script` 包列为"替 Lua"的核心能力。`.so` 仍然必须在目标机上现编（扩展 ABI 绑定具体的
+  PHP 构建），所以包里给的是源码 + 一个 `build.sh`（校验 PHP >= 8.5 且 ZTS，源码没变时直接退出）。
+  根仓库的 `ext/interp/` 删除；所有引用路径改成 `tsf/ext/interp`。
+- **`tsf lint` 对"解释执行的套件"改为显式豁免**：`verifySuites()` 条目里写 `"noBuild" => "原因"`，
+  不再靠认 `php85 main.php` 字面量。起因：`docs`（纯 sh）和 `config-check`（`php85 run.php`）
+  被字面量规则误伤，lint 在 HEAD 上整体判红。
+- **`tests/frame-test` 无条件重编，且先删产物再编**。它是唯一"产物存在就不重编"的套件，
+  当天跑的就是一个动态库路径已失效的旧产物；lint 的字符串嗅探认不出这种写法。
+  变异检查发现只 build 不删不够（增量编译看源码变没变，坏产物原样保留）。
+  另加"服务起来就死"的检查，直接打印服务日志尾部，而不是等客户端超时报成网络问题。
+- `tsf/CHANGELOG.md`：面向 `composer require` 的用户的变更记录（包里此前没有 CHANGELOG）。
 
 - **HTTP 出站客户端 `TSF\Http\Client` / `Result`**。`get / post / request`，返回
   `status / body / error / elapsedMs`，失败不抛异常（`status=0` + `error` 有值）。
@@ -465,6 +493,60 @@ Swoole 给最小栈，收回池里跟真实业务的栈深度对不上，预热�
 - **handoff 协议没有"最终确认"消息**：ACCEPT 丢包 + 源侧超时回滚时，
   目标侧会保留一份状态（双写窗口）。已用测试钉住行为，修它需要协议变更。
 
+## v0.11.0（2026-11-20）
+
+> v0.9 — v0.11 的小节是 2026-11-27 按 tsf 的提交记录补写的摘要；当时没有逐版写变更记录，
+> 这一段（v0.7 之后到 v0.12 之前）的详细叙述见下面「v0.7 — v0.8 之间的开发记录」。
+
+### 新增
+
+- **链路追踪（进程内）**：`traceId` 随消息自动继承；账本落 trace，"这笔钱对应哪次操作"可查。
+- **Prometheus 文本导出** + 一行接入的 `/metrics` 路由；来源限制；RPC 降级自愈。
+- **状态交接 `pkg/handoff`**：单键交接协议 → 闸门 Gate → 自动重平衡（Ownership / Rebalancer）
+  → 归属租约 → abort → 状态版本核对与迁移链 `Schema`。
+- **`pkg/eventlog`**：状态检查点（基座 + delta + 定期压实），恢复不再随日志长度线性增长。
+- **集群**：`Cluster` 支持 TCP 传输（每条连接先握手）；`pkg/registry` Redis 节点注册表。
+- **服务**：崩溃取证（环形缓冲 + 现场落盘）。
+- **RPC**：载荷版本协商（标签 + 乐观降级）。
+- **Docker**：Dockerfile 与用法说明。
+- **CLI**：`tsf test` 发现式跑 `tests/*/main.php`；每个工程独立 build-dir。
+
+### 修复
+
+- 协程模式漏了"回队"，突发流量后剩下的消息永远卡住；协程路径漏了看门狗。
+- eventlog 截空日志后序号回退，用高水位侧车钉住。
+- cluster msgId 越界由静默截断改为抛错。
+- 房间状态机注入契约对齐。
+
+## v0.10.0（2026-11-19）
+
+### 新增
+
+- **GM 异步任务表 `Gm\Task`**：异步命令可查进度。
+
+## v0.9.1（2026-11-18）
+
+### 修复
+
+- CLI 版本号从 `composer.json` 读，不再硬编码（此前发到 0.9.0 时还自报 0.7.0）。
+
+## v0.9.0（2026-11-18）
+
+### 新增
+
+- **`Kernel\FileLoader`**：把 opcache 失效收进一处，按内容指纹判变更。
+- **跨 worker 通道**：`pipeSend` / `onPipeMessage` / `workerId`。
+- **AOI**：按半径查询；`eachAround` 回调遍历，避免候选数组分配。
+- **lint 增加"提示"级别**，加一条 AOT 陷阱检查。
+
+### 修复
+
+- AOI 九宫格静默漏判。
+- `Script::changed()` 改用内容指纹，不再看 mtime。
+- 编译失败时显示真实的 g++ 错误；`tsf add/remove` 校验当前目录是工程根。
+
+---
+
 ## v0.8.1（2026-11-18）
 
 **修 0.8.0 的一个发布事故**：`pkg/script/src/Script.php` 用了 `mixed` 类型声明，
@@ -568,7 +650,12 @@ Swoole 给最小栈，收回池里跟真实业务的栈深度对不上，预热�
 **保留**：`ext/interp/README.md` 和 `docs/research/hot-reload.md` 里与 wasm 的对比 —— 那是"为什么不用"的决策依据。
 
 
-## 未发布
+## v0.7 — v0.8 之间的开发记录（2026-11-16 — 11-18）
+
+> 这一节原来也叫"未发布"，是 2026-11-27 整理时改的名：它记的是 v0.6.0 之后、v0.8.0 定版之前的工作，
+> 没有对应单独的版本号。其中与 wasm 相关的条目（M7 / T7-02 / T7-03 / T7-05 / 灰度切换 /
+> 保留它们是因为其中的实测数据（AOI 批量、邻居查询基准、指标 enum）与 wasm 无关，仍然有效。
+> 同理，下面「自托管 runner」「接入 GitHub Actions」两节描述的 CI 配置也已被 2026-11-27 的全托管 runner 方案取代。
 
 ### 新增：扣款、充值、对账（金币账本补齐贷方）
 

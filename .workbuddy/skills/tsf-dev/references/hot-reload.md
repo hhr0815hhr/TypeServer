@@ -126,17 +126,20 @@ if (is_array($r) && isset($r["ok"]) && $r["ok"] === false) {
 
 ## 扩展怎么装
 
-**不用**装到系统目录（会要 sudo）：
+**不用**装到系统目录（会要 sudo）。源码随 composer 包（`vendor/hhr0815hhr/tsf/ext/interp`；
+TypeServer 仓库里是 `tsf/ext/interp`），`build.sh` 会校验 PHP >= 8.5 + ZTS，源码没变时直接退出：
 
 ```bash
-cd ext/interp && phpize85 && ./configure --with-php-config=$(which php-config85) && make
+bash tsf/ext/interp/build.sh          # composer 装的：bash vendor/hhr0815hhr/tsf/ext/interp/build.sh
 
 mkdir -p /tmp/myconf
-echo "extension=$PWD/modules/interp.so" > /tmp/myconf/interp.ini
+echo "extension=$PWD/tsf/ext/interp/modules/interp.so" > /tmp/myconf/interp.ini
 
 # 跑 AOT 产物时
 PHP_INI_SCAN_DIR='/tmp/myconf:/usr/local/php-8.5-zts/etc/conf.d' ./你的工程
 ```
+
+改了 `interp.c` 要重编（再跑一次 `build.sh`）——依赖它的套件测的都是那份 `.so`。
 
 **`/usr/local/php-8.5-zts/etc/conf.d` 必须保留**，否则 swoole 等扩展不加载。
 

@@ -70,8 +70,14 @@ php85 tsf/bin/tsf verify              # 全量；或者 php85 tsf/bin/tsf verify
 
 ### 5. 文档跟着改
 
-对外可见的行为变化写进 `CHANGELOG.md`。新增的用法在 `docs/guide/` 里补一节。
+对外可见的行为变化写进 `CHANGELOG.md`——**`composer require` 的用户能感知的**（框架能力、
+配置键、CLI 行为）同时写进 `tsf/CHANGELOG.md`，那份是给包的用户看的，只写"你需要做什么"，
+不写测试套件和 CI。新增的用法在 `docs/guide/` 里补一节。
 教程里的数字（"几个套件 / 几项断言"）要对得上实际——这类数字这里漂移过好几次。
+
+回归套件如果解释执行、没有产物，在 `verifySuites()` 条目里显式写 `"noBuild" => "原因"`；
+有产物的必须**无条件**重编（先删产物再 build）。lint 的"必须编译"规则是字符串嗅探，
+`if [ ! -x 产物 ]` 里包着的 build 能过它，却在跑旧产物（2026-11-27 `frame-test` 实际发生过）。
 
 ## 不收的东西
 
