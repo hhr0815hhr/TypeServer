@@ -82,7 +82,7 @@ fi
 if "$PHP_BIN" -r 'exit(class_exists("ZipArchive") ? 0 : 1);' >/dev/null 2>&1; then
     ok "zip" "ZipArchive 可用"
 else
-    bad "zip" "config-check 套件用它搓 xlsx（configure 要带 --enable-zip）"
+    bad "zip" "config-check 套件用它搓 xlsx（configure 要带 --with-zip）"
 fi
 
 if python3 -c "import openpyxl" >/dev/null 2>&1; then

@@ -65,7 +65,9 @@ php_ok() {
     "$PREFIX/bin/php" -r 'exit(PHP_ZTS ? 0 : 1);' >/dev/null 2>&1 || return 1
     [ -f "$PREFIX/lib/libphp.so" ] || return 1
     # zip：config-check 套件用它手搓 xlsx；composer 装包也离不开。
-    # 2026-11-27 CI 第一次跑时 configure 没带 --enable-zip，libzip-dev 装了却没编进去。
+    # 2026-11-27 CI 第一次跑时 configure 没带 zip，libzip-dev 装了却没编进去；
+    # 补的时候写成了 --enable-zip（PHP 7.3 及以前的名字），8.x 里是 --with-zip——
+    # configure 只给一句 "unrecognized options" 警告，不报错，第二次 CI 又白跑了一轮。
     "$PREFIX/bin/php" -r 'exit(class_exists("ZipArchive") ? 0 : 1);' >/dev/null 2>&1 || return 1
     return 0
 }
@@ -210,7 +212,7 @@ if ! php_ok; then
         --enable-sockets --enable-mbstring --enable-fileinfo \
         --with-sqlite3 --with-pdo-sqlite \
         --with-mysqli --with-pdo-mysql --with-pdo-pgsql \
-        --enable-zip \
+        --with-zip \
         > /tmp/php-configure.log 2>&1
     make -j"$JOBS" > /tmp/php-make.log 2>&1
     $SUDO make install > /tmp/php-install.log 2>&1

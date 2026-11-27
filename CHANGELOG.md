@@ -29,7 +29,7 @@
 | `proto` / `config` | 路径写死，且输出都过了 `\| head` / `\| tail`，命令全失败退出码也是 0——CI 上"通过"了 | 路径跟着仓库走；每步检查；FAIL 计数 |
 | `mail` | migrations 目录写死绝对路径 | `TSF_ROOT`（`run-svc-test.sh` 导出） |
 | `redis` / `lock` | CI 的 PHP 没装 phpredis | `ci-setup.sh` 装 phpredis 6.3.0 |
-| `config-check` | CI 的 PHP 没编 zip | `--enable-zip`；缺 ZipArchive 时 SKIP |
+| `config-check` | CI 的 PHP 没编 zip | `--with-zip`；缺 ZipArchive 时 SKIP |
 | `clock` | 全量里偶发 4/5：落点换算压在整秒上，向下截断时差 1 毫秒就落进前一秒（`02:59:59`） | 取整到最近的秒。变异检查：经 run.sh 跑 25 次红 4 次，修后 60 次 0 红 |
 | `shard-router` | 全量里红过一次：`过期节点不发 sent=1`。过期判断用墙钟，WSL2 的墙钟会被反复校正（journal 里每 30 秒一条 `Clock change detected`，还有往回走的），睡 1.6 秒期间往回拨超过 0.6 秒节点就"还活着" | 睡满后没过期就再等，上限 4.5 秒。单独重跑 8 次本来就不红 |
 | `coroutine` | 只打一行 `判定: OK/FAIL`，run.sh 却去数 PASS/FAIL 行——恒为 `passed=0 failed=0`，**判定是 FAIL 时退出码也是 0** | 看判定行 |
@@ -44,6 +44,9 @@
   或 `passed=0 failed=0`（一项都没执行），都判失败——汇总行里给出失败的断言行，
   全文写到 `/tmp/tsf-verify-fail/<套件>.log`，CI 上传。
 - **`tsf lint` 新增一条**：注册的脚本和 `tests/` 下不能写死 `/data/TypeServer`、`/home/hhr`。
+- **CI 环境的 zip 选项写错了一次**：补 zip 时写成 `--enable-zip`（PHP 7.3 及以前的名字），8.x 里是
+  `--with-zip`。configure 只给一句 `unrecognized options` 警告、不报错，自检才发现——第二次 CI
+  又白跑了 25 分钟。
 - `scripts/check-hints.sh`、`scripts/ci-preflight.sh`（补 phpredis / zip / openpyxl 三项检查）同步。
 
 ### 还没解决的

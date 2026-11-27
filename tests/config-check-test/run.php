@@ -32,7 +32,7 @@ $php = PHP_BINARY;
 // 2026-11-27 CI 第一次在 GitHub 上跑，环境脚本没把 zip 编进 PHP，这个套件直接死在 makeXlsx 里，
 // 汇总行只留下一串调用栈。
 if (!class_exists("ZipArchive")) {
-    echo "SKIP 需要 zip 扩展（ZipArchive）；scripts/ci-setup.sh 编 PHP 时要带 --enable-zip" . PHP_EOL;
+    echo "SKIP 需要 zip 扩展（ZipArchive）；scripts/ci-setup.sh 编 PHP 时要带 --with-zip" . PHP_EOL;
     exit(77);
 }
 

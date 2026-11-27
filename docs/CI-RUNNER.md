@@ -43,7 +43,7 @@ bash scripts/ci-setup.sh --check    # 只检查，缺什么列什么，退出码
 
 1. **PHP 8.5.12 ZTS + `--enable-embed=shared`** —— 产出 `libphp.so`，AOT 产物要链它。
    同时把 `pdo_mysql` / `pdo_pgsql` / `pdo_sqlite` 直接编进核心，省掉本地那套
-   "单独补 pdo_pgsql.so、还得在完整源码树里 phpize" 的折腾；`--enable-zip`
+   "单独补 pdo_pgsql.so、还得在完整源码树里 phpize" 的折腾；`--with-zip`
    （`config-check` 套件用它手搓 xlsx，composer 装包也离不开）。
 2. **swoole 6.2.5，`--enable-swoole-thread`** —— 要求 PHP 是 ZTS。
 3. **phpredis 6.3.0** —— `pkg/redis` 直接 `new \Redis()`；缺了 `redis-test` / `lock-test` 必红。
