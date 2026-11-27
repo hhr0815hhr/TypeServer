@@ -1,0 +1,71 @@
+syntax = "proto3";
+
+package game;
+
+// 协议号不是 proto 的语法，用 `// @id N` 注释给。
+// 放注释而不是自定义 option，是为了让这份文件能被任何 protobuf 工具
+// （含前端 protobuf.js）直接吃——它们会忽略注释。
+
+// @id 1001
+message Vector {
+  int32 a = 1;
+}
+
+// @id 1002
+message StrMsg {
+  string s = 2;
+}
+
+// @id 1003
+message NegMsg {
+  int32 v = 3;
+}
+
+// @id 1004
+message FloatMsg {
+  double d = 4;
+  float f = 5;
+}
+
+// @id 1005
+message PackedMsg {
+  repeated int32 vals = 6;
+}
+
+enum Quality {
+  COMMON = 0;
+  RARE = 1;
+  EPIC = 2;
+}
+
+// @id 1010
+message Item {
+  int32 id = 1;
+  int32 count = 2;
+}
+
+// @id 1011
+message Bag {
+  string owner = 1;
+  repeated Item items = 2;
+  Quality quality = 3;
+}
+
+// @id 1012
+message Everything {
+  int32 i32 = 1;
+  int64 i64 = 2;
+  uint32 u32 = 3;
+  sint32 s32 = 4;
+  sint64 s64 = 5;
+  bool flag = 6;
+  string name = 7;
+  bytes raw = 8;
+  float f32 = 9;
+  double f64 = 10;
+  fixed32 fx32 = 11;
+  fixed64 fx64 = 12;
+  repeated sint32 zig = 13;
+  repeated float farr = 14;
+  Item one = 15;
+}

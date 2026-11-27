@@ -145,6 +145,12 @@ function modeRepeat(string $dir, int $count): void
 
 function main(): void
 {
+    // verify 要把整本日志重放进内存（EventLog::replay() 返回全量数组）：续跑完是 10 万局、
+    // 借贷混合是 20 万条事件，远超 PHP 默认的 128M。本机 php.ini 是 512M 所以从没露头；
+    // GitHub runner 上是默认值，「续跑后账目一致」两条红在这里（2026-11-27，两次 CI）。
+    // 这个套件测的是崩溃之后账目对不对，不是内存上限——上限交给别处测（mem-pressure）。
+    ini_set("memory_limit", "1G");
+
     $argv = $_SERVER["argv"];
     $mode = isset($argv[1]) ? (string) $argv[1] : "help";
     $dir = isset($argv[2]) ? (string) $argv[2] : "/tmp/settle_crash";

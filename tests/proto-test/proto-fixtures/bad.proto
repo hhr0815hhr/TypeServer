@@ -1,0 +1,51 @@
+syntax = "proto3";
+
+// 这份文件故意写错，用来验证"不支持的东西要明确报错，而不是悄悄忽略"。
+// 它不会进正式目录，只在 run.sh 里临时拷过去。
+
+// 缺 @id
+message NoId {
+  int32 a = 1;
+}
+
+// @id 2001
+message HasMap {
+  map<string, int32> m = 1;
+}
+
+// @id 2002
+message HasOneof {
+  oneof pick {
+    int32 a = 1;
+  }
+}
+
+// @id 2003
+message BadType {
+  int32 a = 1;
+  MyUnknown b = 2;
+}
+
+// @id 2004
+message DupNum {
+  int32 a = 1;
+  int32 b = 1;
+}
+
+// @id 2005
+message SFixed {
+  sfixed32 v = 1;
+}
+
+// @id 2003
+message DupId {
+  int32 a = 1;
+}
+
+// @id 2006
+message Nested {
+  message Inner {
+    int32 a = 1;
+  }
+  int32 b = 1;
+}

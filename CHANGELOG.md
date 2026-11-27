@@ -49,10 +49,15 @@
   又白跑了 25 分钟。
 - `scripts/check-hints.sh`、`scripts/ci-preflight.sh`（补 phpredis / zip / openpyxl 三项检查）同步。
 
-### 还没解决的
+### 第二、三次 CI 又翻出来的（64 / 67 → 待第四次）
 
-- `settle-crash` 在 CI 上 `PASS 12 / FAIL 2`，本地 14/14。失败的是哪两轮要等下一次 CI 的
-  失败明细（verify 现在会把断言行打出来）。
+| 套件 | 问题 | 修法 |
+|:--|:--|:--|
+| `config` / `proto` | **夹具文件从没进过仓库**：`tests/config-test` 的三张 xlsx、`tests/proto-test` 的两个 `.proto` 只存在于 WSL 的副本里——根仓库的 `.gitignore` 是白名单，`*.xlsx` 和 `*.proto` 没有放行。干净检出里没有它们，这两个套件在新克隆的仓库上根本跑不起来（此前退出码 0，看起来是绿的） | 放行两类扩展名，五个文件入库 |
+| `settle-crash` | `续跑后账目一致` / `混合续跑后账目一致` 两条红：`verify` 把整本日志重放进内存（10 万 / 20 万条事件），超过 PHP 默认的 128M。本机 `php.ini` 是 512M，从没露头 | 用例自己把上限提到 1G（它测的是崩溃后的账目，不是内存）。本地用 `PHP_INI_SCAN_DIR` 起一个 128M 的环境复现：旧代码 fatal，新代码 `events=100000 balance==net` |
+| （CI） | zip 的 configure 选项写错，见上 | `--with-zip` |
+
+到这一步 CI 上只剩 3 个红，第三次 64 / 67；第四次的结果以 CI 页面为准。
 
 ---
 

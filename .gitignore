@@ -38,6 +38,11 @@
 !*.yaml
 !*.c
 !*.cc
+!*.xlsx
+# .proto 是协议源文件，.xlsx 是配置表与测试夹具。2026-11-27 之前这两类没有放行：
+# tests/config-test 的三张表、tests/proto-test 的两个 .proto 只存在于 WSL 的副本里，
+# 从没进过仓库——CI 的干净检出里没有它们，这两个套件在新克隆的仓库上根本跑不起来。
+!*.proto
 !*.cpp
 !*.h
 !*.hpp
