@@ -1,14 +1,26 @@
 name: CI
 
-# 两个 job，跑在不同的 runner 上，这是被现实逼的：
+# 这个仓库是**框架的测试载体**，不是产品仓库：
+# 57 个套件在 `tests/`、7 个在 `demo/`、`ext/interp` 也在这里。
+# tsf 包本身（src / pkg / bin / tpl）在 `tsf/` 子模块，它的"包完整性"门禁在
+# **tsf 仓库自己的** `.github/workflows/ci.yml`（lint + php -l + composer validate
+# + 模板生成，几分钟跑完，不需要工具链）。
 #
-#   lint   —— 结构检查 + PHP 语法。**托管 runner 就能跑**，每次 push 都跑。
-#   verify —— 全量验证（tsf verify，全部套件）。**必须自托管**：
-#             AOT 编译器 tpc 在 ../typephp-src，不在本仓库；还要求 PHP 8.5 ZTS +
-#             Swoole + phpx，托管 runner 从零装要十几分钟且极易漂移。
+# 所以这里跑的不是"某个应用"的 CI，而是 tsf 的**全量回归**——它只能在这里跑，
+# 因为套件依赖 tests/ 和 demo/。两个仓库的分工见 `docs/CI-RUNNER.md`。
 #
-# 不把 verify 塞进托管 runner，是因为"装不上的测试"比没有测试更糟：
-# 它会长期红着，然后所有人学会忽略 CI。
+# 全部跑在 GitHub **托管** runner 上，不依赖自托管机器。
+#
+# 三个约束决定了这个形状：
+#
+#   1. `verify` 需要 PHP 8.5 **ZTS + embed**、swoole（thread）、typephp 编译器、
+#      libphpx.so —— 托管 runner 一样都没有，得现装。所以要一个幂等的
+#      `scripts/ci-setup.sh`，并把装好的结果（约 600MB）缓存下来。
+#   2. 六个套件要连真 MySQL / PostgreSQL / Redis，由 `scripts/dev-*.sh` 用 docker 起。
+#      runner 自带 docker，所以环境**装在 runner 上**而不是容器里——
+#      verify 跑在容器里的话，容器内的 127.0.0.1 是它自己，那六个套件只能 SKIP。
+#   3. tsf 是子模块，checkout 必须 `submodules: recursive`；少了它 verify 会因为
+#      `tsf/bin/tsf` 不存在而失败，而且报错位置很靠后（先编译，再报找不到命令）。
 
 on:
   push:
@@ -16,20 +28,36 @@ on:
   pull_request:
   workflow_dispatch:
 
+# 同一个 ref 上新的提交取消旧的：环境准备要十几分钟，
+# 排队跑两个已经过期的提交是纯浪费
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PHP_VERSION: "8.5.12"
+  SWOOLE_VERSION: "6.2.5"
+  # 工具链的 tag 是独立命名空间（toolchain-<typephp版本>），不是框架版本
+  TOOLCHAIN_TAG: "toolchain-0.9.6"
+  # ci-setup.sh 的步骤变了就 +1，强制重建缓存
+  ENV_SALT: "1"
+
 jobs:
   lint:
-    name: 结构检查 + PHP 语法
-    runs-on: ubuntu-latest
+    name: 结构与语法（含 tsf 子模块）
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
-      - name: 安装 PHP
-        uses: shivammathur/setup-php@v2
+      - uses: shivammathur/setup-php@v2
         with:
           php-version: "8.3"
           coverage: none
 
-      - name: tsf lint（禁 mixed + 命名空间与目录一致）
+      - name: tsf lint（禁 mixed + 命名空间与目录一致 + 核心不依赖 pkg）
         run: php tsf/bin/tsf lint
 
       - name: 全量 php -l
@@ -42,31 +70,118 @@ jobs:
               fail=1
             fi
           done < <(git ls-files '*.php')
-          if [ "$fail" -ne 0 ]; then
-            exit 1
-          fi
+          [ "$fail" -eq 0 ] || exit 1
           echo "OK $(git ls-files '*.php' | wc -l) 个 PHP 文件"
 
   verify:
-    name: 全量验证（自托管）
-    # 自托管 runner 的标签是 self-hosted；这台机器上跑过 tsf verify 才算通过。
-    # 只在手动触发时跑：push 就全量验证会把全量验证的成本摊到每次提交上，
-    # 而真正需要它的是"准备发布"和"改了核心之后"。
-    runs-on: [self-hosted, tsf]
-    if: github.event_name == 'workflow_dispatch'
-    timeout-minutes: 30
+    name: tsf 全量回归（全部套件）
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
-      # runner 的默认 PATH 里没有 cargo install 与 wasi-sdk 的产物，
-      # 这是"环境装好了但 CI 说没有"这类问题的根源。
-      - name: 加入工具链目录
+      # ---- 环境缓存 ----------------------------------------------------
+      # 缓存的是"装完之后的样子"：PHP 前缀 + 工具链，打成单个 tar。
+      # 不用 actions/cache 直接缓存目录，是因为 /usr/local 归 root 所有，
+      # restore 以 runner 用户身份写不进去；先还原成 tar 再 sudo 解包才行。
+      - name: 还原环境缓存
+        id: env
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/tsf-env.tar
+          key: tsf-env-${{ runner.os }}-php${{ env.PHP_VERSION }}-swoole${{ env.SWOOLE_VERSION }}-${{ env.TOOLCHAIN_TAG }}-s${{ env.ENV_SALT }}
+
+      - name: 解包环境（缓存命中）
+        if: steps.env.outputs.cache-hit == 'true'
         run: |
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          sudo tar -xf "$RUNNER_TEMP/tsf-env.tar" -C /
+          # symlink 在 /usr/local/bin，不在 tar 里，恢复后补上
+          sudo ln -sf /usr/local/php-8.5-zts/bin/php /usr/local/bin/php85
+          php85 -v | head -1
 
-      - name: 前置检查
-        run: bash scripts/ci-preflight.sh
+      - name: 安装环境（缓存未命中）
+        if: steps.env.outputs.cache-hit != 'true'
+        env:
+          PHP_VERSION: ${{ env.PHP_VERSION }}
+          SWOOLE_VERSION: ${{ env.SWOOLE_VERSION }}
+          TOOLCHAIN_TAG: ${{ env.TOOLCHAIN_TAG }}
+        run: bash scripts/ci-setup.sh
+
+      - name: 打包环境（缓存未命中）
+        if: steps.env.outputs.cache-hit != 'true'
+        run: |
+          sudo tar -cf "$RUNNER_TEMP/tsf-env.tar" \
+            /usr/local/php-8.5-zts \
+            "$HOME/.tsf"
+          ls -lh "$RUNNER_TEMP/tsf-env.tar"
+
+      # ---- 断言 --------------------------------------------------------
+      - name: 环境自检
+        run: bash scripts/ci-setup.sh --check
+
+      # 六个套件要真库；缺服务时它们自己打 SKIP 并返回 77，
+      # 那样"全绿"是假的——所以这里必须真的起来
+      - name: 起测试服务（redis / mysql / pg）
+        run: |
+          bash scripts/dev-redis.sh
+          bash scripts/dev-mysql.sh
+          bash scripts/dev-pg.sh
+          docker ps --format '{{.Names}}\t{{.Ports}}'
 
       - name: tsf verify（全部套件）
-        run: ./tsf/bin/tsf verify
+        run: |
+          set -o pipefail
+          export TSF_PHP=php85
+          export TPC="$HOME/.tsf/toolchain/typephp/bin/tpc.php"
+          ./tsf/bin/tsf verify | tee /tmp/verify.log
+
+          # 跳过不等于通过。缺服务时 run.sh 自己 exit 77 打 SKIP，
+          # 汇总行是"通过 57 / 失败 0 / 跳过 0"——如果这里是 6 个跳过，
+          # 说明 redis/mysql/pg 没起来，那 153 项断言其实一条都没跑。
+          if ! grep -q "跳过 0" /tmp/verify.log; then
+            echo "::error::有套件被跳过（缺外部服务？），CI 不算通过"
+            grep -n "SKIP\|跳过" /tmp/verify.log || true
+            exit 1
+          fi
+
+          # 另一类假绿：一个套件都没跑也报"跳过 0"（参数写错时会这样）
+          if grep -q "通过 0 /" /tmp/verify.log; then
+            echo "::error::一个套件都没跑，检查 verify 的参数"
+            exit 1
+          fi
+
+      # ---- 失败现场 ----------------------------------------------------
+      # 先在这里打出来：下载 artifact 再看一遍太慢，而这些日志通常只有几十行
+      - name: 打印构建日志尾部
+        if: failure()
+        run: |
+          for f in /tmp/php-configure.log /tmp/php-make.log /tmp/php-install.log \
+                   /tmp/swoole-configure.log /tmp/swoole-make.log \
+                   /tmp/interp-configure.log /tmp/interp-make.log; do
+            [ -f "$f" ] || continue
+            echo "===== $f ====="
+            tail -40 "$f"
+          done
+
+      # 只上传关键日志：整个 repo 打 artifact 又慢又大，而排障需要的
+      # 基本只有三类——编译错误、套件的 stdout、应用日志
+      - name: 上传失败现场
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-logs-${{ github.run_id }}
+          if-no-files-found: ignore
+          path: |
+            /tmp/php-*.log
+            /tmp/swoole-*.log
+            /tmp/interp-*.log
+            /tmp/*build*.log
+            /tmp/*_test*.log
+            /tmp/rule_hot_server.log
+            /tmp/rh_node*.log
+            demo/rule-hot/var/log/*.log
+            tests/*/var/log/*.log
+            var/log/*.log
+          retention-days: 7

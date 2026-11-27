@@ -1,83 +1,107 @@
-# 自托管 runner 注册（让 `verify` job 真正跑起来）
+# CI：全部跑在 GitHub 托管 runner 上
 
-> 现状：**这台机器上还没装 runner**。没装之前，手动触发 CI 时 `verify` job 会一直
-> 停在 "Waiting for a runner to pick up this job" —— 这是预期行为，不是配置错了。
+> 更新：2026-11-27。**不再需要自托管机器**。
+>
+> 之前的方案是 `lint` 走托管、`verify` 走 `runs-on: [self-hosted, tsf]`，理由写在
+> 旧版文档里：tpc 不在本仓库、PHP 8.5 ZTS + swoole + phpx 装起来要十几分钟。
+> 这个理由只对了一半——**装一次很贵，但装好之后可以缓存**。以下是现在的做法。
 
-## 为什么必须自托管
+## 两个仓库，各管一段
 
-`verify` 要跑 `tsf verify` 的 197 项断言，它依赖三样仓库外的、且版本敏感的东西：
+| 仓库 | 管什么 | 触发 | 耗时 |
+|:--|:--|:--|--:|
+| `tsf`（子模块，发布到 Packagist） | 包完整性：`lint`、全量 `php -l`、`composer validate`、三种模板能生成且语法正确 | push / PR | ~3 分钟 |
+| `TypeServer`（根，测试载体） | 全量回归：57 个套件（含 6 个连真库的） | push / PR | ~20 分钟 |
 
-| 依赖 | 位置 | 为什么托管 runner 不行 |
-|:--|:--|:--|
-| AOT 编译器 `tpc` | `~/typephp-src/bin/tpc.php` | **不在本仓库**（866 个 git 文件里没有） |
-| PHP 8.5 **ZTS** | 系统安装 | tpc 生成的代码要求运行时与编译器 ZTS 状态一致；托管 runner 装 NTS 会在链接期报一堆无关错误 |
-| Swoole 6.2 + phpx | 系统安装 | 需要按 PHP 版本编译，托管 runner 每次跑都要重装，十几分钟且易漂移 |
+为什么不全放 tsf 仓库：**套件在根仓库**——`tests/` 57 个、`demo/` 里 7 个，
+`ext/interp` 也在根仓库。tsf 仓库里没有这些，`verify` 跑不起来。
 
-所以 `lint` job 走托管 runner（只依赖 PHP CLI），`verify` 走自托管。
+为什么也不能只留根仓库：改了 `tsf/src/` 之后，tsf 仓库自己的 push 没有任何检查，
+而它才是用户 `composer require` 拿到的东西。包完整性和全量回归是两件事，
+前者几分钟、不需要工具链，后者十几分钟、要 PHP 8.5 + tpc。
 
-## 注册步骤（在 WSL 里，不是 Windows）
+两份 workflow 各管各的，不互相引用。
 
-WSL 里 `systemd` 可用（`ps -p 1 -o comm=` 输出 `systemd`），所以能装成服务。
+## 根仓库的两个 job
 
-**1. 拿注册令牌**
+| job | 内容 | 典型耗时 |
+|:--|:--|--:|
+| `lint` | `tsf lint` + 全量 `php -l`，PHP 8.3 | 20 秒 |
+| `verify` | 装环境（缓存命中则解包）+ 起 redis/mysql/pg + `tsf verify` 全部套件 | 首次 ~25 分，之后 ~18 分 |
 
-GitHub 仓库 → Settings → Actions → Runners → New self-hosted runner → Linux / x64。
-页面上会给一条完整命令，其中含 `--token <TOKEN>`（有效期 1 小时）。
+两个都在 `ubuntu-24.04`（GitHub 托管）上跑，`concurrency` 会取消同一 ref 的旧任务。
 
-**2. 下载并配置**
-
-```bash
-mkdir -p ~/actions-runner && cd ~/actions-runner
-curl -sL -o runner.tar.gz https://github.com/actions/runner/releases/download/v2.329.0/actions-runner-linux-x64-2.329.0.tar.gz
-tar -xzf runner.tar.gz
-
-./config.sh \
-  --url https://github.com/hhr0815hhr/TypeServer \
-  --token <TOKEN> \
-  --labels tsf \
-  --name wsl-tsf \
-  --unattended
-```
-
-`--labels tsf` 对应 `ci.yml` 里的 `runs-on: [self-hosted, tsf]`——
-不加标签的话，这台 runner 会被仓库里所有 `self-hosted` 的 job 抢走。
-
-**3. 装成服务（WSL 关机重启后自动恢复）**
+## 环境怎么装：`scripts/ci-setup.sh`
 
 ```bash
-sudo ./svc.sh install
-sudo ./svc.sh start
-sudo ./svc.sh status      # 看 active (running)
+bash scripts/ci-setup.sh            # 幂等安装，已装的步骤跳过
+bash scripts/ci-setup.sh --check    # 只检查，缺什么列什么，退出码 1
 ```
 
-不想装服务就前台跑：`./run.sh`（关掉终端就停，只适合临时验证）。
+它装四样东西，顺序固定：
 
-**4. 验证**
+1. **PHP 8.5.12 ZTS + `--enable-embed=shared`** —— 产出 `libphp.so`，AOT 产物要链它。
+   同时把 `pdo_mysql` / `pdo_pgsql` / `pdo_sqlite` 直接编进核心，省掉本地那套
+   "单独补 pdo_pgsql.so、还得在完整源码树里 phpize" 的折腾。
+2. **swoole 6.2.5，`--enable-swoole-thread`** —— 要求 PHP 是 ZTS。
+3. **typephp 工具链**（`scripts/install-toolchain.sh`，tag `toolchain-0.9.6`）——
+   tpc 编译器 + `libphpx.so`。**版本号是编译器的，不是框架的**，两者解耦。
+4. **`ext/interp`** —— 脚本热更的运行时，`script-test` / `rule-hot` 都靠它。
+
+`--check` 模式在本地 WSL 上应该全绿（环境一样）。
+
+### 两个不能改的路径
+
+```
+/usr/local/php-8.5-zts                                ← tsf build 的 rpath
+$HOME/.tsf/toolchain/typephp/vendor/swoole/phpx/lib   ← phpx 的 rpath
+```
+
+`tsf build` 把这些写死进链接命令，换前缀的后果是产物启动时报
+`error while loading shared libraries`。`docker/Dockerfile` 里有同一条注释，两处要保持一致。
+
+## 缓存：为什么是 tar 不是目录
+
+`actions/cache` 以 **runner 用户**身份恢复文件，而 `/usr/local` 归 root——
+直接缓存目录会 restore 失败或权限错乱。所以：
+
+```
+缓存 path = $RUNNER_TEMP/tsf-env.tar          （一个文件）
+命中 → sudo tar -xf ... -C /                 （还原到 /）
+未命中 → 装完 → sudo tar -cf ... /usr/local/php-8.5-zts $HOME/.tsf
+```
+
+缓存的 key 里带三个版本号和 `ENV_SALT`。**改了 `ci-setup.sh` 的步骤就把 `ENV_SALT` +1**，
+否则会拿着旧环境跑新脚本，出现"本地好的、CI 报缺依赖"。
+
+缓存约 600MB，恢复约 1–2 分钟。
+
+## 数据库为什么不用容器跑 verify
+
+六个套件（`registry` / `mail` / `db-mysql` / `db-shards` / `db-pg` / `redis`）要连真库，
+由 `scripts/dev-*.sh` 用 docker 起在 `127.0.0.1`。
+
+如果 verify 本身跑在容器里，容器内的 `127.0.0.1` 是它自己，这六个套件只能 SKIP——
+而 SKIP 会让"全绿"变成假象。所以环境装在 runner 上，数据库用 runner 自带的 docker 起。
+
+## 三个容易踩的点
+
+1. **子模块**。`tsf/` 是 submodule，`actions/checkout` 必须 `submodules: recursive`。
+   少了它，verify 会先编译一堆、再报 `tsf/bin/tsf` 不存在。
+2. **`php85` 的 symlink**。`ci-setup.sh` 建了 `/usr/local/bin/php85`，但它不在缓存里
+   （缓存只有 `/usr/local/php-8.5-zts` 和 `~/.tsf`）。所以解包步骤里要重新 `ln -sf`。
+3. **缓存不跨 OS**。key 里带 `runner.os`，将来加 macOS runner 不会误命中。
+
+## 本地等价物
+
+CI 里没有第二套逻辑，本地跑的就是 CI 跑的命令：
 
 ```bash
-cd /data/TypeServer && ./tsf/bin/tsf verify
+bash scripts/ci-setup.sh --check          # 环境
+bash scripts/dev-redis.sh                 # 三个服务（缺哪个起哪个）
+bash scripts/dev-mysql.sh
+bash scripts/dev-pg.sh
+TSF_PHP=php85 TPC=$HOME/.tsf/toolchain/typephp/bin/tpc.php ./tsf/bin/tsf verify
 ```
 
-先确认本机能跑通，再触发 CI。Actions 页面 → CI → Run workflow。
-
-## 两个容易踩的点
-
-**PATH 不一致。** runner 服务的环境变量和你 shell 里的不一样，尤其不会包含
-`~/.cargo/bin` 与 `~/.local/bin`。`ci.yml` 里已经用 `$GITHUB_PATH` 补上了，
-但如果以后加了新工具，记得同步加——否则会出现"我本地明明装了，CI 说没有"。
-
-**WSL 重启后 systemd。** 若 `/etc/wsl.conf` 里 `systemd=false`，`svc.sh` 装的服务
-不会自启。确认方式：`systemctl is-enabled actions.runner.*`。
-
-## 没 runner 时怎么办
-
-不需要 CI 也能跑全套：
-
-```bash
-cd /data/TypeServer
-bash scripts/ci-preflight.sh    # 先看环境
-./tsf/bin/tsf verify            # 9 套件 197 项
-```
-
-`tsf verify` 就是 CI 里跑的那条命令，两者没有第二套逻辑——这是刻意的：
-CI 与本地不一致时，绿的意义就没了。
+"CI 绿、本地红"或者反过来，都说明有一边在说谎——这时先查环境和版本，别查代码。

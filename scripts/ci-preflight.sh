@@ -1,75 +1,80 @@
 #!/bin/bash
 # 验证套件的前置条件检查。
 #
-# 为什么要有这个脚本：`tsf verify` 失败时的报错来自最深的那一层
+# 为什么要有这个脚本：`tsf verify` 失败时的报错来自最深的那一层，
 # 看不出是环境缺东西还是代码真的坏了。把检查前置，能一眼分清这两类失败。
 #
-# 本地也能跑：新人接手第一件事应该是 bash scripts/ci-preflight.sh。
+#   bash scripts/ci-preflight.sh
+#
+# CI 里由 `scripts/ci-setup.sh` 装完环境后调用；本地新人接手也先跑它。
 set -u
 
 PHP_BIN=${PHP_BIN:-php85}
-TPC=${TPC:-/home/hhr/typephp-src/bin/tpc.php}
+TPC=${TPC:-$HOME/.tsf/toolchain/typephp/bin/tpc.php}
+PHP_PREFIX=${PHP_PREFIX:-/usr/local/php-8.5-zts}
 
 fail=0
-ok()   { printf '[ OK ]  %-14s %s
-' "$1" "$2"; }
-bad()  { printf '[FAIL]  %-14s %s
-' "$1" "$2"; fail=1; }
-warn() { printf '[WARN]  %-14s %s
-' "$1" "$2"; }
+ok()   { printf '[ OK ]  %-12s %s\n' "$1" "$2"; }
+bad()  { printf '[FAIL]  %-12s %s\n' "$1" "$2"; fail=1; }
+warn() { printf '[WARN]  %-12s %s\n' "$1" "$2"; }
 
+# ---- PHP ----
 if command -v "$PHP_BIN" > /dev/null 2>&1; then
     ver=$("$PHP_BIN" -r 'echo PHP_VERSION;' 2>/dev/null)
     zts=$("$PHP_BIN" -r 'echo PHP_ZTS ? "ZTS" : "NTS";' 2>/dev/null)
-    ok "$PHP_BIN" "$ver ($zts)"
-    # tpc 生成的代码要求运行时与编译器的 ZTS 状态一致，NTS 会在链接期报一堆莫名错误
-    if [ "$zts" != "ZTS" ]; then
-        bad "PHP ZTS" "需要 ZTS 版本（tpc 用 ZTS 运行时）"
+    if [ "$zts" = "ZTS" ]; then
+        ok "$PHP_BIN" "$ver ($zts)"
+    else
+        # tpc 生成的代码要求运行时与编译器的 ZTS 状态一致，NTS 会在链接期报一堆莫名错误
+        bad "$PHP_BIN" "$ver ($zts) —— 需要 ZTS"
     fi
 else
     bad "$PHP_BIN" "不在 PATH（用 PHP_BIN=... 指定）"
 fi
 
+# ---- swoole ----
+if "$PHP_BIN" -m 2>/dev/null | grep -qix swoole; then
+    ok "swoole" "$("$PHP_BIN" -r 'echo phpversion("swoole") ?: "?";' 2>/dev/null)"
+else
+    bad "swoole" "扩展未加载"
+fi
+
+# ---- typephp 工具链 ----
 if [ -f "$TPC" ]; then
     ok "tpc" "$TPC"
 else
     bad "tpc" "找不到 $TPC（用 TPC=... 指定；它不在本仓库里）"
 fi
 
-if "$PHP_BIN" -m 2>/dev/null | grep -q swoole; then
-    ok "swoole" "$("$PHP_BIN" -r 'echo phpversion("swoole") ?: "?";' 2>/dev/null)"
+if [ -f "$HOME/.tsf/toolchain/typephp/vendor/swoole/phpx/lib/libphpx.so" ]; then
+    ok "phpx" "libphpx.so 就位"
 else
-    bad "swoole" "扩展未加载"
+    bad "phpx" "缺 libphpx.so（重跑 scripts/install-toolchain.sh）"
 fi
 
-# 注意 wit-bindgen 通常装在 ~/.cargo/bin，默认不在 PATH 里（cargo 也不在）。
-# 这里显式认它，否则会误报"没装"——这个误报我踩过一次。
-missing=""
-    if ! command -v "$t" > /dev/null 2>&1 && [ ! -x "$HOME/.cargo/bin/$t" ]; then
-        missing="$missing $t"
-    fi
+# ---- 脚本热更的运行时 ----
+interp=""
+for f in "$PHP_PREFIX"/lib/php/extensions/*/interp.so "$(cd "$(dirname "$0")/.." && pwd)"/ext/interp/modules/interp.so; do
+    [ -f "$f" ] && interp="$f" && break
 done
-if [ -z "$missing" ]; then
+if [ -n "$interp" ]; then
+    ok "interp" "$interp"
 else
-    echo "         wit-bindgen 一般在 ~/.cargo/bin，需要加进 PATH："
-    echo "         export PATH=\"\$HOME/.cargo/bin:\$PATH\""
+    warn "interp" "没编译：script-test / rule-hot 会 SKIP（cd ext/interp && phpize85 && ./configure && make）"
 fi
 
-# tp-precompile 是宿主的 Rust 构建产物，不可能入库，所以按三级查找：
-# 显式 env > PATH > 仓库内 host 的构建目录。原来只认最后一条硬编码路径，
-# 换机器或换目录就误报"未构建"。
-PRE=${TSF_PRECOMPILE:-}
-if [ -z "$PRE" ]; then
-    PRE=$(command -v tp-precompile 2>/dev/null || true)
-fi
-if [ -z "$PRE" ]; then
-    CANDIDATE="$(cd "$(dirname "$0")/.." && pwd)/spike/s2/host-capi/target/release/tp-precompile"
-    [ -x "$CANDIDATE" ] && PRE=$CANDIDATE
-fi
-if [ -n "$PRE" ]; then
-    ok "tp-precompile" "$PRE"
+# ---- pdo_pgsql ----
+if "$PHP_BIN" -r 'exit(in_array("pgsql", PDO::getAvailableDrivers(), true) ? 0 : 1);' >/dev/null 2>&1; then
+    ok "pdo_pgsql" "已编入"
 else
-    echo "         先 cd spike/s2/host-capi && cargo build --release，或设 TSF_PRECOMPILE"
+    warn "pdo_pgsql" "缺它 db-pg 套件会 SKIP"
+fi
+
+# ---- docker（六个套件要真库）----
+if command -v docker > /dev/null 2>&1 && docker info > /dev/null 2>&1; then
+    ok "docker" "$(docker version --format '{{.Server.Version}}' 2>/dev/null)"
+else
+    warn "docker" "registry / mail / db-* / redis 六个套件会 SKIP"
 fi
 
 echo
