@@ -85,6 +85,14 @@ if ($t === "ws") {
 
 `$opts` 常用键：`worker_num`、`max_conn`、`nodelay`。
 
+> **`worker_num` 只能配 1（有状态服务）。** 多 worker 不是"分片"而是"复制"：
+> 每个 worker 各有一份 Service 实例、各一套 `interval` 定时器、各一份内存状态。
+> 实测（2026-11-27）：`worker_num=2` 时 100 ms 的 tick 打了两次，两个 pid 各自
+> 从 `n=1` 数起。后果是"定时任务执行 N 次"和"同房间玩家落在不同 worker 时互相看不见"。
+>
+> 扩容走**多节点**（不同 `node_id` + 不同端口 + Cluster 互连），不要调这个值。
+> 纯无状态服务（只做 echo 转发）可以配多 worker；配了之后启动会打一条 WARN。
+
 ### Gateway
 
 | 方法 | 用途 |
@@ -121,6 +129,7 @@ $proto = ProtocolStack::fromConfig("native", "raw");
 
 // 2) 传输：工厂返回基类，类型稳定
 $server = ServerFactory::make("tcp", "0.0.0.0", 9001, $proto->frame(), [
+    // worker_num 只该配 1：多 worker 是复制不是分片（见上面的警告）
     "worker_num" => 1, "max_conn" => 10000, "nodelay" => true,
 ]);
 

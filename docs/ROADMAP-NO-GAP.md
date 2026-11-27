@@ -725,3 +725,27 @@ AOT 侧现有的 `Rpc`、超时、`Broadcast`（重载通知）都能复用。
 一个顺手的好处要记下：**「多文件组织」在独立进程里天然解决**——脚本进程里 `require`
 是 PHP 原生能力，不需要动 AOT 的符号表。所以真到「脚本必须拆文件」那天，
 这条路和 §九 那条「不支持 function/class」是同一个答案的两半。
+
+---
+
+## 十一、多 worker 是"复制"不是"分片"（2026-11-27 实测）
+
+`server.worker_num` 配 > 1 时，**Service 会被 fork 成 N 份**，不是一个分片集群：
+
+| 实测项（`worker_num=2`，100ms 的 `interval`） | 结果 |
+|:--|:--|
+| tick 日志条数 | 两个 worker 各一份，总量 ×2 |
+| 计数 | 两个 pid 各自从 `n=1` 数起（状态不共享） |
+| `gateway ready` | 打了两次（worker 0 与 1） |
+
+根因是 Swoole 的 fork 模型 + `Swoole\Timer` 在 worker 内各自生效：
+主进程注册的定时器被继承，每个 worker 都会跑。
+
+**所以有状态服务的正确扩容方式是"多节点"**（不同 `node_id` + 端口 + `Cluster` 互连），
+不是调 `worker_num`。纯无状态转发（压测 echo）可以用多 worker。
+
+已经做的防护：`Scheduler::create()` 在 `worker_num > 1` 时打一条 WARN（只打一次），
+说不清后果的话写在 `docs/guide/01-ingress.md` 的 `$opts` 一节。
+
+**没做的**：没有加运行时拦截（抛异常会误伤无状态服务），也没有为这条限制建回归套件——
+它是架构约束，不会因为代码改动漂移，而套件要为它多编译一个工程（约 40 秒）。
