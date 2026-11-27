@@ -6,6 +6,13 @@
 
 ### 新增
 
+- **HTTP 出站客户端 `TSF\Http\Client` / `Result`**。`get / post / request`，返回
+  `status / body / error / elapsedMs`，失败不抛异常（`status=0` + `error` 有值）。
+  **默认显式清空 `CURLOPT_PROXY`**：curl 会读 `http_proxy`，实测在有坏代理的机器上
+  本机请求返回 502、耗时 1.8 秒，看起来像"curl 在 AOT 下不能用"。
+  先做了可用性探针：`curl_init` 的 `CurlHandle`、`curl_setopt` 常量、出站连接在 AOT
+  产物里都正常（本地 4.9 ms / 20 KB）。`tests/http-client-test` 9 项（含"坏代理下仍直连"
+  与"慢接口按 timeout 返回"），自己用 `php -S` 起目标服务。
 - **配置表校验器的负例测试** `tests/config-check-test`（7 项，0.4 秒）。
   导出期那套校验（主键重复、引用不存在、字段重名、越界、未知类型、区间写反）
   此前**一条都没被测过**——它保证别人不出错，自己错了却没人知道，而策划看到
