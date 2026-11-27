@@ -122,3 +122,7 @@ ext/interp/missing
 ext/interp/install-sh
 ext/interp/config.guess
 ext/interp/config.sub
+
+# project.yml 由 `tsf build` 从 project.json 生成，不是源文件。
+# bench/ 下有几个历史遗留的已被跟踪，这里只挡新生成的产物。
+/demo/*/project.yml
