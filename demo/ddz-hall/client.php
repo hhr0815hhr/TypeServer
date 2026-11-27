@@ -18,7 +18,7 @@ require_once __DIR__ . "/../../tsf/src/Protocol/Frame/HeaderFrame.php";
 
 use TSF\Protocol\Frame\HeaderFrame;
 
-$port = (int) ($argv[1] ?? 9061);
+$port = (int) ($argv[1] ?? 9071);
 
 const MSG_LOGIN = 1;
 const MSG_LOGIN_OK = 2;

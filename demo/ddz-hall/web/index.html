@@ -321,7 +321,7 @@ function isRed(id) {
  * （见 run.sh：python3 -m http.server 8080）。所以这里显式指定游戏服的端口，
  * 不能用 location.host（那是静态服务器的 8080）。
  */
-const WS_PORT = 9061;
+const WS_PORT = 9071;
 
 function connect(token) {
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
