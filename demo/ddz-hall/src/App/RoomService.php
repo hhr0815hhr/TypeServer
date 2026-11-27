@@ -496,6 +496,8 @@ final class RoomService extends Service
             "counts" => $counts,
             "phase" => $this->phase,
             "turn" => $turn,
+            // 桌上没有要压的牌（自由出牌）——前端据此把桌面区域清空
+            "free" => $this->game->toBeat() === null,
             "landlord" => $this->game->landlord(),
             "multiplier" => $this->game->multiplier(),
         ]);

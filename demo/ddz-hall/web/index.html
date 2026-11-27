@@ -81,6 +81,13 @@
   }
   .center-info b { color: var(--gold); }
 
+  /* 桌面：最近一手出的牌 */
+  .played { margin-top: 10px; }
+  .played-by { font-size: 12px; color: var(--dim); margin-bottom: 5px; }
+  .table-cards { display: flex; gap: 5px; justify-content: center; flex-wrap: wrap; }
+  .pcard.small { width: 38px; height: 54px; font-size: 13px; cursor: default; }
+  .pcard.small:hover { transform: none; }
+
   .hand { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; min-height: 74px; }
   .pcard {
     width: 46px; height: 66px; border-radius: 7px;
@@ -270,6 +277,9 @@ const S = {
   level: 1,
   multiplier: 1,
   lastPlay: null,
+  // 自由出牌（桌上没有要压的牌）。服务端在两家都过之后会把它置 true，
+  // 桌面区域的牌要跟着清掉
+  free: true,
 };
 
 const PHASE_NAME = ["等待玩家", "等待准备", "叫地主中", "对局中", "已结束"];
@@ -404,6 +414,7 @@ function handle(msgId, body) {
     S.turn = d.turn ?? -1;
     S.landlord = d.landlord ?? -1;
     S.multiplier = d.multiplier || 1;
+    S.free = d.free ?? S.free;
     if (d.event === "again") {
       S.hand = [];
       S.selected.clear();
@@ -449,12 +460,25 @@ function handle(msgId, body) {
     const d = JSON.parse(body || "{}");
     if (d.event === "pass") {
       logLine((d.seat + 1) + " 号位过牌");
-      S.lastPlay = null;
+      // 过牌不清桌面：要压的牌还是那一手，直到有人压或被清空
     } else if (d.event === "play") {
       const names = (d.cards || []).map(cardName).join(" ");
       logLine((d.seat + 1) + " 号位出：" + names);
       S.lastPlay = { seat: d.seat, cards: d.cards || [] };
       S.counts[d.seat] = d.left ?? S.counts[d.seat];
+      S.free = false;   // 有人出牌了，桌上就有要压的牌
+      // 自己出的牌要从手牌里去掉——之前只更新了"还剩几张"的计数，
+      // 手牌本身没动，看起来像"出完牌还在手里"
+      if (d.seat === S.seat) {
+        const played = new Set(d.cards || []);
+        const rest = [];
+        for (const id of S.hand) {
+          if (!played.has(id)) rest.push(id);
+        }
+        S.hand = rest;
+        S.selected.clear();
+        renderHand();
+      }
     }
     renderRoom();
     return;
@@ -542,14 +566,21 @@ function renderRoom() {
   } else if (S.phase === 2) {
     info = "叫地主：轮到 <b>" + (S.turn + 1) + " 号位</b>";
   } else if (S.phase === 3) {
-    info = "对局中 · 轮到 <b>" + (S.turn + 1) + " 号位</b> · 倍数 " + S.multiplier;
-    if (S.lastPlay) {
-      info += "<br>桌面：" + S.lastPlay.cards.map(cardName).join(" ");
-    }
+    info = "轮到 <b>" + (S.turn + 1) + " 号位</b> · 倍数 " + S.multiplier;
   } else if (S.phase === 4) {
     info = "本局结束";
   }
-  $("centerInfo").innerHTML = info;
+
+  // 桌面：显示最近一手出的牌（自由出牌时为空）
+  let tableHtml = "";
+  if (S.phase === 3 && !S.free && S.lastPlay && S.lastPlay.cards.length) {
+    const cardsHtml = S.lastPlay.cards.map((id) => cardHtml(id, true)).join("");
+    tableHtml = '<div class="played">' +
+      '<div class="played-by">' + (S.lastPlay.seat + 1) + ' 号位出</div>' +
+      '<div class="table-cards">' + cardsHtml + '</div>' +
+      '</div>';
+  }
+  $("centerInfo").innerHTML = info + tableHtml;
 
   renderActions();
 }
@@ -596,6 +627,16 @@ function renderActions() {
       renderActions();
     });
   }
+}
+
+/** 一张牌的 HTML（桌面用，不可点） */
+function cardHtml(id, small) {
+  const cls = "pcard" + (small ? " small" : "") +
+    (isRed(id) ? " red" : "") + (id >= 52 ? " joker" : "");
+  return '<div class="' + cls + '">' +
+    '<span>' + cardName(id) + '</span>' +
+    (id >= 52 ? "" : '<span class="suit">' + cardSuit(id) + '</span>') +
+    '</div>';
 }
 
 function renderHand() {
