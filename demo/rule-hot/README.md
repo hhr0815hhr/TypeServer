@@ -264,8 +264,10 @@ $cluster->flush(); // 漏了会出现"发出去了但对端永远收不到"
 
 另外两条与代码无关但会卡住人：
 
-- `scripts/` 下**不能定义 function / class**：reload 第二次必然
-  `Cannot redeclare`，而且开发期不暴露（首次加载是好的）。
+- `scripts/` 下**不能定义 function / class**。不是语法限制——`function_exists` 包住就能
+  重复 require——而是框架 **reload 时不清理符号表**：直接写会 `Cannot redeclare` 中止，
+  包住之后不报错，但调用拿到的还是第一次的实现，热更等于没做。两条路都是死路。
+  而且首次加载看不出来，要等第一次重载才炸。
 - AOT 产物要**通过 ini 注入 `interp.so`**，不是 `dl()`：
 
   ```bash

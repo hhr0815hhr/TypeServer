@@ -115,7 +115,7 @@ wasm 的定位是“灰度换实现”，但**换的那一刻状态是不带过�
 | **脚本崩了进程也崩** | 同进程，没有隔离 | 已做异常捕获（catch throw / bailout）；再往上靠监督树 |
 | **同权限** | 脚本能调 `exec` / `file_put_contents` | **靠"脚本作者可信"**，不对外开放 |
 | **不能用 `$GLOBALS`** | AOT 编译阶段拒绝 | 用返回值或闭包捕获 |
-| **不能重复定义函数** | `Cannot redeclare` | 脚本 `return` 闭包，不写 `function xxx()` |
+| **不能重复定义函数** | 符号表没清：直接写会 `Cannot redeclare`，用 `function_exists` 包住则永远拿旧实现 | 脚本 `return` 闭包，不写 `function xxx()` |
 | **`$fn($obj)` 不行** | AOT 编译期要确定签名 | 走 `interp_invoke` |
 
 **最后三条是 AOT 的固有约束**，不是 `pkg/script` 的设计缺陷。
@@ -392,8 +392,22 @@ return [
 **这些边界是"敢把脚本交给运营改"的前提**，不是可选项。
 
 其中两条已经落成门禁：`tsf lint <工程目录>` 会检查 `scripts/` 下
-**不能有 `class` / `function` 定义**（reload 第二次必然 `Cannot redeclare`），
-且**只能 `use TSF\Script\*`**（能力一律从 `Context` 取）。
+**不能有 `class` / `function` 定义**——**不是 PHP 不允许**：用
+`if (!function_exists(...))` 包住完全能重复 require。真正的理由是
+**reload 时不清理符号表**：
+
+| 写法 | 第二次 reload | 结果 |
+|:--|:--|:--|
+| 直接 `function xxx()` | `Cannot redeclare` | 进程中止 |
+| `if (!function_exists())` 包住 | 不报错 | **拿到的还是第一次的实现**，热更失效 |
+
+两条路都不能用，所以约定只 `return` 闭包：入口每次从导出表现取，
+reload 后自动是新版本，没有旧引用也没有符号表。
+
+要支持定义也不是不行——`zend_hash_del(EG(function_table))` 就能删，uopz 这么干过。
+但类要连带清静态属性、常量、接口/trait、已实例化对象的 ce 指针，闭包还可能
+捕获旧 `op_array`；这是一次"自己重做一个 PHP 模块系统"的活儿，收益是写法好看一点。
+另外**只能 `use TSF\Script\*`**（能力一律从 `Context` 取）。
 不带参数的 `tsf lint` 行为不变，只查框架。
 
 ### 6.6 灰度：先让 10% 的人踩

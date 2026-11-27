@@ -101,7 +101,7 @@ return [
 
 | # | 坑 | 现象 |
 |:--|:--|:--|
-| **1** | **脚本不能 `function xxx()`** | 热更时第二次 require 报 `Cannot redeclare`。必须 `return` 闭包 |
+| **1** | **脚本不能 `function xxx()`** | 符号表没清：直接写第二次 require 报 `Cannot redeclare`；用 `function_exists` 包住则不报错但永远拿旧实现。必须 `return` 闭包 |
 | **2** | **脚本里不能用 `$GLOBALS`** | AOT 编译阶段就拒绝（`'GLOBALS' was not declared`） |
 | **3** | **不能写 `$fn($obj)` 调闭包** | AOT 编译期要确定签名，运行期闭包会被 tpc 拒绝。必须走 `interp_invoke` |
 | 4 | `zend_eval_stringl` 不能用 | ZTS + embed 下 `CG(compiler_options)` 上下文错乱，报 `expecting ";"`。用 `zend_compile_file` |
