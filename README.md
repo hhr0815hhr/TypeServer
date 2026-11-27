@@ -142,17 +142,28 @@ docs/                设计文档与 spike 结论
 scripts/             ci-preflight.sh 等
 tpc-patches/         对 typephp 编译器的本地补丁（AOT 下必须）
 .github/workflows/   CI：lint 走托管 runner，verify 走自托管
-tools/repo-guard.py  提交前检查：抓「被 .gitignore 误挡的源码」
-spike/               一次性技术验证，只保留结论文档入仓库
+scripts/check-doc-links.sh   文档里的相对链接是否都有效
 ```
 
-**`demo/` 是示例集**（battle 完整对局、idle 挂机、mmo-mini、sharded-world、duel、
-demo-echo），跟着主仓库走，不单独发布。`bench/` 不同——它是 `tsf verify` 的一部分，
-属于回归。
+**`demo/` 是示例集**，跟着主仓库走，不单独发布。九个示例按用途分三类：
+
+| 用途 | 目录 | 说明 |
+|:--|:--|:--|
+| **最小可跑** | `demo-echo` / `demo-echo-nts` | 200 行左右，验证工具链和协议往返 |
+| **完整玩法** | `battle`（2038 行） | 回合制对局、技能、AOI、帧循环 |
+| | `duel`（3195 行） | 1v1 匹配对战，含集群 / 崩溃恢复 / 断线重连四个套件 |
+| | `idle`（1899 行） | 挂机，含配置表与存档 |
+| | `doudizhu`（2086 行） | 三人斗地主 + 网页端，最小可玩版 |
+| | `ddz-hall`（3490 行） | 同上是斗地主，但按四层拆分：大厅 / 房卡 / 叫分 / 断线重连，**分层参考** |
+| | `mmo-mini` / `sharded-world` | 分片世界、跨服 |
+| **分层示范** | `ddz-hall` | `src/{Domain,App,Protocol,Infra}`，Domain 有 72 条单测 |
+
+`bench/` 不同——它是 `tsf verify` 的一部分，属于回归。
 
 组织一个真实工程该怎么分目录、分几层，看
-[14-architecture.md](docs/guide/14-architecture.md)；它对照的参考实现是
-`demo/battle/`（2038 行，五个源文件 + 一份装配）。
+[14-architecture.md](docs/guide/14-architecture.md)。两个参考实现：
+`demo/battle/`（2038 行，五个源文件 + 一份装配，看"填满之后长什么样"）和
+`demo/ddz-hall/`（3490 行，四层拆分 + 纯逻辑单测，看"怎么从第一天就有形状"）。
 
 ---
 

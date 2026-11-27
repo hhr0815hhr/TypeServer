@@ -282,7 +282,12 @@ mygame/
 
 | 想看什么 | 看哪 |
 |:--|:--|
-| 分层最完整的示例（2038 行） | `demo/battle/`（`src/Battle/` 五个文件 + `main.php` 装配） |
+| **四层拆分 + 纯逻辑单测**（3490 行） | `demo/ddz-hall/`：`src/{Domain,App,Protocol,Infra}`，Domain 72 条断言、不需要编译 |
+| 填满之后长什么样（2038 行） | `demo/battle/`（`src/Battle/` 五个文件 + `main.php` 装配） |
 | 一局斗地主的全流程 | [07-walkthrough.md](07-walkthrough.md) |
 | 最小能跑的 echo | `demo/demo-echo/` |
 | 从零件到整机的五个"缝" | [09-assembly.md](09-assembly.md) |
+
+`battle` 和 `ddz-hall` 是两种参照：前者是"业务做大之后自然形成的分层"，
+后者是"从第一行就按四层写"。看 `main.php` 的差别最明显——battle 的装配里
+还留着不少业务判断，ddz-hall 的只有函数调用。
