@@ -70,11 +70,11 @@ php85 client.php 9001          # 3) 另开终端验证
 
 ---
 
-## 验证：一条命令跑完 62 个套件
+## 验证：一条命令跑完全部套件
 
 ```bash
 bash scripts/ci-preflight.sh   # 先看环境（缺什么、缺在哪、怎么补）
-tsf verify                     # 62 个套件（含文档链接检查）
+tsf verify                     # 全部套件（含文档链接检查；tsf verify --list 看清单）
 
 # 依赖 Redis / MySQL / PostgreSQL 的套件缺服务时会标 SKIP；本机用 docker 起一个就都跑：
 bash scripts/dev-redis.sh && bash scripts/dev-mysql.sh && bash scripts/dev-pg.sh

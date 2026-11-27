@@ -88,7 +88,7 @@ rollback v1  4316 us
 | 组 | 命令 | 用途 |
 |:--|:--|:--|
 | 开发 | `new` `build` `watch` `serve` `lint` | 建工程、编译、热重编、跑起来、结构检查 |
-| 验证 | `verify` `verify --list` `verify <id>` | 57 个套件；`<id>` 是子串过滤 |
+| 验证 | `verify` `verify --list` `verify <id>` | 跑注册表里的全部套件；`<id>` 是子串过滤 |
 | 数据 | `migrate` `migrate-status` | 部署期迁移 |
 | 资源 | `config` `proto` `list` `add` `remove` | 配置导出、协议生成、包管理 |
 
