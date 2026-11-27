@@ -1,0 +1,36 @@
+{
+    "app": {
+        "name": "rule-hot"
+    },
+    "log": {
+        "level": "info",
+        "file": "${base}/var/log/app.log"
+    },
+    "protocol": {
+        "frame": "native",
+        "payload": "raw"
+    },
+    "server": {
+        "host": "0.0.0.0",
+        "port": 9603,
+        "transport": "tcp",
+        "worker_num": 1,
+        "max_conn": 1000,
+        "nodelay": true,
+        "heartbeat_sec": 30,
+        "rate_per_sec": 200,
+        "rate_burst": 400,
+        "auth": {
+            "require": true,
+            "secret": "rule-hot-dev-secret",
+            "tokens": {
+                "tok-1001": 1001,
+                "tok-1002": 1002
+            }
+        }
+    },
+    "game": {
+        "activity_multiplier": 2,
+        "activity_enabled": 1
+    }
+}

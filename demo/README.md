@@ -5,7 +5,8 @@
 > 除这两个之外，目录下还有若干独立工程，各自带 `run.sh`：
 > `battle`（战斗最小闭环：AOI + 帧循环 + 配置热更 + GM，压测报告见仓库根的
 > `VERIFY-BATTLE.md`）、`duel`（1v1 对战 + 快照恢复）、`doudizhu`（回合制 + 状态机）、
-> `idle`、`mmo-mini`、`sharded-world`（分片 + 跨 worker 转发）。
+> `idle`、`mmo-mini`、`sharded-world`（分片 + 跨 worker 转发）、
+> `rule-hot`（脚本规则热更：哪层放 AOT、哪层放脚本、灰度与成本对照）。
 >
 > 构建方式统一：`php85 ../tsf/bin/tsf build <dir>`（不各自装 composer）。
 

@@ -25,6 +25,32 @@ AOT 二进制（C++ 对象、帧循环）
 | `interp_eval_string(string $code)` | ❌ | `zend_eval_stringl` 在 ZTS 下 `CG()` 上下文错乱，报 `expecting ";"` |
 | `interp_probe()` | ✅ | 诊断：编译器指针是否就绪、sapi 名、EG 是否初始化 |
 
+### `interp_invoke` 的错误结构
+
+脚本抛异常时**不抛给宿主**，返回结构化数组：
+
+| 字段 | 说明 |
+|:--|:--|
+| `ok` | `false` |
+| `class` | 异常类名 |
+| `message` | 消息 |
+| `file` / `line` | 抛出点（2026-11-27 补） |
+| `trace` | `getTraceAsString()` 的原文（2026-11-27 补） |
+| `fatal` / `timeout` | 只有 bailout 分支才有 |
+
+为什么非要 file/line：只有 class+message 时，2000 行的脚本报一句
+`business failed`，运维只能人肉翻。Lua 的 `error()` 默认带 `file:line`，
+这是脚本能不能上生产的分界，不是"调试舒服"的问题。
+
+两个实现坑（改这段 C 还会遇到）：
+
+1. `zend_call_method` / `zend_clear_exception` 不在 `php.h` 里，要 include
+   `Zend/zend_interfaces.h`、`Zend/zend_exceptions.h`。隐式声明会把 `zval*`
+   截成 `int`，症状是"方法调了但什么都没拿到"（trace 一开始就是这样丢的）。
+2. 取 trace 必须在 `EG(exception)` 清掉之后：`zend_call_function` 在已有异常时
+   拒绝执行。顺序是 `GC_ADDREF` → `zend_clear_exception` → 读属性/取 trace
+   → `OBJ_RELEASE`。
+
 ## 编译
 
 ```bash

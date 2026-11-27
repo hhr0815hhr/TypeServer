@@ -4,6 +4,9 @@
 >
 > 先给结论：用 `pkg/script`（AOT 二进制内嵌 PHP 解释器），**不是** wasm。
 > 早期版本有过 wasm 路线，2026-11-18 整个删掉了，原因见第三节。
+>
+> 想直接看能跑的完整例子：`demo/rule-hot/`（AOT 结算 + 脚本掉落 + 脚本活动 +
+> 灰度 + GM 重载 + 成本对照，一条 `./run.sh` 跑完）。本文讲原理，那个工程讲落地。
 
 ## 一、问题定义：热更到底要什么
 
@@ -309,6 +312,35 @@ $ctx->bind("config", function (string $key): string {
 **为什么必须显式授权**：`reward` / `send` / `timer` 都有副作用。静默成功等于
 "脚本能越过宿主自己做决策"，静默失败等于"活动悄悄不生效"——两者都比报错难查。
 
+#### 脚本间调用：能，但建议少用
+
+`$ctx->callScript($target, $entry, $arg)` 支持脚本 A 调脚本 B：
+
+```php
+return [
+    "onSettle" => function ($ctx) {
+        // 入参是字符串；要传结构就 JSON —— 标准库在脚本里可用（实测 json/mb/preg/usort 都在）
+        return $ctx->callScript("mail", "sendReward", json_encode([
+            "uid" => $ctx->getInt("uid"),
+            "gold" => 350,
+        ]));
+    },
+];
+```
+
+三条约束，都是刻意的：
+
+| 约束 | 原因 |
+|:--|:--|
+| 入参只有 `string` | 复合类型跨 interp 边界时所有权容易出错，字符串没有歧义 |
+| 返回只收 `string/int/float/bool`，数组会被吞成 null | 同上；要结构化就自己 `json_encode` 再 decode |
+| 最多 8 层嵌套，嵌套共用一次超时预算 | 防"A 调 B、B 又调 A"把进程拖死；每层各给 500ms 会被叠乘 |
+
+**优先级：能力注入 > 脚本互调。** 互调会引入依赖图——reload 顺序、循环依赖、
+"A 依赖 B 的旧版本"全要自己扛（Skynet 也踩过）。宿主把公共逻辑做成
+`$ctx->bind("calcDamage", ...)` 的能力，既没有依赖图，又能让 AOT 侧统一校验。
+代价是这类公共逻辑不能热更——这是取舍，不是遗漏。
+
 ### 6.3 一个完整的活动脚本
 
 ```php
@@ -464,6 +496,57 @@ return [
 
 最后一行是**设计取向**而不是缺陷：TSF 的脚本碰不到任意业务对象，
 所以复杂状态机仍应写在 AOT 里。这是拿"表达力"换"不会误改数据"。
+
+### 6.9 脚本的单测与错误定位
+
+脚本是运营每周改的东西。两件事决定它能不能上生产：**改完多久知道错了**，
+**错了能不能看到在哪一行**。
+
+#### 不需要 AOT 的单测
+
+```bash
+php85 tests/script/run.php      # 不编译、不起服务
+```
+
+成立的前提是骨架的第一条规矩：`src/Domain/` 不依赖 TSF。所以原生 PHP 直接
+`require` 就能当脚本的 stub 视图：
+
+```php
+require __DIR__ . "/../../src/Domain/PlayerView.php";
+$e = interp_require_file(__DIR__ . "/../../scripts/levelup.php");
+$e["onLevelUp"](new PlayerView(1001, 5, 0, 0));   // 直接断言
+```
+
+脚本由 `interp.so` 加载，和线上**同一份运行时**——不是"测试用另一套实现"，
+所以它验证的东西线上成立。实测 `demo/rule-hot/tests/script/run.php`：
+7 项断言（含"脚本与 AOT 规则逐字节一致"）在 0.05 秒内跑完。
+
+这条通道填的是"脚本改完只能上线验"。没有它，每次改脚本都是一次小赌博。
+
+#### 错误带位置
+
+`interp_invoke` 的异常返回从 v0.x 起带 `file` / `line` / `trace`：
+
+```
+{
+    "ok": false,
+    "class": "LogicException",
+    "message": "from nested closure",
+    "file": "/opt/scripts/loot.php",
+    "line": 9,
+    "trace": "#0 /opt/scripts/loot.php(11): {closure}()\n#1 ..."
+}
+```
+
+三条实现细节，改这段 C 时会再遇到：
+
+1. `zend_call_method` / `zend_clear_exception` 不在 `php.h` 里，要显式
+   include `Zend/zend_interfaces.h` 和 `Zend/zend_exceptions.h`。隐式声明会把
+   `zval*` 截成 `int`，症状是"方法调了但什么都没拿到"。
+2. `getTraceAsString()` 要在 `EG(exception)` **清掉之后**调。`zend_call_function`
+   在已有异常时拒绝执行；所以顺序是 `GC_ADDREF` → `zend_clear_exception` →
+   读属性/取 trace → `OBJ_RELEASE`。
+3. trace 的第一帧是抛出点的**调用者**，抛出点本身由 `file` / `line` 补。
 
 ## 七、什么时候还是该用 AOT
 

@@ -14,6 +14,10 @@
 
 #include "php.h"
 #include "php_interp.h"
+/* zend_call_method / zend_clear_exception 不在 php.h 里，显式包含：
+ * 否则隐式声明会把 zval* 截成 int，调用静默失败（trace 拿不到就是这么来的） */
+#include "Zend/zend_interfaces.h"
+#include "Zend/zend_exceptions.h"
 #include "SAPI.h"
 #include "ext/standard/info.h"
 
@@ -238,8 +242,25 @@ PHP_FUNCTION(interp_invoke)
     }
 
     if (EG(exception)) {
-        /* 可捕获的 PHP 异常：取类名和 message，清掉，返回结构化错误 */
+        /* 可捕获的 PHP 异常：取类名、message、**文件与行号**，清掉，返回结构化错误。
+         *
+         * 为什么必须带 file/line：只有 class+message 时，2000 行的脚本报一句
+         * "business failed"，运维只能人肉翻。Lua 的 error() 默认给 file:line，
+         * 这是脚本能不能上生产的分界——不是"调试舒服"的问题，是"出事能不能定位"。
+         *
+         * trace 用 getTraceAsString() 而不是自己遍历 trace 数组：
+         * 后者要把 args/class/type 逐项取出来，几十行 C 只为拼一个字符串；
+         * 而这个字符串的消费方是人（日志、GM 返回），不是程序。
+         */
+        /* 先摘掉 EG(exception) 再加引用持有对象：
+         * zend_call_method 内部走 zend_call_function，而后者在
+         * EG(exception) 非空时拒绝执行——不摘掉的话 getTraceAsString()
+         * 永远返回 NULL（第一版就是这么静默失败的）。
+         * 摘掉之后对象会被释放，所以先 ADDREF，用完再 RELEASE。 */
         zend_object *ex = EG(exception);
+        GC_ADDREF(ex);
+        zend_clear_exception();
+
         zend_string *cls = ex->ce->name;
         zval rv;
         zval *msg_zv = zend_read_property(ex->ce, ex, "message", sizeof("message") - 1, 1, &rv);
@@ -247,12 +268,39 @@ PHP_FUNCTION(interp_invoke)
             ? Z_STR_P(msg_zv)
             : ZSTR_EMPTY_ALLOC();
 
+        zval rv_file;
+        zval *file_zv = zend_read_property(ex->ce, ex, "file", sizeof("file") - 1, 1, &rv_file);
+        zval rv_line;
+        zval *line_zv = zend_read_property(ex->ce, ex, "line", sizeof("line") - 1, 1, &rv_line);
+
         array_init(return_value);
         add_assoc_bool(return_value, "ok", 0);
         add_assoc_str(return_value, "class", zend_string_copy(cls));
         add_assoc_str(return_value, "message", zend_string_copy(msg));
+        if (file_zv && Z_TYPE_P(file_zv) == IS_STRING) {
+            add_assoc_str(return_value, "file", zend_string_copy(Z_STR_P(file_zv)));
+        }
+        if (line_zv && Z_TYPE_P(line_zv) == IS_LONG) {
+            add_assoc_long(return_value, "line", Z_LVAL_P(line_zv));
+        }
 
-        zend_clear_exception();
+        /* traceback：第一帧是抛出点的调用者，抛出点本身由 file/line 补。
+         *
+         * 用 zend_call_method 而不是 call_user_function：后者在
+         * EG(exception) 非空时可能走不通（它要先把当前异常挂起），
+         * zend_call_method 直接按对象调用，实测能拿到字符串。 */
+        zval trace_ret;
+        ZVAL_UNDEF(&trace_ret);
+        zval *tr = zend_call_method(ex, ex->ce, NULL, "gettraceasstring",
+            sizeof("gettraceasstring") - 1, &trace_ret, 0, NULL, NULL);
+        if (tr != NULL && Z_TYPE(trace_ret) == IS_STRING) {
+            add_assoc_str(return_value, "trace", zend_string_copy(Z_STR(trace_ret)));
+        }
+        if (!Z_ISUNDEF(trace_ret)) {
+            zval_ptr_dtor(&trace_ret);
+        }
+
+        OBJ_RELEASE(ex);
         return;
     }
 

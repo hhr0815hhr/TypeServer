@@ -1,0 +1,6 @@
+{
+    "name": "rule-hot",
+    "packages": [
+        "script"
+    ]
+}
