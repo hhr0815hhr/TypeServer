@@ -14,7 +14,7 @@
 
 ```bash
 # 前提：ext/interp 已编译（脚本层的运行时）
-cd ../../ext/interp && phpize85 && ./configure && make && cd -
+bash ../../tsf/ext/interp/build.sh
 
 ./run.sh              # 编译 + 完整演示（约 15 秒）
 ./run.sh --no-build   # 已编译过

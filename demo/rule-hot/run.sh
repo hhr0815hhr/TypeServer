@@ -47,10 +47,10 @@ mkdir -p var/log
 
 # 脚本层依赖 ext/interp 提供 interp_require_file / interp_invoke。
 # AOT 产物是普通进程，扩展通过 ini 扫描目录注入——不需要改系统 php.ini。
-INTERP="$ROOT/ext/interp/modules/interp.so"
+INTERP="$ROOT/tsf/ext/interp/modules/interp.so"
 if [ ! -f "$INTERP" ]; then
     # 77 = 用例自己声明"缺外部依赖"，回归里算 SKIP 而不是 FAIL
-    echo "SKIP 缺少 $INTERP（cd ext/interp && phpize85 && ./configure && make）"
+    echo "SKIP 缺少 $INTERP（bash tsf/ext/interp/build.sh）"
     exit 77
 fi
 mkdir -p /tmp/tsf-rule-hot-conf

@@ -54,13 +54,13 @@ fi
 
 # ---- 脚本热更的运行时 ----
 interp=""
-for f in "$PHP_PREFIX"/lib/php/extensions/*/interp.so "$(cd "$(dirname "$0")/.." && pwd)"/ext/interp/modules/interp.so; do
+for f in "$PHP_PREFIX"/lib/php/extensions/*/interp.so "$(cd "$(dirname "$0")/.." && pwd)"/tsf/ext/interp/modules/interp.so; do
     [ -f "$f" ] && interp="$f" && break
 done
 if [ -n "$interp" ]; then
     ok "interp" "$interp"
 else
-    warn "interp" "没编译：script-test / rule-hot 会 SKIP（cd ext/interp && phpize85 && ./configure && make）"
+    warn "interp" "没编译：script-test / rule-hot 会 SKIP（bash tsf/ext/interp/build.sh）"
 fi
 
 # ---- pdo_pgsql ----

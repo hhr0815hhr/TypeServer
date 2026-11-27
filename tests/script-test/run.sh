@@ -37,13 +37,13 @@ if [ -z "$OUT" ]; then
 fi
 
 # 需要 interp 扩展；没装就跳过并说明
-if [ ! -f "$ROOT/ext/interp/modules/interp.so" ]; then
-    echo "SKIP 需要先编译 ext/interp（cd ext/interp && phpize85 && ./configure && make）"
+if [ ! -f "$ROOT/tsf/ext/interp/modules/interp.so" ]; then
+    echo "SKIP 需要先编译 ext/interp（bash tsf/ext/interp/build.sh）"
     exit 0
 fi
 
 mkdir -p /tmp/tsf-test-conf
-echo "extension=$ROOT/ext/interp/modules/interp.so" > /tmp/tsf-test-conf/interp.ini
+echo "extension=$ROOT/tsf/ext/interp/modules/interp.so" > /tmp/tsf-test-conf/interp.ini
 
 RESULT=$(PHP_INI_SCAN_DIR="/tmp/tsf-test-conf:/usr/local/php-8.5-zts/etc/conf.d" "./$OUT" 2>&1)
 echo "$RESULT"

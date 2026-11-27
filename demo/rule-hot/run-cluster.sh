@@ -46,9 +46,9 @@ if [ "${1:-}" != "--no-build" ]; then
     php85 "$ROOT/tsf/bin/tsf" build . || { echo "编译失败"; exit 1; }
 fi
 
-INTERP="$ROOT/ext/interp/modules/interp.so"
+INTERP="$ROOT/tsf/ext/interp/modules/interp.so"
 if [ ! -f "$INTERP" ]; then
-    echo "SKIP 缺少 $INTERP（cd ext/interp && phpize85 && ./configure && make）"
+    echo "SKIP 缺少 $INTERP（bash tsf/ext/interp/build.sh）"
     exit 77
 fi
 mkdir -p /tmp/tsf-rule-hot-conf

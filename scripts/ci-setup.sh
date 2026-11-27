@@ -90,7 +90,7 @@ interp_ok() {
     local f
     # 源码树里的 modules/interp.so 也算：所有套件都用 PHP_INI_SCAN_DIR 直接指它，
     # 不依赖 make install 到扩展目录
-    for f in "$PREFIX"/lib/php/extensions/*/interp.so "$ROOT"/ext/interp/modules/interp.so; do
+    for f in "$PREFIX"/lib/php/extensions/*/interp.so "$ROOT"/tsf/ext/interp/modules/interp.so; do
         [ -f "$f" ] && return 0
     done
     return 1
@@ -117,9 +117,9 @@ else
 fi
 
 if [ -x "$PREFIX/bin/php" ] && interp_ok; then
-    ok "interp" "ext/interp 已安装"
+    ok "interp" "ext/interp 已编译（tsf/ext/interp，随包分发）"
 else
-    bad "interp" "ext/interp（脚本热更的运行时）"
+    bad "interp" "tsf/ext/interp（脚本热更的运行时，源码随 composer 包）"
 fi
 
 if [ -x "$PREFIX/bin/php" ] && "$PREFIX/bin/php" -r 'exit(in_array("pgsql", PDO::getAvailableDrivers(), true) ? 0 : 1);' >/dev/null 2>&1; then
@@ -241,7 +241,7 @@ fi
 if ! interp_ok; then
     echo
     echo "== ext/interp =="
-    cd "$ROOT/ext/interp"
+    cd "$ROOT/tsf/ext/interp"
     "$PREFIX/bin/phpize" > /dev/null
     ./configure --with-php-config="$PREFIX/bin/php-config" > /tmp/interp-configure.log 2>&1
     make -j"$JOBS" > /tmp/interp-make.log 2>&1

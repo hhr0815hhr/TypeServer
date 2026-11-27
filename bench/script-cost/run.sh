@@ -17,12 +17,12 @@ if ! php85 "$TSF" build . > /tmp/script_cost_build.log 2>&1; then
     exit 1
 fi
 
-if [ ! -f "$ROOT/ext/interp/modules/interp.so" ]; then
-    echo "SKIP 需要先编译 ext/interp（cd ext/interp && phpize85 && ./configure --with-php-config=\$(which php-config85) && make）"
+if [ ! -f "$ROOT/tsf/ext/interp/modules/interp.so" ]; then
+    echo "SKIP 需要先编译 ext/interp（bash tsf/ext/interp/build.sh）"
     exit 77
 fi
 
 mkdir -p /tmp/tsf-script-cost-conf
-echo "extension=$ROOT/ext/interp/modules/interp.so" > /tmp/tsf-script-cost-conf/interp.ini
+echo "extension=$ROOT/tsf/ext/interp/modules/interp.so" > /tmp/tsf-script-cost-conf/interp.ini
 
 PHP_INI_SCAN_DIR="/tmp/tsf-script-cost-conf:/usr/local/php-8.5-zts/etc/conf.d" ./script_cost

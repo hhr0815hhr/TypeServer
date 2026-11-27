@@ -1,7 +1,7 @@
 name: CI
 
 # 这个仓库是**框架的测试载体**，不是产品仓库：
-# 57 个套件在 `tests/`、7 个在 `demo/`、`ext/interp` 也在这里。
+# 回归套件在 `tests/` 和 `demo/`；`ext/interp` 自 2026-11-27 起随 tsf 子模块分发。
 # tsf 包本身（src / pkg / bin / tpl）在 `tsf/` 子模块，它的"包完整性"门禁在
 # **tsf 仓库自己的** `.github/workflows/ci.yml`（lint + php -l + composer validate
 # + 模板生成，几分钟跑完，不需要工具链）。

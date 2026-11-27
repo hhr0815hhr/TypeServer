@@ -583,7 +583,7 @@ $e["onLevelUp"](new PlayerView(1001, 5, 0, 0));   // 直接断言
 
 ```bash
 # 1. 编译扩展
-cd ext/interp && phpize85 && ./configure --with-php-config=$(which php-config85) && make
+cd tsf/ext/interp && phpize85 && ./configure --with-php-config=$(which php-config85) && make
 
 # 2. 让 AOT 产物能加载它（不用 sudo）
 mkdir -p /tmp/myconf

@@ -11,10 +11,11 @@
 | 仓库 | 管什么 | 触发 | 耗时 |
 |:--|:--|:--|--:|
 | `tsf`（子模块，发布到 Packagist） | 包完整性：`lint`、全量 `php -l`、`composer validate`、三种模板能生成且语法正确 | push / PR | ~3 分钟 |
-| `TypeServer`（根，测试载体） | 全量回归：57 个套件（含 6 个连真库的） | push / PR | ~20 分钟 |
+| `TypeServer`（根，测试载体） | 全量回归：67 个套件（含连真库的） | push / PR | ~20 分钟 |
 
-为什么不全放 tsf 仓库：**套件在根仓库**——`tests/` 57 个、`demo/` 里 7 个，
-`ext/interp` 也在根仓库。tsf 仓库里没有这些，`verify` 跑不起来。
+为什么不全放 tsf 仓库：**套件在根仓库**——`tests/`、`demo/` 里的回归都在这里，
+tsf 仓库里没有它们，`verify` 跑不起来。（`ext/interp` 的源码自 2026-11-27 起在 tsf 仓库的
+`ext/interp/`，随 composer 包分发；本仓库的 CI 从那里编译。）
 
 为什么也不能只留根仓库：改了 `tsf/src/` 之后，tsf 仓库自己的 push 没有任何检查，
 而它才是用户 `composer require` 拿到的东西。包完整性和全量回归是两件事，
@@ -46,7 +47,7 @@ bash scripts/ci-setup.sh --check    # 只检查，缺什么列什么，退出码
 2. **swoole 6.2.5，`--enable-swoole-thread`** —— 要求 PHP 是 ZTS。
 3. **typephp 工具链**（`scripts/install-toolchain.sh`，tag `toolchain-0.9.6`）——
    tpc 编译器 + `libphpx.so`。**版本号是编译器的，不是框架的**，两者解耦。
-4. **`ext/interp`** —— 脚本热更的运行时，`script-test` / `rule-hot` 都靠它。
+4. **`ext/interp`** —— 脚本热更的运行时，`script-test` / `rule-hot` 都靠它。源码在 `tsf/ext/interp`。
 
 `--check` 模式在本地 WSL 上应该全绿（环境一样）。
 
