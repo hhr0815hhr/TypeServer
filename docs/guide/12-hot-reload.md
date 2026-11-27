@@ -407,6 +407,7 @@ reload 后自动是新版本，没有旧引用也没有符号表。
 要支持定义也不是不行——`zend_hash_del(EG(function_table))` 就能删，uopz 这么干过。
 但类要连带清静态属性、常量、接口/trait、已实例化对象的 ce 指针，闭包还可能
 捕获旧 `op_array`；这是一次"自己重做一个 PHP 模块系统"的活儿，收益是写法好看一点。
+**评估结论：不做**，理由与替代路径见 `ROADMAP-NO-GAP.md` §九。
 另外**只能 `use TSF\Script\*`**（能力一律从 `Context` 取）。
 不带参数的 `tsf lint` 行为不变，只查框架。
 
